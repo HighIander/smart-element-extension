@@ -2,10 +2,10 @@
 
 **Smart Element** is a browser extension for Element Web / Matrix workflows. It combines four tools into one extension:
 
-1. an image-gallery sender and gallery renderer for Matrix rooms,
-2. a Mattermost-to-Matrix importer,
-3. a Mattermost export helper,
-4. a mobile-friendly Element Web companion with improved space, chat, and thread navigation - no need to install a separate app!
+1. An image-gallery sender and gallery renderer for Matrix rooms to bring back the look and feel from Mattermost and many other chat services.
+2. A Mattermost exporter with standalone offline viewer for all your chats.
+3. A Mattermost-to-Matrix importer.
+4. The Element website does not work on mobile devices which requires you to install an app with very different look and feel. Smart Element disables the ban of mobile devices and brings you a mobile-friendly Element Web experience with improved space, chat, and thread navigation - no need to install a separate app!
 
 The extension is designed for users who work heavily in Element Web and want a faster, more touch-friendly, media-friendly interface without replacing Element itself. All features are optional and can be enabled or disabled independently.
 
