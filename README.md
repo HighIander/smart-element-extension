@@ -115,7 +115,7 @@ After installing or reloading the extension, refresh already-open Element or Mat
 
 ## Install in Google Chrome
 
-1. Download and unzip the Smart Element release ZIP.
+1. Download the Smart Element ZIP from the [Smart Element v1.0.0 release page](https://github.com/HighIander/smart-element-extension/releases/tag/1.0.0) and unzip it.
 2. Open Chrome.
 3. Go to `chrome://extensions`.
 4. Enable **Developer mode** using the switch in the upper-right corner.
@@ -137,8 +137,7 @@ Official Chrome reference: <https://developer.chrome.com/docs/extensions/get-sta
 
 ## Install in Microsoft Edge
 
-1. Download and unzip the Smart Element release ZIP.
-2. Open Edge.
+1. Download the Smart Element ZIP from the [Smart Element v1.0.0 release page](https://github.com/HighIander/smart-element-extension/releases/tag/1.0.0) and unzip it.2. Open Edge.
 3. Go to `edge://extensions`.
 4. Enable **Developer mode**.
 5. Click **Load unpacked**.
@@ -161,8 +160,7 @@ Official Edge reference: <https://learn.microsoft.com/en-us/microsoft-edge/exten
 
 Firefox Desktop can load the extension temporarily for development/testing.
 
-1. Download and unzip the Smart Element release ZIP.
-2. Open Firefox.
+1. Download the Smart Element ZIP from the [Smart Element v1.0.0 release page](https://github.com/HighIander/smart-element-extension/releases/tag/1.0.0) and unzip it.2. Open Firefox.
 3. Go to `about:debugging`.
 4. Click **This Firefox**.
 5. Click **Load Temporary Add-on...**.
@@ -180,16 +178,16 @@ Official Firefox reference: <https://developer.mozilla.org/en-US/docs/Mozilla/Ad
 
 ---
 
-## Install or test in Firefox for Android Nightly
+## Install on modile device
 
-Firefox for Android has a different extension-development workflow from desktop Firefox. Smart Element is primarily a content-script extension for Element Web, but Android support should be treated as experimental because Firefox for Android does not always support the same extension APIs and UI surfaces as desktop Firefox.
+Unfortunately, there is nor browser on iOs that supports extensions. On Android, Firefox Nightly is the only browser fully supporting custom user extensions.
 
-There are two practical test routes.
+Firefox for Android has a different extension-development workflow from desktop Firefox. Smart Element is primarily a content-script extension for Element Web, but Android support should be treated as experimental because Firefox for Android does not always support the same extension APIs and UI surfaces as desktop Firefox. 
 
-### Route A (suggested): install an XPI from file in Firefox Nightly
+### Install an XPI from file in Firefox Nightly
 
 1. Install **Firefox Nightly for Developers** on Android.
-2. Copy the Smart Element `.xpi` file to the Android device, for example into `Downloads`.
+2. Copy the Smart Element (smart-element.xpi)[https://github.com/HighIander/smart-element-extension/blob/main/smart-element.xpi] file to the Android device, for example into `Downloads`.
 3. Open Firefox Nightly.
 4. Open the three-dot menu.
 5. Open **Settings**.
@@ -202,48 +200,6 @@ There are two practical test routes.
 12. Optional: **Install as app** (progressive web app, PWA): Three-dot-menu, "Mehr"/"More", "App zum Startbildschirm hinzufügen"/"Add app to home screen"
 
 If **Install add-on from file** is not visible, use Route B.
-
-### Route B: run from source with `web-ext` and ADB
-
-Use this route for development, debugging, and cases where the Nightly file installer is not available.
-
-One-time Android setup:
-
-1. Open Android **Settings**.
-2. Open **About phone** or the device-specific equivalent.
-3. Tap **Build number** repeatedly, usually seven times, until Android says developer options are enabled.
-4. Go back to **Settings**.
-5. Open **Developer options**.
-6. Enable **USB debugging**.
-7. Connect the device to your computer and allow the USB debugging prompt.
-8. In Firefox Nightly on Android, enable **Remote debugging via USB** in Firefox settings if the option is present.
-
-Computer setup:
-
-1. Install Node.js/npm.
-2. Install Mozilla's web-ext tool:
-
-   ```bash
-   npm install --global web-ext
-   ```
-
-3. Install Android Platform Tools so that `adb` is available.
-4. Check the device connection:
-
-   ```bash
-   adb devices
-   ```
-
-Run Smart Element on Android Nightly:
-
-```bash
-cd /path/to/smart-element
-web-ext run -t firefox-android --adb-device <device-id> --firefox-apk org.mozilla.fenix
-```
-
-Replace `<device-id>` with the device ID shown by `adb devices`.
-
-Official Mozilla Android extension-development reference: <https://extensionworkshop.com/documentation/develop/developing-extensions-for-firefox-for-android/>
 
 ---
 
