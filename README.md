@@ -3,8 +3,8 @@
 **Smart Element** is a browser extension for Element Web / Matrix workflows. It combines four tools into one extension:
 
 1. An image-gallery sender and gallery renderer for Matrix rooms to bring back the look and feel from Mattermost and many other chat services.
-2. A Mattermost exporter with standalone offline viewer for all your chats.
-3. A Mattermost-to-Matrix importer.
+2. A Mattermost exporter with standalone offline viewer for all your chats - no python or api-key required.
+3. A Mattermost-to-Matrix importer - no python or api keys required.
 4. The Element website does not work on mobile devices which requires you to install an app with very different look and feel. Smart Element disables the ban of mobile devices and brings you a mobile-friendly Element Web experience with improved space, chat, and thread navigation - no need to install a separate app!
 
 The extension is designed for users who work heavily in Element Web and want a faster, more touch-friendly, media-friendly interface without replacing Element itself. All features are optional and can be enabled or disabled independently.
@@ -47,12 +47,32 @@ The Mattermost tools are intended for migrating or archiving Mattermost content 
 
 Exporter features include:
 
-- browser-side helper for Mattermost export pages,
-- export/download UI integration,
-- configurable date range support where available,
-- shared enable/disable state with the importer.
-- include emojis and threads
-- standalone website to browse and view Mattermost teams, channels and chats
+- Adds an `export` button inside Mattermost at the lower-left corner.
+- Export dialog with options for:
+  - including images,
+  - including other files,
+  - setting a maximum file size,
+  - start and end date range,
+  - include direct messages/group messages.
+- Individual Team and channel as well as direct message and group message selection before export.
+- Progress bar and cancel button during export.
+- Static export folder with core structure:
+  - `index.html`,
+  - `manifest.json`,
+  - `users.json`,
+  - `data/channels/<channel-id>/posts-0000.json`,
+  - `assets/files/<file-id>.<ext>`.
+- Additional additive metadata/files:
+  - `emojis.json` for referenced custom emoji,
+  - `assets/emojis/<emoji-id>.<ext>` for custom emoji images,
+  - `post_index.json` for local post/message links.
+- Unicode emoji are preserved directly in the exported UTF-8 message text.
+- Custom Mattermost emoji written as `:emoji_name:` are resolved and exported when available.
+- Mattermost channel mentions like `~channel-name` are rendered as local links inside the static export.
+- Mattermost message permalinks such as `/team/pl/<post-id>` are rewritten to local export links when the referenced post is part of the export.
+- Generated `index.html` works from a webserver or locally (you have to manually select the export folder to grant file access to the browser).
+- Optional generated `standalone.html` embeds the exported JSON and downloaded assets into one file, so it can be opened without selecting a folder. The export dialog warns that this file can become extremely large, so only use for small exports!
+- Direct-message and group-message display names prefer Mattermost nicknames, then full names, then usernames, while original channel fields stay available.
 
 Importer features include:
 
@@ -240,10 +260,31 @@ When you select a subspace, Smart Element aborts pending parent-panel refreshes 
 
 Element's own space drag-and-drop sorting is ignored by the gallery drop handler, so resorting spaces should not open the gallery overlay.
 
+### Using the Mattermost exporter
+
+Just visit the mattermost page in your browser, and click the export button at the bottom left. Then follow the dialog to set your export date range and teams/channels/direct messages to export. 
+The export of many chats can take a while!
+
+**Standalone viewer note**
+
+The `standalone.html` option is convenient but can become very large because it embeds JSON chunks and exported image/file data directly. For very large exports, you should NOT enable it and leave the checkboc unchecked! In that case, all data can be viewed later simply by opening `index.html` in the export directory. After opening index.html, select the export directory (usually the same directory where you just opened the index.html). To avoid this additional step, you can simply copy the export directory to a (local) webserver. One simple local option is XAMPP / Apache Friends: https://www.apachefriends.org/index.html
+
+When `index.html` is opened directly from disk, browsers often block automatic reads of neighboring files such as `manifest.json`, `users.json`, `data/`, and `assets/`. The viewer therefore offers two folder-selection mechanisms:
+
+1. **Select export folder** uses the browser File System Access API. This is the preferred option in Chrome/Edge. Select the folder that directly contains `manifest.json`.
+2. **Select folder fallback** uses a directory-upload input. Use this when the first button is unavailable; select the same complete export folder.
+
+`standalone.html` avoids folder selection but embeds exported JSON and assets directly, so it can become very large and is mainly intended for small or medium exports.
+
+**Good to know***
+The extension uses your active Mattermost browser session. It does not need a Mattermost access token or admin permissions. It can only export data that your Mattermost account can read.
+
+For writing the export folder, the browser must support the File System Access API. This usually means Chrome, Edge, or Firefox on HTTPS/localhost.
+
 ### Using the Mattermost importer
 
 1. Open the Mattermost importer dialog in Element.
-2. Select or point Smart Element to a local/static Mattermost export.
+2. Select or point Smart Element to the local/static Mattermost export.
 3. Select the team, channel, or direct-message export to import.
 4. Review warnings, especially duplicate-check and scroll-to-top warnings.
 5. Start the import.
