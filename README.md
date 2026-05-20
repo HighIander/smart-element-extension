@@ -5,7 +5,7 @@
 1. an image-gallery sender and gallery renderer for Matrix rooms,
 2. a Mattermost-to-Matrix importer,
 3. a Mattermost export helper,
-4. a mobile-friendly Element Web companion with improved space, chat, and thread navigation.
+4. a mobile-friendly Element Web companion with improved space, chat, and thread navigation - no need to install a separate app!
 
 The extension is designed for users who work heavily in Element Web and want a faster, more touch-friendly, media-friendly interface without replacing Element itself. All features are optional and can be enabled or disabled independently.
 
@@ -123,6 +123,7 @@ After installing or reloading the extension, refresh already-open Element or Mat
 6. Select the unzipped Smart Element extension folder, the folder that contains `manifest.json`.
 7. Open or reload your Element Web tab.
 8. Open the browser extension menu and optionally pin **Smart Element - by Thomas Kluge** to the toolbar.
+9. Optional: **Install as app** (progressive web app, PWA): look for the install icon in the browser adress bar to install as desktop app
 
 To update after replacing files:
 
@@ -144,6 +145,7 @@ Official Chrome reference: <https://developer.chrome.com/docs/extensions/get-sta
 6. Select the unzipped Smart Element folder containing `manifest.json`.
 7. Open or reload your Element Web tab.
 8. Optional: pin the extension from the Edge extensions menu.
+9. Optional: **Install as app** (progressive web app, PWA): look for the install icon in the browser adress bar to install as desktop app
 
 To update after replacing files:
 
@@ -166,6 +168,7 @@ Firefox Desktop can load the extension temporarily for development/testing.
 5. Click **Load Temporary Add-on...**.
 6. Select `manifest.json` from the unzipped Smart Element folder.
 7. Open or reload your Element Web tab.
+8. Optional: **Install as app** (progressive web app, PWA): look for the install icon in the browser adress bar to install as desktop app
 
 Important details:
 
@@ -183,9 +186,7 @@ Firefox for Android has a different extension-development workflow from desktop 
 
 There are two practical test routes.
 
-### Route A: install an XPI from file in Firefox Nightly
-
-Use this route if your Firefox Nightly build shows **Install add-on from file** after enabling its debug menu.
+### Route A (suggested): install an XPI from file in Firefox Nightly
 
 1. Install **Firefox Nightly for Developers** on Android.
 2. Copy the Smart Element `.xpi` file to the Android device, for example into `Downloads`.
@@ -198,6 +199,7 @@ Use this route if your Firefox Nightly build shows **Install add-on from file** 
 9. Use **Install add-on from file**.
 10. Select the Smart Element `.xpi` file.
 11. Open your Element Web instance in Firefox Nightly and reload the page.
+12. Optional: **Install as app** (progressive web app, PWA): Three-dot-menu, "Mehr"/"More", "App zum Startbildschirm hinzufügen"/"Add app to home screen"
 
 If **Install add-on from file** is not visible, use Route B.
 
