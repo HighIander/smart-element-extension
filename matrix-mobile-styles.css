@@ -1,0 +1,1158 @@
+#mmlc-toolbar {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translateX(-50%);
+  z-index: 2147483645;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 6px;
+  width: max-content;
+  max-width: calc(100vw - 64px);
+  padding: 6px 8px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.22);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: auto;
+  backdrop-filter: blur(12px);
+}
+
+#mmlc-toolbar-hamburger {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top, 0px));
+  left: calc(8px + env(safe-area-inset-left, 0px));
+  z-index: 2147483645;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.96);
+  color: #0f172a;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(12px);
+}
+
+.mmlc-toolbar-control {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mmlc-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: currentColor;
+}
+
+.mmlc-icon-hamburger {
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mmlc-icon-hamburger span {
+  width: 18px;
+  height: 2px;
+  display: block;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.mmlc-icon-arrow::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  border-left: 3px solid currentColor;
+  border-bottom: 3px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.16s ease;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-compact .mmlc-icon-arrow::before {
+  transform: rotate(-135deg);
+}
+
+.mmlc-toolbar-path {
+  min-width: 0;
+  max-width: calc(100vw - 150px);
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px 6px;
+}
+
+.mmlc-toolbar-separator {
+  flex: 0 0 auto;
+  color: #64748b;
+  font: 900 13px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.mmlc-toolbar-item {
+  flex: 0 0 auto;
+  min-height: 32px;
+  max-width: min(240px, calc(100vw - 96px));
+  margin: 0;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #0f172a;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font: 800 13px/1.15 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  overflow-wrap: anywhere;
+  text-align: center;
+  white-space: normal;
+}
+
+.mmlc-toolbar-item-root {
+  width: 32px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.mmlc-toolbar-avatar {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #e5e7eb;
+}
+
+.mmlc-toolbar-avatar-fallback {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  color: #334155;
+  font: 900 10px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.mmlc-toolbar-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.mmlc-toolbar-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mmlc-toolbar-item-chat {
+  color: #1d4ed8;
+}
+
+.mmlc-toolbar-control:focus-visible,
+#mmlc-toolbar-hamburger:focus-visible,
+.mmlc-toolbar-item:focus-visible,
+.mmlc-toolbar-control:hover,
+#mmlc-toolbar-hamburger:hover,
+.mmlc-toolbar-item:hover {
+  background: #dbeafe;
+  color: #1d4ed8;
+  outline: none;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-path {
+  max-width: calc(100vw - 150px);
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-path::-webkit-scrollbar {
+  display: none;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-item {
+  width: 32px;
+  max-width: 32px;
+  min-height: 32px;
+  padding: 0;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-label {
+  display: none;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-item-root .mmlc-toolbar-label {
+  display: inline;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-avatar-fallback {
+  display: inline-flex;
+}
+
+html.mmlc-mode-thread #mmlc-toolbar,
+html.mmlc-mode-thread #mmlc-toolbar-hamburger {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+#mmlc-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  width: 100vw;
+  height: 100vh;
+  max-width: 100vw;
+  max-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #f8fafc;
+  color: #0f172a;
+  box-shadow: none;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#mmlc-panel.mmlc-hidden,
+.mmlc-hidden {
+  display: none !important;
+}
+
+.mmlc-panel-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(13px + env(safe-area-inset-top, 0px)) 14px 11px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.mmlc-panel-header > div:first-child {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+#mmlc-panel-kicker {
+  display: block;
+  margin-bottom: 2px;
+  color: #64748b;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: none;
+}
+
+#mmlc-panel-title {
+  display: block;
+  max-width: calc(100vw - 182px);
+  color: #0f172a;
+  font-size: 18px;
+  line-height: 1.15;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.mmlc-panel-title-avatar {
+  width: 24px;
+  height: 24px;
+  margin-right: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #e5e7eb;
+  color: #334155;
+  font: 900 10px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.mmlc-panel-title-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.mmlc-panel-title-text {
+  display: inline-block;
+  max-width: calc(100% - 34px);
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  vertical-align: middle;
+}
+
+#mmlc-panel-title:not(.mmlc-panel-title-has-avatar) .mmlc-panel-title-text {
+  max-width: 100%;
+}
+
+#mmlc-panel-title::after {
+  content: attr(data-subtitle);
+  display: block;
+  margin-top: 3px;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.mmlc-panel-controls {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.mmlc-panel-controls button {
+  width: 34px;
+  height: 34px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  font: 800 18px/1 system-ui, sans-serif;
+}
+
+.mmlc-panel-controls .mmlc-sort-toggle {
+  width: auto;
+  min-width: 50px;
+  padding: 0 9px;
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.mmlc-panel-controls .mmlc-sort-toggle[aria-pressed="true"] {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.mmlc-actions,
+.mmlc-current-space {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px 0 12px;
+}
+
+.mmlc-progress {
+  flex: 0 0 auto;
+  height: 3px;
+  margin: 8px 12px 0 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.mmlc-progress span {
+  display: block;
+  width: 46%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(29, 78, 216, 0), rgba(29, 78, 216, 0.75), rgba(14, 165, 233, 0));
+  animation: mmlc-progress-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes mmlc-progress-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(240%);
+  }
+}
+
+.mmlc-current-space {
+  justify-content: space-between;
+}
+
+.mmlc-breadcrumb {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 9px;
+  padding-bottom: 2px;
+}
+
+.mmlc-breadcrumb-button {
+  min-height: 34px;
+  max-width: 100%;
+  padding: 0 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #0f172a;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: 800 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mmlc-breadcrumb-avatar {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 7px;
+  background: #e5e7eb;
+  color: #334155;
+  font: 900 10px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.mmlc-breadcrumb-avatar img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.mmlc-breadcrumb-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mmlc-inline-avatar-fallback {
+  display: inline-flex;
+}
+
+.mmlc-breadcrumb-button:focus-visible,
+.mmlc-breadcrumb-button:hover {
+  border-color: #93c5fd;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.13);
+}
+
+.mmlc-breadcrumb-separator {
+  color: #64748b;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.mmlc-current-space-text {
+  min-width: 0;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mmlc-action-button {
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #ffffff;
+  color: #1e293b;
+  cursor: pointer;
+  font: 800 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.mmlc-list {
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+  grid-auto-rows: minmax(144px, auto);
+  align-content: start;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 12px calc(84px + env(safe-area-inset-bottom, 0px)) 12px;
+}
+
+.mmlc-list-item {
+  width: 100%;
+  min-height: 144px;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-template-rows: 68px minmax(0, 1fr);
+  justify-items: center;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+  color: #0f172a;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+}
+
+.mmlc-list-item-draggable {
+  cursor: grab;
+}
+
+.mmlc-list-item-draggable:active,
+.mmlc-list-item-dragging {
+  cursor: grabbing;
+}
+
+.mmlc-list-item-dragging {
+  opacity: 0.55;
+}
+
+.mmlc-list-item-drop-before,
+.mmlc-list-item-drop-after {
+  position: relative;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.mmlc-list-item-drop-before::before,
+.mmlc-list-item-drop-after::after {
+  content: "";
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  width: 4px;
+  border-radius: 999px;
+  background: #2563eb;
+}
+
+.mmlc-list-item-drop-before::before {
+  left: -8px;
+}
+
+.mmlc-list-item-drop-after::after {
+  right: -8px;
+}
+
+.mmlc-list-item:focus-visible,
+.mmlc-list-item:hover {
+  border-color: #93c5fd;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.16);
+}
+
+.mmlc-list-avatar {
+  width: 64px;
+  height: 64px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 18px;
+  background: #e0f2fe;
+  color: #075985;
+  font: 900 18px/1 system-ui, sans-serif;
+  overflow: hidden;
+}
+
+.mmlc-list-avatar-image {
+  background: #e5e7eb;
+}
+
+.mmlc-list-avatar-image img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.mmlc-list-body {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+
+.mmlc-list-label {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 15px;
+  line-height: 1.18;
+  overflow-wrap: anywhere;
+}
+
+.mmlc-list-meta {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.mmlc-list-item-action .mmlc-list-avatar {
+  background: #bbf7d0;
+  color: #166534;
+}
+
+.mmlc-list-item-action {
+  border-color: #86efac;
+  background: #ecfdf5;
+}
+
+.mmlc-list-item-create-space,
+.mmlc-list-item-create-subspace,
+.mmlc-list-item-create-chat {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #334155;
+}
+
+.mmlc-list-item-create-space .mmlc-list-avatar,
+.mmlc-list-item-create-subspace .mmlc-list-avatar,
+.mmlc-list-item-create-chat .mmlc-list-avatar {
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.mmlc-list-item-create-space .mmlc-list-label,
+.mmlc-list-item-create-subspace .mmlc-list-label,
+.mmlc-list-item-create-chat .mmlc-list-label {
+  color: #1e293b;
+}
+
+.mmlc-list-item-create-space .mmlc-list-meta,
+.mmlc-list-item-create-subspace .mmlc-list-meta,
+.mmlc-list-item-create-chat .mmlc-list-meta {
+  color: #64748b;
+}
+
+.mmlc-list-item-start .mmlc-list-avatar {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.mmlc-empty {
+  padding: 14px 16px 18px 16px;
+  color: #475569;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.mmlc-empty-status {
+  color: #1d4ed8;
+}
+
+.mmlc-hidden-warning {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane body,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane body {
+  overflow: hidden !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-wrapper,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-shell,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 2147483000 !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  max-height: 100vh !important;
+  max-height: 100dvh !important;
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 100% !important;
+  overflow: hidden !important;
+  opacity: 1 !important;
+  visibility: visible !important;
+  transform: none !important;
+  background: #ffffff !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane .mx_ThreadPanel,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane .mx_ThreadView,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadPanel"],
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadView"] {
+  width: 100vw !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  max-width: 100vw !important;
+  min-width: 0 !important;
+  flex: 1 1 100% !important;
+  display: flex !important;
+  background: #ffffff !important;
+}
+
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane > *,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadPanel"],
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadView"] {
+  margin: 0 !important;
+  transform: none !important;
+  width: 100vw !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  box-sizing: border-box !important;
+}
+
+
+#mmlc-thread-close {
+  position: fixed;
+  top: var(--mmlc-thread-close-top, calc(88px + env(safe-area-inset-top, 0px)));
+  left: 50%;
+  right: auto;
+  z-index: 2147483644;
+  width: auto;
+  min-width: 118px;
+  height: 38px;
+  transform: translateX(-50%);
+  padding: 0 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #ffffff;
+  color: #0f172a;
+  cursor: pointer;
+  font: 900 13px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  white-space: nowrap;
+  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.24);
+}
+
+.mmlc-list-item-muted {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #64748b;
+  opacity: 0.72;
+}
+
+.mmlc-list-item-muted .mmlc-list-avatar {
+  background: #e2e8f0;
+  color: #64748b;
+}
+
+.mmlc-list-item-muted .mmlc-list-label,
+.mmlc-list-item-muted .mmlc-list-meta {
+  color: #64748b;
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  html.mmlc-enabled,
+  html.mmlc-enabled body {
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: hidden !important;
+  }
+
+  html.mmlc-enabled body {
+    min-width: 0 !important;
+  }
+
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane body,
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane body {
+    overflow: hidden !important;
+  }
+
+  html.mmlc-enabled .mx_MatrixChat,
+  html.mmlc-enabled [class*="MatrixChat"],
+  html.mmlc-enabled .mx_LoggedInView,
+  html.mmlc-enabled [class*="LoggedInView"],
+  html.mmlc-enabled .mx_RoomView,
+  html.mmlc-enabled [class*="RoomView"],
+  html.mmlc-enabled .mx_RoomView_body,
+  html.mmlc-enabled [class*="RoomView_body"],
+  html.mmlc-enabled .mx_TimelinePanel,
+  html.mmlc-enabled [class*="TimelinePanel"],
+  html.mmlc-enabled .mx_MessagePanel,
+  html.mmlc-enabled [class*="MessagePanel"] {
+    min-width: 0 !important;
+    max-width: none !important;
+  }
+
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483000 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    flex: 1 1 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+    background: #ffffff !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_body,
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_body"],
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_TimelinePanel,
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="TimelinePanel"],
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessagePanel,
+  html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessagePanel"] {
+    min-width: 0 !important;
+    max-width: 100vw !important;
+  }
+
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-wrapper,
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-shell,
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 2147483000 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    display: flex !important;
+    flex-direction: column !important;
+    flex: 1 1 100% !important;
+    overflow: hidden !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: none !important;
+    background: #ffffff !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane .mx_ThreadPanel,
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane .mx_ThreadView,
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadPanel"],
+  html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadView"] {
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-width: 100vw !important;
+    min-width: 0 !important;
+    flex: 1 1 100% !important;
+    display: flex !important;
+    background: #ffffff !important;
+  }
+
+  html.mmlc-enabled .mx_RoomHeader,
+  html.mmlc-enabled [class*="RoomHeader"] {
+    min-width: 0 !important;
+    max-width: 100vw !important;
+  }
+
+  html.mmlc-enabled .mx_MessageComposer,
+  html.mmlc-enabled [class*="MessageComposer"] {
+    max-width: 100vw !important;
+  }
+
+  html.mmlc-enabled .mx_EventTile,
+  html.mmlc-enabled [class*="EventTile"] {
+    max-width: 100% !important;
+  }
+
+  html.mmlc-enabled img,
+  html.mmlc-enabled video {
+    max-width: 100% !important;
+  }
+
+  #mmlc-toolbar {
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    max-width: calc(100vw - 60px);
+    padding: 5px 6px;
+  }
+
+  #mmlc-toolbar-hamburger {
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    left: calc(8px + env(safe-area-inset-left, 0px));
+  }
+
+  .mmlc-toolbar-path {
+    max-width: calc(100vw - 140px);
+    gap: 3px 4px;
+  }
+
+  .mmlc-toolbar-item {
+    min-height: 30px;
+    max-width: calc(100vw - 108px);
+    padding: 0 4px;
+    font-size: 12px;
+  }
+
+  .mmlc-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: minmax(136px, auto);
+    gap: 10px;
+  }
+
+  .mmlc-list-item {
+    min-height: 136px;
+    padding: 12px 9px;
+  }
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mx_SpacePanel,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mx_SpacePanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane [class*="SpacePanel"],
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane [class*="SpacePanel"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane [data-testid="left-panel"],
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane [data-testid="left-panel"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel .mx_LeftPanel,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel .mx_LeftPanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel .mx_LeftPanel_panel,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel .mx_LeftPanel_panel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel .mx_RoomListPanel,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel .mx_RoomListPanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel [aria-label="Chatliste"],
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel [aria-label="Chatliste"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane #left-panel [aria-label="Room list"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane #left-panel [aria-label="Room list"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mx_Separator,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mx_Separator,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mx_RightPanel_ResizeWrapper,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mx_RightPanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane [class*="RightPanel"] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mx_RightPanel_ResizeWrapper:not(.mmlc-promoted-thread-wrapper),
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane [class*="RightPanel_ResizeWrapper"]:not(.mmlc-promoted-thread-wrapper),
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mx_RightPanel:not(.mmlc-promoted-thread-shell) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessageComposer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessageComposer"] {
+  flex: 0 0 auto !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  z-index: 2147483002 !important;
+  transform: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_body,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_body"] {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.mmlc-list-item-muted {
+  border-color: #d1d5db !important;
+  background: #f3f4f6 !important;
+  color: #6b7280 !important;
+  opacity: 1 !important;
+  box-shadow: none !important;
+}
+
+.mmlc-list-item-muted .mmlc-list-avatar {
+  background: #e5e7eb !important;
+  color: #6b7280 !important;
+}
+
+.mmlc-list-item-muted .mmlc-list-label,
+.mmlc-list-item-muted .mmlc-list-meta {
+  color: #6b7280 !important;
+}
+
+/* Element SpaceHierarchy rows that expose Betreten/Join instead of Ansicht/View are not joined.
+   Marking the native rows makes this state visible even when the companion panel is closed. */
+html.mmlc-enabled .mmlc-native-unjoined-row,
+html.mmlc-enabled .mmlc-native-unjoined-row > .mx_SpaceHierarchy_roomTile,
+html.mmlc-enabled .mmlc-native-unjoined-row > [class*="SpaceHierarchy_roomTile"] {
+  background: #f3f4f6 !important;
+  color: #6b7280 !important;
+}
+
+html.mmlc-enabled .mmlc-native-unjoined-row .mx_SpaceHierarchy_roomTile_name,
+html.mmlc-enabled .mmlc-native-unjoined-row [class*="SpaceHierarchy_roomTile_name"],
+html.mmlc-enabled .mmlc-native-unjoined-row .mx_SpaceHierarchy_roomTile_info,
+html.mmlc-enabled .mmlc-native-unjoined-row [class*="SpaceHierarchy_roomTile_info"] {
+  color: #6b7280 !important;
+}
+
+html.mmlc-enabled .mmlc-native-unjoined-row .mx_BaseAvatar,
+html.mmlc-enabled .mmlc-native-unjoined-row [class*="BaseAvatar"] {
+  filter: grayscale(1) !important;
+  opacity: 0.72 !important;
+}
+
+.mmlc-unread-badge {
+  flex: 0 0 auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 900 11px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  pointer-events: none;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.2);
+}
+
+.mmlc-unread-badge-dot {
+  width: 9px;
+  min-width: 9px;
+  height: 9px;
+  padding: 0;
+}
+
+.mmlc-unread-badge-highlight {
+  background: #dc2626;
+}
+
+.mmlc-list-item {
+  position: relative;
+}
+
+.mmlc-list-unread-badge {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  z-index: 2;
+}
+
+.mmlc-toolbar-unread-badge {
+  margin-left: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10px;
+}
+
+.mmlc-toolbar-unread-badge.mmlc-unread-badge-dot {
+  width: 8px;
+  min-width: 8px;
+  height: 8px;
+  padding: 0;
+}
+
+.mmlc-breadcrumb-unread-badge,
+.mmlc-action-unread-badge,
+.mmlc-panel-title-unread-badge {
+  margin-left: 4px;
+}
+
+.mmlc-breadcrumb-unread-badge,
+.mmlc-action-unread-badge {
+  min-width: 17px;
+  height: 17px;
+  font-size: 10px;
+}
+
+.mmlc-panel-title-unread-badge {
+  vertical-align: middle;
+  transform: translateY(-1px);
+}
+
+.mmlc-action-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-unread-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+}
+
+html.mmlc-toolbar-icons-only .mmlc-toolbar-item {
+  position: relative;
+}
+
+.mmlc-settings-button {
+  font: 800 16px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+html.mmlc-feature-disabled #mmlc-toolbar,
+html.mmlc-feature-disabled #mmlc-toolbar-hamburger,
+html.mmlc-feature-disabled #mmlc-panel {
+  display: none !important;
+}

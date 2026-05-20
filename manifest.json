@@ -1,0 +1,88 @@
+{
+  "manifest_version": 3,
+  "name": "Smart Element",
+  "version": "1.0.0",
+  "description": "Smart Element by Thomas Kluge",
+  "permissions": [
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "https://app.element.io/*",
+    "https://*.element.io/*",
+    "https://matrix.helmholtz.cloud/*",
+    "https://matrix-client.matrix.org/*",
+    "https://*/_matrix/*",
+    "http://*/_matrix/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "mg-page-bridge.js",
+        "mmi-page-bridge.js"
+      ],
+      "matches": [
+        "https://app.element.io/*",
+        "https://*.element.io/*",
+        "https://matrix.helmholtz.cloud/*"
+      ]
+    }
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://app.element.io/*",
+        "https://*.element.io/*",
+        "https://matrix.helmholtz.cloud/*"
+      ],
+      "js": [
+        "combined-settings.js",
+        "gallery-content.js",
+        "mattermost-importer-content.js",
+        "matrix-mobile-content.js"
+      ],
+      "css": [
+        "gallery-styles.css",
+        "mattermost-importer-styles.css",
+        "matrix-mobile-styles.css"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
+        "combined-settings.js",
+        "mattermost-exporter-content.js"
+      ],
+      "css": [
+        "mattermost-exporter-content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "minimum_chrome_version": "114",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "smart-element@t-kluge.de",
+      "strict_min_version": "121.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "121.0"
+    }
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Smart Element settings"
+  }
+}
