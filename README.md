@@ -2,10 +2,10 @@
 
 **Smart Element** is a browser extension for Element Web / Matrix workflows. It combines four tools into one extension:
 
-1. An image-gallery sender and gallery renderer for Matrix rooms to bring back the look and feel from Mattermost and many other chat services.
-2. A Mattermost exporter with standalone offline viewer for all your chats - no python or api-key required.
-3. A Mattermost-to-Matrix importer - no python or api keys required.
-4. The Element website does not work on mobile devices which requires you to install an app with very different look and feel. Smart Element disables the ban of mobile devices and brings you a mobile-friendly Element Web experience with improved space, chat, and thread navigation - no need to install a separate app!
+1. an image-gallery sender and gallery renderer for Matrix rooms,
+2. a Mattermost-to-Matrix importer,
+3. a Mattermost export helper,
+4. a mobile-friendly Element Web companion with improved space, chat, and thread navigation.
 
 The extension is designed for users who work heavily in Element Web and want a faster, more touch-friendly, media-friendly interface without replacing Element itself. All features are optional and can be enabled or disabled independently.
 
@@ -47,32 +47,12 @@ The Mattermost tools are intended for migrating or archiving Mattermost content 
 
 Exporter features include:
 
-- Adds an `export` button inside Mattermost at the lower-left corner.
-- Export dialog with options for:
-  - including images,
-  - including other files,
-  - setting a maximum file size,
-  - start and end date range,
-  - include direct messages/group messages.
-- Individual Team and channel as well as direct message and group message selection before export.
-- Progress bar and cancel button during export.
-- Static export folder with core structure:
-  - `index.html`,
-  - `manifest.json`,
-  - `users.json`,
-  - `data/channels/<channel-id>/posts-0000.json`,
-  - `assets/files/<file-id>.<ext>`.
-- Additional additive metadata/files:
-  - `emojis.json` for referenced custom emoji,
-  - `assets/emojis/<emoji-id>.<ext>` for custom emoji images,
-  - `post_index.json` for local post/message links.
-- Unicode emoji are preserved directly in the exported UTF-8 message text.
-- Custom Mattermost emoji written as `:emoji_name:` are resolved and exported when available.
-- Mattermost channel mentions like `~channel-name` are rendered as local links inside the static export.
-- Mattermost message permalinks such as `/team/pl/<post-id>` are rewritten to local export links when the referenced post is part of the export.
-- Generated `index.html` works from a webserver or locally (you have to manually select the export folder to grant file access to the browser).
-- Optional generated `standalone.html` embeds the exported JSON and downloaded assets into one file, so it can be opened without selecting a folder. The export dialog warns that this file can become extremely large, so only use for small exports!
-- Direct-message and group-message display names prefer Mattermost nicknames, then full names, then usernames, while original channel fields stay available.
+- browser-side helper for Mattermost export pages,
+- export/download UI integration,
+- configurable date range support where available,
+- shared enable/disable state with the importer.
+- include emojis and threads
+- standalone website to browse and view Mattermost teams, channels and chats
 
 Importer features include:
 
@@ -135,7 +115,7 @@ After installing or reloading the extension, refresh already-open Element or Mat
 
 ## Install in Google Chrome
 
-1. Download the Smart Element ZIP from the [Smart Element v1.0.0 release page](https://github.com/HighIander/smart-element-extension/releases/tag/1.0.0) and unzip it.
+1. Download and unzip the Smart Element release ZIP.
 2. Open Chrome.
 3. Go to `chrome://extensions`.
 4. Enable **Developer mode** using the switch in the upper-right corner.
@@ -143,7 +123,6 @@ After installing or reloading the extension, refresh already-open Element or Mat
 6. Select the unzipped Smart Element extension folder, the folder that contains `manifest.json`.
 7. Open or reload your Element Web tab.
 8. Open the browser extension menu and optionally pin **Smart Element - by Thomas Kluge** to the toolbar.
-9. Optional: **Install as app** (progressive web app, PWA): look for the install icon in the browser adress bar to install as desktop app
 
 To update after replacing files:
 
@@ -157,14 +136,14 @@ Official Chrome reference: <https://developer.chrome.com/docs/extensions/get-sta
 
 ## Install in Microsoft Edge
 
-1. Download the Smart Element ZIP from the [Smart Element v1.0.0 release page](https://github.com/HighIander/smart-element-extension/releases/tag/1.0.0) and unzip it.2. Open Edge.
+1. Download and unzip the Smart Element release ZIP.
+2. Open Edge.
 3. Go to `edge://extensions`.
 4. Enable **Developer mode**.
 5. Click **Load unpacked**.
 6. Select the unzipped Smart Element folder containing `manifest.json`.
 7. Open or reload your Element Web tab.
 8. Optional: pin the extension from the Edge extensions menu.
-9. Optional: **Install as app** (progressive web app, PWA): look for the install icon in the browser adress bar to install as desktop app
 
 To update after replacing files:
 
@@ -180,13 +159,13 @@ Official Edge reference: <https://learn.microsoft.com/en-us/microsoft-edge/exten
 
 Firefox Desktop can load the extension temporarily for development/testing.
 
-1. Download the Smart Element ZIP from the [Smart Element v1.0.0 release page](https://github.com/HighIander/smart-element-extension/releases/tag/1.0.0) and unzip it.2. Open Firefox.
+1. Download and unzip the Smart Element release ZIP.
+2. Open Firefox.
 3. Go to `about:debugging`.
 4. Click **This Firefox**.
 5. Click **Load Temporary Add-on...**.
 6. Select `manifest.json` from the unzipped Smart Element folder.
 7. Open or reload your Element Web tab.
-8. Optional: **Install as app** (progressive web app, PWA): look for the install icon in the browser adress bar to install as desktop app
 
 Important details:
 
@@ -198,16 +177,18 @@ Official Firefox reference: <https://developer.mozilla.org/en-US/docs/Mozilla/Ad
 
 ---
 
-## Install on modile device
+## Install or test in Firefox for Android Nightly
 
-Unfortunately, there is nor browser on iOs that supports extensions. On Android, Firefox Nightly is the only browser fully supporting custom user extensions.
+Firefox for Android has a different extension-development workflow from desktop Firefox. Smart Element is primarily a content-script extension for Element Web, but Android support should be treated as experimental because Firefox for Android does not always support the same extension APIs and UI surfaces as desktop Firefox.
 
-Firefox for Android has a different extension-development workflow from desktop Firefox. Smart Element is primarily a content-script extension for Element Web, but Android support should be treated as experimental because Firefox for Android does not always support the same extension APIs and UI surfaces as desktop Firefox. 
+There are two practical test routes.
 
-### Install an XPI from file in Firefox Nightly
+### Route A: install an XPI from file in Firefox Nightly
+
+Use this route if your Firefox Nightly build shows **Install add-on from file** after enabling its debug menu.
 
 1. Install **Firefox Nightly for Developers** on Android.
-2. Copy the Smart Element (smart-element.xpi)[https://github.com/HighIander/smart-element-extension/blob/main/smart-element.xpi] file to the Android device, for example into `Downloads`.
+2. Copy the Smart Element `.xpi` file to the Android device, for example into `Downloads`.
 3. Open Firefox Nightly.
 4. Open the three-dot menu.
 5. Open **Settings**.
@@ -217,9 +198,50 @@ Firefox for Android has a different extension-development workflow from desktop 
 9. Use **Install add-on from file**.
 10. Select the Smart Element `.xpi` file.
 11. Open your Element Web instance in Firefox Nightly and reload the page.
-12. Optional: **Install as app** (progressive web app, PWA): Three-dot-menu, "Mehr"/"More", "App zum Startbildschirm hinzufügen"/"Add app to home screen"
 
 If **Install add-on from file** is not visible, use Route B.
+
+### Route B: run from source with `web-ext` and ADB
+
+Use this route for development, debugging, and cases where the Nightly file installer is not available.
+
+One-time Android setup:
+
+1. Open Android **Settings**.
+2. Open **About phone** or the device-specific equivalent.
+3. Tap **Build number** repeatedly, usually seven times, until Android says developer options are enabled.
+4. Go back to **Settings**.
+5. Open **Developer options**.
+6. Enable **USB debugging**.
+7. Connect the device to your computer and allow the USB debugging prompt.
+8. In Firefox Nightly on Android, enable **Remote debugging via USB** in Firefox settings if the option is present.
+
+Computer setup:
+
+1. Install Node.js/npm.
+2. Install Mozilla's web-ext tool:
+
+   ```bash
+   npm install --global web-ext
+   ```
+
+3. Install Android Platform Tools so that `adb` is available.
+4. Check the device connection:
+
+   ```bash
+   adb devices
+   ```
+
+Run Smart Element on Android Nightly:
+
+```bash
+cd /path/to/smart-element
+web-ext run -t firefox-android --adb-device <device-id> --firefox-apk org.mozilla.fenix
+```
+
+Replace `<device-id>` with the device ID shown by `adb devices`.
+
+Official Mozilla Android extension-development reference: <https://extensionworkshop.com/documentation/develop/developing-extensions-for-firefox-for-android/>
 
 ---
 
@@ -260,31 +282,10 @@ When you select a subspace, Smart Element aborts pending parent-panel refreshes 
 
 Element's own space drag-and-drop sorting is ignored by the gallery drop handler, so resorting spaces should not open the gallery overlay.
 
-### Using the Mattermost exporter
-
-Just visit the mattermost page in your browser, and click the export button at the bottom left. Then follow the dialog to set your export date range and teams/channels/direct messages to export. 
-The export of many chats can take a while!
-
-**Standalone viewer note**
-
-The `standalone.html` option is convenient but can become very large because it embeds JSON chunks and exported image/file data directly. For very large exports, you should NOT enable it and leave the checkboc unchecked! In that case, all data can be viewed later simply by opening `index.html` in the export directory. After opening index.html, select the export directory (usually the same directory where you just opened the index.html). To avoid this additional step, you can simply copy the export directory to a (local) webserver. One simple local option is XAMPP / Apache Friends: https://www.apachefriends.org/index.html
-
-When `index.html` is opened directly from disk, browsers often block automatic reads of neighboring files such as `manifest.json`, `users.json`, `data/`, and `assets/`. The viewer therefore offers two folder-selection mechanisms:
-
-1. **Select export folder** uses the browser File System Access API. This is the preferred option in Chrome/Edge. Select the folder that directly contains `manifest.json`.
-2. **Select folder fallback** uses a directory-upload input. Use this when the first button is unavailable; select the same complete export folder.
-
-`standalone.html` avoids folder selection but embeds exported JSON and assets directly, so it can become very large and is mainly intended for small or medium exports.
-
-**Good to know***
-The extension uses your active Mattermost browser session. It does not need a Mattermost access token or admin permissions. It can only export data that your Mattermost account can read.
-
-For writing the export folder, the browser must support the File System Access API. This usually means Chrome, Edge, or Firefox on HTTPS/localhost.
-
 ### Using the Mattermost importer
 
 1. Open the Mattermost importer dialog in Element.
-2. Select or point Smart Element to the local/static Mattermost export.
+2. Select or point Smart Element to a local/static Mattermost export.
 3. Select the team, channel, or direct-message export to import.
 4. Review warnings, especially duplicate-check and scroll-to-top warnings.
 5. Start the import.
@@ -371,6 +372,12 @@ Treat the extension as a local productivity/development tool. Review `manifest.j
 
 ---
 
+
+
+### Firefox-specific package note
+
+The Firefox/Firefox Android `.xpi` uses a Firefox-specific manifest variant with a background event page (`background.scripts`) instead of a Chromium service worker. Firefox for Android does not support extension background service workers; using the Firefox-specific XPI avoids the misleading “damaged/corrupt add-on” failure that can occur when the Chromium manifest is packaged as an XPI.
+
 ## Known limitations
 
 - Element Web is a React application with frequently changing class names and DOM structure. Smart Element uses defensive DOM matching, but Element updates can still require patches.
@@ -408,6 +415,10 @@ That is expected for temporary installation through `about:debugging`. Reload it
 
 Use the `web-ext`/ADB workflow described above. The file-install option can vary by Nightly version, device, and build channel.
 
+### A subspace appears under the wrong parent
+
+Reload Element and use the latest Smart Element build. This version aborts parent refreshes once a subspace is selected and derives hierarchy from Element's nested space-rail DOM where possible.
+
 ---
 
 ## License / distribution
@@ -417,12 +428,4 @@ Smart Element is distributed under the MIT License, with one explicit naming exc
 - the software code, documentation, and extension assets are licensed under the MIT License;
 - the name **"Smart Element"** is excluded from the MIT license grant and remains copyright © Thomas Kluge, 2026.
 
-Copyright 2026 by Thomas Kluge
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the “Software”), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-* The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-* All copies that modify, publish, distribute, sublicense and/or sell parts of the software may not use the name "Smart Element"
-
-THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-
+See [`LICENSE`](LICENSE) for the complete license text and naming exception.
