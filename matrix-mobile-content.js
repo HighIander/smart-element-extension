@@ -2035,7 +2035,25 @@
     chatListBackgroundRefreshRun += 1;
     homeChatListBackgroundRefreshRun += 1;
 
-    try { document.documentElement.dataset.mmlcNativeDomActionCancelled = String(reason || "cancel-native-actions"); } catch {}
+    // Native parse actions temporarily force Element's left/middle/right panes
+    // into a desktop-like layout. If the user enters a chat while one of those
+    // async actions is still running, stale inline flex/width/overflow styles can
+    // remain on the RoomView and produce the huge empty header/footer seen in the
+    // promoted chat view. Always unwind the native parse layout when cancelling.
+    try {
+      if (document.documentElement.classList.contains("mmlc-native-parse-layout") || nativeParseForcedStyles.size) {
+        deactivateNativeElementParseLayout();
+      } else {
+        restoreNativeElementParsePanes();
+      }
+      restoreNativeReturnLeftPaneMinimize();
+    } catch {}
+
+    try {
+      document.documentElement.dataset.mmlcNativeDomActionCancelled = String(reason || "cancel-native-actions");
+      delete document.documentElement.dataset.mmlcNativeDomAction;
+      document.documentElement.removeAttribute("data-mmlc-native-dom-action");
+    } catch {}
   }
 
   function selectorBackgroundRefreshIntervalMs() {
@@ -2088,6 +2106,7 @@
 
   function scheduleSpaceDetailBackgroundRefresh(token, selectedLabel, path, options = {}) {
     if (!isMobileLayoutEnabled()) return;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return;
     const delayMs = Math.max(0, Math.min(2500, Number(options.delayMs || 0)));
     const run = beginNativeDomAction("space-detail-background-refresh");
     const labelSnapshot = normalizeSpaces(selectedLabel || currentSpaceLabel || "");
@@ -2102,6 +2121,7 @@
 
   async function refreshSpaceDetailInBackground(actionRun, token, selectedLabel, pathSnapshot) {
     if (isNativeDomActionCancelled(actionRun)) return;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return;
     if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "space-detail") return;
     if (!spacePanelStillMatchesSnapshot(selectedLabel, pathSnapshot)) return;
 
@@ -2119,6 +2139,7 @@
         actionRun
       });
       if (isNativeDomActionCancelled(actionRun)) return;
+      if (currentMode !== "spaces" && currentMode !== "rooms") return;
       if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "space-detail") return;
       if (!spacePanelStillMatchesSnapshot(selectedLabel, pathSnapshot)) return;
       if (!subspaces.length) return;
@@ -2138,6 +2159,7 @@
 
   function scheduleHomeChatListBackgroundRefresh(token, options = {}) {
     if (!isMobileLayoutEnabled()) return;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return;
     if (homeChatListBackgroundRefreshTimer) clearTimeout(homeChatListBackgroundRefreshTimer);
 
     const run = ++homeChatListBackgroundRefreshRun;
@@ -2152,6 +2174,7 @@
 
   async function refreshHomeChatListInBackground(run, token) {
     if (run !== homeChatListBackgroundRefreshRun) return;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return;
     if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "home-chats") return;
 
     const actionRun = beginNativeDomAction("home-chat-background-refresh");
@@ -2160,6 +2183,7 @@
 
     if (isNativeDomActionCancelled(actionRun)) return;
     if (run !== homeChatListBackgroundRefreshRun) return;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return;
     if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "home-chats") return;
     if (!chats.length) return;
 
@@ -2172,6 +2196,7 @@
 
   function scheduleChatListBackgroundRefresh(token, selectedLabel, path, options = {}) {
     if (!isMobileLayoutEnabled()) return;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return;
     if (chatListBackgroundRefreshTimer) clearTimeout(chatListBackgroundRefreshTimer);
 
     const run = ++chatListBackgroundRefreshRun;
@@ -2220,6 +2245,7 @@
 
   async function refreshChatListInBackground(run, token, selectedLabel, pathSnapshot) {
     if (run !== chatListBackgroundRefreshRun) return;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return;
     if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "chats") return;
 
     const actionRun = beginNativeDomAction("space-chat-background-refresh");
@@ -2239,6 +2265,7 @@
 
       if (isNativeDomActionCancelled(actionRun)) return;
       if (run !== chatListBackgroundRefreshRun) return;
+      if (currentMode !== "spaces" && currentMode !== "rooms") return;
       if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "chats") return;
       if (!spacePanelStillMatchesSnapshot(selectedLabel, pathSnapshot)) return;
       if (!chatItems.length) return;
@@ -5184,6 +5211,11 @@
       return;
     }
 
+    if (mode === "chat" || mode === "thread") {
+      cancelPendingNativeDomActions(mode === "chat" ? "entering-chat-mode" : "entering-thread-mode");
+      clearForcedMiddlePaneState();
+    }
+
     const chatPane = mode === "chat" ? findActiveRoomView() : null;
 
     currentMode = mode;
@@ -5219,7 +5251,6 @@
     }
 
     if (mode === "chat") {
-      cancelPendingNativeDomActions("entered-chat-mode");
       restoreNativeReturnLeftPaneMinimize();
       dismissVirtualKeyboard("enter-chat-mode");
       scrollActiveChatToBottom("enter-chat-mode-immediate");
@@ -5690,9 +5721,36 @@
     if (!target) return isStablePromotedChatPane(existing);
 
     clearPromotedChatPane();
+    sanitizePromotedChatPane(target);
     target.classList.add("mmlc-promoted-chat-pane");
     markChatLayoutParts(target);
     return true;
+  }
+
+  function sanitizePromotedChatPane(root) {
+    if (!(root instanceof HTMLElement)) return;
+
+    const affected = uniqueElements([
+      root,
+      ...root.querySelectorAll("[data-mmlc-native-parse-forced], [data-mmlc-forced-middle-pane], [data-mmlc-native-left-minimized]")
+    ]);
+
+    const properties = [
+      "position", "inset", "zIndex", "display", "flex", "flexGrow", "flexShrink", "flexBasis",
+      "width", "minWidth", "maxWidth", "height", "minHeight", "maxHeight", "overflow", "overflowX", "overflowY",
+      "visibility", "opacity", "pointerEvents", "transform", "padding", "margin"
+    ];
+
+    for (const element of affected) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      element.removeAttribute("data-mmlc-native-parse-forced");
+      element.removeAttribute("data-mmlc-forced-middle-pane");
+      element.removeAttribute("data-mmlc-native-left-minimized");
+      element.removeAttribute("inert");
+      for (const property of properties) {
+        try { element.style[property] = ""; } catch {}
+      }
+    }
   }
 
   function isStablePromotedChatPane(element) {
