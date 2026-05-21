@@ -310,6 +310,8 @@
   let threadViewRebuildTimer = null;
   let currentThreadReplyTarget = null;
   let currentThreadPanelTarget = null;
+  let closedThreadPanelRootEventId = "";
+  let suppressThreadSidePanelUntil = 0;
   let lastThreadReplySource = null;
   let uiLanguage = UI_DEFAULT_LANGUAGE;
   let lastTimelineScrollAt = 0;
@@ -343,7 +345,10 @@
   }
 
   function isThreadViewFeatureEnabled() {
-    return combinedFeatureConfig.enableThreadView !== false;
+    // Smart Element's thread view is part of the mobile companion. It is no
+    // longer exposed as an independent gallery setting because enabling it
+    // without the mobile layout creates duplicate/ambiguous thread renderings.
+    return combinedFeatureConfig.enableMatrixMobile !== false;
   }
 
   function isEventFromOtherCombinedUi(event) {
@@ -383,12 +388,9 @@
     const gallery = document.getElementById("mg-enable-gallery");
     const mattermost = document.getElementById("mg-enable-mattermost-tools");
     const mobile = document.getElementById("mg-enable-matrix-mobile");
-    const thread = document.getElementById("mg-enable-thread-view");
-
     if (gallery) gallery.checked = combinedFeatureConfig.enableGallery !== false;
     if (mattermost) mattermost.checked = combinedFeatureConfig.enableMattermostTools !== false;
     if (mobile) mobile.checked = combinedFeatureConfig.enableMatrixMobile !== false;
-    if (thread) thread.checked = combinedFeatureConfig.enableThreadView !== false;
   }
 
   function applyCombinedFeatureVisibility() {
@@ -423,8 +425,7 @@
     const patch = {
       enableGallery: document.getElementById("mg-enable-gallery")?.checked !== false,
       enableMattermostTools: document.getElementById("mg-enable-mattermost-tools")?.checked !== false,
-      enableMatrixMobile: document.getElementById("mg-enable-matrix-mobile")?.checked !== false,
-      enableThreadView: document.getElementById("mg-enable-thread-view")?.checked !== false
+      enableMatrixMobile: document.getElementById("mg-enable-matrix-mobile")?.checked !== false
     };
 
     combinedFeatureConfig = { ...combinedFeatureConfig, ...patch };
@@ -693,6 +694,43 @@
     });
   }
 
+  function handleGalleryPanelKeyDown(event) {
+    if (event.defaultPrevented) return;
+    if (event.key !== "Enter") return;
+    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+    if (event.repeat) return;
+
+    const target = event.target instanceof Element ? event.target : null;
+
+    // Settings fields keep their normal Enter behavior. The gallery send shortcut
+    // is for the actual gallery composer/queue area, including the text field.
+    if (target?.closest("#mg-settings")) return;
+
+    // Real buttons and non-message inputs should keep their native Enter action.
+    if (target?.closest("button, input[type='file'], input[type='checkbox'], select, option")) return;
+
+    const panel = document.getElementById("mg-panel");
+    if (!panel || panel.classList.contains("mg-hidden")) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    document.getElementById("mg-send")?.click();
+  }
+
+  function handleThreadSidePanelKeyDown(event) {
+    if (event.defaultPrevented) return;
+    if (event.key !== "Enter") return;
+    if (event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || event.isComposing) return;
+    if (event.repeat) return;
+
+    const panel = document.getElementById("mg-thread-side-panel");
+    if (!panel || panel.classList.contains("mg-thread-side-hidden")) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    document.getElementById("mg-thread-side-send")?.click();
+  }
+
   function createPanel() {
     const panel = document.createElement("div");
     panel.id = "mg-panel";
@@ -727,10 +765,6 @@
           <span data-i18n="galleryFeatureLabel">Bildgalerie aktivieren</span>
         </label>
 
-        <label class="mg-settings-check">
-          <input id="mg-enable-thread-view" type="checkbox">
-          <span data-i18n="threadViewFeatureLabel">Thread-Ansicht aktivieren</span>
-        </label>
 
         <label class="mg-settings-check">
           <input id="mg-enable-mattermost-tools" type="checkbox">
@@ -776,6 +810,7 @@
     `;
 
     document.body.appendChild(panel);
+    panel.addEventListener("keydown", handleGalleryPanelKeyDown, true);
 
     document.getElementById("mg-close").addEventListener("click", closePanelAndClear);
 
@@ -801,9 +836,6 @@
       saveCombinedFeatureCheckboxes();
     });
 
-    document.getElementById("mg-enable-thread-view").addEventListener("change", () => {
-      saveCombinedFeatureCheckboxes();
-    });
 
     document.getElementById("mg-enable-mattermost-tools").addEventListener("change", () => {
       saveCombinedFeatureCheckboxes();
@@ -860,9 +892,20 @@
     `;
 
     document.body.appendChild(panel);
+    panel.addEventListener("keydown", handleThreadSidePanelKeyDown, true);
     applyUiLanguage();
 
-    document.getElementById("mg-thread-side-close").addEventListener("click", closeThreadSidePanel);
+    const closeButton = document.getElementById("mg-thread-side-close");
+    const closeHandler = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      closeThreadSidePanel({ suppressMs: 5000 });
+    };
+    closeButton.addEventListener("pointerdown", closeHandler, true);
+    closeButton.addEventListener("touchstart", closeHandler, true);
+    closeButton.addEventListener("mousedown", closeHandler, true);
+    closeButton.addEventListener("click", closeHandler, true);
     document.getElementById("mg-thread-side-send").addEventListener("click", sendThreadSidePanelText);
 
     const text = document.getElementById("mg-thread-side-text");
@@ -948,8 +991,17 @@
     });
   }
 
+  function hideGallerySettings() {
+    document.getElementById("mg-settings")?.classList.add("mg-settings-hidden");
+  }
+
+  function hideGalleryPanel() {
+    hideGallerySettings();
+    document.getElementById("mg-panel")?.classList.add("mg-hidden");
+  }
+
   function closePanelAndClear() {
-    document.getElementById("mg-panel").classList.add("mg-hidden");
+    hideGalleryPanel();
     clearDraft();
   }
 
@@ -1458,9 +1510,21 @@
 
     await openPanelFromReplySource(replySource);
     addFiles(uniqueFiles);
+    focusGalleryPanelAfterPaste();
 
     hardCleanupNativeDropOverlay();
     forceDropOverlayClosed();
+  }
+
+  function focusGalleryPanelAfterPaste() {
+    const panel = document.getElementById("mg-panel");
+    if (!panel || panel.classList.contains("mg-hidden")) return;
+
+    const target = document.getElementById("mg-text") || document.getElementById("mg-dropzone") || panel;
+    requestAnimationFrame(() => {
+      try { target.focus({ preventScroll: true }); } catch { target.focus?.(); }
+      panel.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "auto" });
+    });
   }
 
   function isRecentlySeenClipboardFingerprint(fingerprint) {
@@ -2530,6 +2594,24 @@
   }
 
   async function sendGallery() {
+    const sendButton = document.getElementById("mg-send");
+    if (sendButton?.dataset.sending === "1") return;
+    if (sendButton) {
+      sendButton.dataset.sending = "1";
+      sendButton.disabled = true;
+    }
+
+    try {
+      await sendGalleryInternal();
+    } finally {
+      if (sendButton) {
+        delete sendButton.dataset.sending;
+        sendButton.disabled = false;
+      }
+    }
+  }
+
+  async function sendGalleryInternal() {
     const status = document.getElementById("mg-status");
 
     await autofillSessionData(true);
@@ -2571,7 +2653,7 @@
 
       clearOriginalComposerText();
       clearDraft();
-      document.getElementById("mg-panel").classList.add("mg-hidden");
+      hideGalleryPanel();
 
       setTimeout(rebuildInlineGalleries, 500);
       setTimeout(rebuildInlineGalleries, 1500);
@@ -2635,7 +2717,7 @@
 
       clearOriginalComposerText();
       clearDraft();
-      document.getElementById("mg-panel").classList.add("mg-hidden");
+      hideGalleryPanel();
 
       setTimeout(rebuildInlineGalleries, 500);
       setTimeout(rebuildInlineGalleries, 1500);
@@ -3219,6 +3301,7 @@
     }
 
     await refreshGalleryMetadataFromElementTimeline();
+    if (!shouldHideNativeGallerySources()) restorePreviouslyHiddenPlaceholders();
 
     const galleryScrollPositions = captureGalleryScrollPositions();
     currentGalleryBuildPass += 1;
@@ -3611,16 +3694,16 @@
         skipFirstReplyRun: keepRootInOriginalGallery
       });
 
-      if (rootElement && !keepRootInOriginalGallery) {
+      const rootMeta = threadMetadataByEventId.get(group.rootEventId);
+      if (rootElement && !keepRootInOriginalGallery && shouldHideThreadSourceMessage(rootMeta, rootElement)) {
         rootElement.classList.add("mg-thread-hidden-message");
       }
 
-      const rootMeta = threadMetadataByEventId.get(group.rootEventId);
       hideAttachedGallerySourceMessages(rootMeta, eventElements);
 
       for (const item of allReplies) {
         const source = eventElements.get(item.eventId);
-        if (source) {
+        if (source && shouldHideThreadSourceMessage(item, source)) {
           source.classList.add("mg-thread-hidden-message");
         }
 
@@ -3648,7 +3731,7 @@
   function hideAttachedGallerySourceMessages(item, eventElements) {
     for (const attachedItem of attachedGalleryItemsForThreadItem(item, eventElements)) {
       const source = attachedItem?.eventId ? eventElements.get(attachedItem.eventId) : null;
-      if (source instanceof Element) {
+      if (source instanceof Element && shouldHideThreadSourceMessage(attachedItem, source)) {
         source.classList.add("mg-thread-hidden-message");
       }
     }
@@ -3663,7 +3746,7 @@
       if (isRenderableThreadItem(item)) continue;
 
       const source = eventElements.get(item.eventId);
-      if (source) {
+      if (source && shouldHideThreadSourceMessage(item, source)) {
         source.classList.add("mg-thread-hidden-message");
       }
     }
@@ -4475,6 +4558,7 @@
     if (Number.isFinite(width) && width > 0) img.width = width;
     if (Number.isFinite(height) && height > 0) img.height = height;
 
+    installRobustGalleryImageLoading(img, sourceImage, source instanceof Element ? source : null, item);
     return img;
   }
 
@@ -5556,8 +5640,12 @@
           return;
         }
       } finally {
-        if (wasHidden) {
-          setTimeout(() => source.classList.add("mg-thread-hidden-message"), 400);
+        if (wasHidden && shouldHideThreadSourceMessage(threadMetadataByEventId.get(eventId), source)) {
+          setTimeout(() => {
+            if (shouldHideThreadSourceMessage(threadMetadataByEventId.get(eventId), source)) {
+              source.classList.add("mg-thread-hidden-message");
+            }
+          }, 400);
         }
       }
     }
@@ -5765,10 +5853,13 @@
   }
 
   function openThreadSidePanel(rootEventId) {
+    if (closedThreadPanelRootEventId === rootEventId && Date.now() < suppressThreadSidePanelUntil) return;
+
     const target = makeThreadTarget(rootEventId);
     if (!target) return;
 
     currentThreadPanelTarget = target;
+    closedThreadPanelRootEventId = "";
     renderThreadSidePanel(target);
 
     const text = document.getElementById("mg-thread-side-text");
@@ -5778,9 +5869,10 @@
     }
   }
 
-  function closeThreadSidePanel() {
+  function closeThreadSidePanel(options = {}) {
     const panel = document.getElementById("mg-thread-side-panel");
     const text = document.getElementById("mg-thread-side-text");
+    const rootEventId = currentThreadPanelTarget?.rootEventId || panel?.dataset?.threadRootId || "";
 
     if (currentThreadPanelTarget?.rootEventId && text) {
       threadDraftsByRootEventId.set(currentThreadPanelTarget.rootEventId, text.value);
@@ -5788,14 +5880,19 @@
 
     currentThreadPanelTarget = null;
     lastThreadReplySource = null;
+    closedThreadPanelRootEventId = rootEventId;
+    suppressThreadSidePanelUntil = Date.now() + Math.max(1400, Number(options.suppressMs || 1400));
 
     if (panel) {
       panel.classList.add("mg-thread-side-hidden");
+      panel.setAttribute("aria-hidden", "true");
+      panel.dataset.closedAt = String(Date.now());
     }
   }
 
   function renderOpenThreadSidePanel() {
     if (!currentThreadPanelTarget?.rootEventId) return;
+    if (closedThreadPanelRootEventId === currentThreadPanelTarget.rootEventId && Date.now() < suppressThreadSidePanelUntil) return;
 
     const target = makeThreadTarget(currentThreadPanelTarget.rootEventId);
     if (!target) {
@@ -5824,6 +5921,8 @@
     status.textContent = "";
     messages.replaceChildren(...buildThreadSidePanelMessages(target.rootEventId));
     text.value = draft || "";
+    panel.dataset.threadRootId = target.rootEventId;
+    panel.removeAttribute("aria-hidden");
     panel.classList.remove("mg-thread-side-hidden");
 
     if (hadFocus) {
@@ -6118,6 +6217,24 @@
   }
 
   async function sendThreadSidePanelText() {
+    const sendButton = document.getElementById("mg-thread-side-send");
+    if (sendButton?.dataset.sending === "1") return;
+    if (sendButton) {
+      sendButton.dataset.sending = "1";
+      sendButton.disabled = true;
+    }
+
+    try {
+      await sendThreadSidePanelTextInternal();
+    } finally {
+      if (sendButton) {
+        delete sendButton.dataset.sending;
+        sendButton.disabled = false;
+      }
+    }
+  }
+
+  async function sendThreadSidePanelTextInternal() {
     const source = getCurrentThreadReplySource();
     const text = source?.textElement?.value?.trim() || "";
     const status = document.getElementById("mg-thread-side-status");
@@ -6322,6 +6439,9 @@
       const img = findMainImage(message);
       if (!img) continue;
 
+      const eventId = eventIdForElement(message);
+      if (shouldSkipMainGalleryForThreadEvent(eventId, message)) continue;
+
       if (result.some(item => item.element === message)) continue;
 
       result.push({
@@ -6331,6 +6451,12 @@
     }
 
     return result;
+  }
+
+  function shouldSkipMainGalleryForThreadEvent(eventId, messageElement) {
+    if (!mergedThreadViewEnabled || !eventId) return false;
+    if (messageElement?.closest?.(NATIVE_THREAD_PANEL_SELECTOR)) return false;
+    return isEventInMergedThreadGroup(eventId);
   }
 
   function findMainImage(element) {
@@ -6379,6 +6505,57 @@
     return false;
   }
 
+  function isLoadedMessageImage(img) {
+    if (!(img instanceof HTMLImageElement)) return false;
+    const src = img.currentSrc || img.src || img.getAttribute("src") || "";
+    if (!src) return false;
+    return Boolean(img.complete && (img.naturalWidth > 0 || img.naturalHeight > 0));
+  }
+
+  function isSmartElementMobileViewActive() {
+    const root = document.documentElement;
+    return Boolean(root?.classList?.contains("mmlc-enabled") && (
+      root.classList.contains("mmlc-mode-chat") ||
+      root.classList.contains("mmlc-image-gate-pending")
+    ));
+  }
+
+  function shouldHideNativeGallerySources() {
+    // In Smart Element mobile chat view, do not hide Element's original media
+    // tiles. Element's media/service-worker pipeline may still replace lazy
+    // images after reload; hiding the native tile before/after the cloned gallery
+    // image settles can leave only Element's temporary error placeholder visible.
+    // Desktop/vanilla mode keeps the compact de-duplicated gallery behavior.
+    return !isSmartElementMobileViewActive();
+  }
+
+  function shouldHideThreadSourceMessage(item = null, source = null) {
+    if (shouldHideNativeGallerySources()) return true;
+
+    // In mobile view, hide thread source events only when Smart Element can render
+    // their replacement. If an image cannot be cloned/rendered, robust image
+    // loading removes the clone and leaves the native Element media visible.
+    if (source instanceof Element && findMainImage(source)) return true;
+    if (item && isThreadImageItem(item)) return Boolean(item?.media?.downloadUrl || item?.media?.thumbnailUrl || item?.media?.mxcUrl || item?.gallery?.url || item?.gallery?.downloadUrl);
+
+    return true;
+  }
+
+  function scheduleGalleryRebuildWhenImageReady(img) {
+    if (!(img instanceof HTMLImageElement)) return;
+    if (img.dataset.mgImageReadyWatch === "1") return;
+    img.dataset.mgImageReadyWatch = "1";
+
+    const done = () => {
+      delete img.dataset.mgImageReadyWatch;
+      scheduleGalleryRebuild(80);
+      setTimeout(() => scheduleGalleryRebuild(120), 360);
+    };
+
+    img.addEventListener("load", done, { once: true });
+    img.addEventListener("error", done, { once: true });
+  }
+
   function isMessageImageCandidate(img, messageElement) {
     if (!(img instanceof HTMLImageElement)) return false;
 
@@ -6396,6 +6573,11 @@
       messageElement?.classList?.contains("mg-gallery-placeholder") ||
       messageElement?.classList?.contains("mg-thread-hidden-message")
     );
+    if (!isLoadedMessageImage(img)) {
+      scheduleGalleryRebuildWhenImageReady(img);
+      return false;
+    }
+
     const rect = img.getBoundingClientRect();
     if (!isHiddenGallerySource && (rect.width < 35 || rect.height < 35)) return false;
 
@@ -6670,6 +6852,139 @@
     return message;
   }
 
+  function installRobustGalleryImageLoading(img, sourceImage = null, sourceElement = null, sourceMeta = null) {
+    if (!(img instanceof HTMLImageElement)) return;
+    if (img.dataset.mgRobustImageLoading === "1") return;
+
+    img.dataset.mgRobustImageLoading = "1";
+    img.dataset.mgImageLoadFailed = "0";
+
+    const candidates = galleryImageFallbackCandidates(img, sourceImage, sourceMeta);
+    let index = 0;
+
+    const markLoaded = () => {
+      if (!(img.naturalWidth > 0 || img.naturalHeight > 0)) return;
+
+      img.dataset.mgImageLoadFailed = "0";
+      img.classList.remove("mg-gallery-image-error");
+      const wrapper = img.closest(".mg-gallery-item");
+      wrapper?.classList?.remove("mg-gallery-item-error", "mg-gallery-item-fallback-to-native");
+
+      if (sourceElement instanceof Element && sourceElement.dataset.mgGalleryImageLoadFailed !== "1") {
+        sourceElement.classList.add("mg-gallery-placeholder");
+        sourceElement.dataset.mgGalleryPlaceholderPass = String(currentGalleryBuildPass);
+      }
+    };
+
+    const markFailed = () => {
+      img.dataset.mgImageLoadFailed = "1";
+      img.classList.add("mg-gallery-image-error");
+      const wrapper = img.closest(".mg-gallery-item");
+      wrapper?.classList?.add("mg-gallery-item-fallback-to-native");
+      wrapper?.classList?.remove("mg-gallery-item-error");
+
+      // Keep Element's original message visible if our cloned thumbnail cannot be
+      // loaded. This is the safe mobile reload path: Element may lazily replace
+      // images with placeholders until its own media/service-worker pipeline has
+      // resolved the real source. Hiding the original too early produced the
+      // visible Smart Element error placeholder even though Element could show the
+      // image once mobile view was disabled.
+      if (sourceElement instanceof Element) {
+        sourceElement.classList.remove("mg-gallery-placeholder", "mg-thread-hidden-message");
+        delete sourceElement.dataset.mgGalleryPlaceholderPass;
+        sourceElement.dataset.mgGalleryImageLoadFailed = "1";
+      }
+
+      cleanupGalleryFallbackItems(wrapper?.closest?.(".mg-inline-gallery"));
+    };
+
+    img.addEventListener("load", markLoaded);
+
+    img.addEventListener("error", () => {
+      while (index < candidates.length) {
+        const next = candidates[index++];
+        if (!next || next === img.currentSrc || next === img.src) continue;
+        img.src = next;
+        return;
+      }
+
+      markFailed();
+    });
+
+    if (img.complete) {
+      if (img.naturalWidth > 0 || img.naturalHeight > 0) {
+        markLoaded();
+      } else {
+        // If the browser already knows the cloned source is broken, run the error
+        // fallback asynchronously so that the original Element message remains
+        // visible and no stale gallery placeholder is shown.
+        setTimeout(() => {
+          if (!(img.naturalWidth > 0 || img.naturalHeight > 0)) markFailed();
+        }, 0);
+      }
+    }
+  }
+
+  function cleanupGalleryFallbackItems(gallery) {
+    if (!(gallery instanceof Element)) return;
+
+    const items = Array.from(gallery.querySelectorAll(".mg-gallery-item"));
+    const visibleItems = items.filter(item => !item.classList.contains("mg-gallery-item-fallback-to-native"));
+    if (visibleItems.length === 0) {
+      gallery.remove();
+    }
+  }
+
+
+  function galleryImageFallbackCandidates(img = null, sourceImage = null, sourceMeta = null) {
+    const raw = [];
+    const addFromImage = image => {
+      if (!(image instanceof HTMLImageElement)) return;
+      raw.push(
+        image.dataset.fullSrc,
+        image.dataset.mxcUrl,
+        image.getAttribute("data-full-src"),
+        image.getAttribute("data-mxc-url"),
+        image.currentSrc,
+        image.src,
+        image.getAttribute("src")
+      );
+      raw.push(...buildMatrixMediaDownloadCandidates(image));
+    };
+
+    addFromImage(img);
+    addFromImage(sourceImage);
+
+    if (sourceMeta && typeof sourceMeta === "object") {
+      raw.push(
+        sourceMeta.downloadUrl,
+        sourceMeta.thumbnailUrl,
+        sourceMeta.url,
+        sourceMeta.mxcUrl,
+        sourceMeta.gallery?.downloadUrl,
+        sourceMeta.gallery?.url,
+        sourceMeta.media?.downloadUrl,
+        sourceMeta.media?.thumbnailUrl,
+        sourceMeta.media?.mxcUrl
+      );
+    }
+
+    const candidates = [];
+    for (const value of raw) {
+      if (!value) continue;
+      const before = candidates.length;
+      addDownloadCandidatesFromUrl(String(value), candidates);
+      if (before === candidates.length) {
+        const browserUrl = browserImageUrl(value);
+        if (browserUrl) candidates.push(browserUrl);
+      }
+    }
+
+    const current = new Set([img?.currentSrc, img?.src, img?.getAttribute?.("src")].filter(Boolean));
+    return Array.from(new Set(candidates.map(browserImageUrl).filter(Boolean)))
+      .filter(url => !current.has(url));
+  }
+
   function buildInlineGallery(anchor, imageItems, galleryId) {
     const parent = findBestGalleryParent(anchor);
     if (!parent) return;
@@ -6684,7 +6999,6 @@
       withVisibleGallerySources(imageItems, () => {
         applyInlineGalleryIndent(existing, anchor, parent);
       });
-      markGallerySourcePlaceholders(imageItems);
       return;
     }
 
@@ -6721,6 +7035,7 @@
       if (sourceEventId) clone.dataset.eventId = sourceEventId;
       if (sourceMeta?.url) clone.dataset.mxcUrl = sourceMeta.url;
       if (sourceMeta?.caption) clone.dataset.caption = sourceMeta.caption;
+      installRobustGalleryImageLoading(clone, img, item.element, sourceMeta);
 
       wrapper.appendChild(clone);
       appendPostedImageReplyButton(wrapper, sourceEventId);
@@ -6734,7 +7049,6 @@
 
     const reference = findDirectChildForParent(anchor, parent);
     parent.insertBefore(gallery, reference);
-    markGallerySourcePlaceholders(imageItems);
   }
 
 
@@ -6851,8 +7165,10 @@
   }
 
   function markGallerySourcePlaceholders(imageItems) {
+    if (!shouldHideNativeGallerySources()) return;
     for (const item of imageItems) {
       if (!(item?.element instanceof Element)) continue;
+      if (item.element.dataset.mgGalleryImageLoadFailed === "1") continue;
       item.element.classList.add("mg-gallery-placeholder");
       item.element.dataset.mgGalleryPlaceholderPass = String(currentGalleryBuildPass);
     }
@@ -6873,8 +7189,10 @@
     try {
       return callback();
     } finally {
-      for (const element of restored) {
-        element.classList.add("mg-gallery-placeholder");
+      if (shouldHideNativeGallerySources()) {
+        for (const element of restored) {
+          element.classList.add("mg-gallery-placeholder");
+        }
       }
     }
   }
@@ -7105,6 +7423,10 @@
     document.addEventListener("keydown", handleLightboxKey, true);
     updateLightbox();
   }
+
+  document.addEventListener("smart-element-close-image-overlays", () => {
+    closeLightbox();
+  }, true);
 
   function updateLightbox() {
     const image = document.getElementById("mg-lightbox-image");
@@ -7709,8 +8031,18 @@
     });
   }
 
+  function snapFloatingButtonRight(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 0;
+    // Users often drag the + button exactly to the right edge. Browser/mobile
+    // viewport changes can report a few px of residual right offset. Treat small
+    // offsets as intentional edge snapping and persist 0 instead of slowly moving
+    // the button left on every reload.
+    return numeric <= 24 ? 0 : Math.max(0, numeric);
+  }
+
   async function saveButtonPosition(left, top) {
-    const right = Math.max(0, window.innerWidth - left - getToggleButtonWidth());
+    const right = snapFloatingButtonRight(window.innerWidth - left - getToggleButtonWidth());
     const bottom = Math.max(0, window.innerHeight - top - getToggleButtonHeight());
 
     await chrome.storage.local.set({
@@ -7722,7 +8054,7 @@
     const data = await chrome.storage.local.get(BUTTON_POSITION_KEY);
     const pos = data[BUTTON_POSITION_KEY] || {};
 
-    const right = Number.isFinite(pos.right) ? pos.right : 18;
+    const right = Number.isFinite(pos.right) ? snapFloatingButtonRight(pos.right) : 18;
     const bottom = Number.isFinite(pos.bottom) ? pos.bottom : 18;
 
     button.style.left = "auto";
@@ -7735,12 +8067,14 @@
 
   function installButtonResizeGuard(button) {
     window.addEventListener("resize", () => {
+      if (document.documentElement.classList.contains("mmlc-native-parse-layout") || button.hidden) return;
       clampToggleButtonToViewport(button);
       saveCurrentButtonPosition(button);
     }, { passive: true });
 
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
+        if (document.documentElement.classList.contains("mmlc-native-parse-layout") || button.hidden) return;
         clampToggleButtonToViewport(button);
         saveCurrentButtonPosition(button);
       }, 150);
@@ -7751,7 +8085,7 @@
     if (!button) return;
 
     const rect = button.getBoundingClientRect();
-    const margin = 8;
+    const margin = 0;
 
     let left = rect.left;
     let top = rect.top;
@@ -7762,7 +8096,7 @@
     left = Math.max(margin, Math.min(left, maxLeft));
     top = Math.max(margin, Math.min(top, maxTop));
 
-    const right = Math.max(margin, window.innerWidth - left - rect.width);
+    const right = snapFloatingButtonRight(window.innerWidth - left - rect.width);
     const bottom = Math.max(margin, window.innerHeight - top - rect.height);
 
     button.style.left = "auto";
@@ -7774,7 +8108,7 @@
   async function saveCurrentButtonPosition(button) {
     const rect = button.getBoundingClientRect();
 
-    const right = Math.max(0, window.innerWidth - rect.left - rect.width);
+    const right = snapFloatingButtonRight(window.innerWidth - rect.left - rect.width);
     const bottom = Math.max(0, window.innerHeight - rect.top - rect.height);
 
     await chrome.storage.local.set({

@@ -1933,3 +1933,44 @@ html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane textare
   margin: 0 !important;
   box-sizing: border-box !important;
 }
+
+/* v46: native promoted thread view uses the same light gray as inline threads. */
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-wrapper,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-shell,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane .mx_ThreadPanel,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane .mx_ThreadView,
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadPanel"],
+html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [class*="ThreadView"] {
+  background: #f3f4f6 !important;
+}
+
+/* Smart Element v48: constrain Element's native middle pane during mobile chat
+   transitions. If the left/middle room-list pane remains visible before the
+   promoted full-width chat has settled, it must not consume nearly the whole
+   viewport. Keep it at most 40% wide so the actual chat pane remains visible. */
+html.mmlc-enabled.mmlc-mode-chat:not(.mmlc-native-parse-layout) #left-panel,
+html.mmlc-enabled.mmlc-mode-thread:not(.mmlc-native-parse-layout) #left-panel,
+html.mmlc-enabled.mmlc-mode-chat:not(.mmlc-native-parse-layout) [data-testid="left-panel"],
+html.mmlc-enabled.mmlc-mode-thread:not(.mmlc-native-parse-layout) [data-testid="left-panel"],
+body[data-mmlc-mode="chat"] #left-panel,
+body[data-mmlc-mode="thread"] #left-panel {
+  flex: 0 1 min(40vw, 420px) !important;
+  flex-grow: 0 !important;
+  flex-shrink: 1 !important;
+  flex-basis: min(40vw, 420px) !important;
+  width: min(40vw, 420px) !important;
+  min-width: 0 !important;
+  max-width: 40vw !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-enabled.mmlc-mode-chat:not(.mmlc-native-parse-layout) #left-panel .mx_LeftPanel_panel,
+html.mmlc-enabled.mmlc-mode-thread:not(.mmlc-native-parse-layout) #left-panel .mx_LeftPanel_panel,
+html.mmlc-enabled.mmlc-mode-chat:not(.mmlc-native-parse-layout) #left-panel [class*="LeftPanel"],
+html.mmlc-enabled.mmlc-mode-thread:not(.mmlc-native-parse-layout) #left-panel [class*="LeftPanel"] {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}

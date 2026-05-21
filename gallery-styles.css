@@ -1280,3 +1280,55 @@ html.mg-gallery-feature-disabled #mg-panel,
 html.mg-gallery-feature-disabled #mg-global-drop-hint {
   display: none !important;
 }
+
+/* v39: keep original Element image visible if a cloned gallery image cannot be loaded. */
+.mg-gallery-item-error {
+  min-width: 180px !important;
+  border: 1px dashed rgba(148, 163, 184, 0.9) !important;
+  border-radius: 8px !important;
+  background: rgba(248, 250, 252, 0.96) !important;
+}
+
+.mg-gallery-item-error::after {
+  content: "Bild konnte nicht geladen werden";
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 180px !important;
+  height: 190px !important;
+  padding: 12px !important;
+  box-sizing: border-box !important;
+  color: #64748b !important;
+  font-size: 13px !important;
+  line-height: 1.25 !important;
+  text-align: center !important;
+}
+
+.mg-gallery-item-error > img.mg-gallery-image-error {
+  display: none !important;
+}
+
+.mg-native-thread-gallery .mg-gallery-item-error::after,
+#mg-thread-side-panel .mg-thread-media-gallery .mg-gallery-item-error::after {
+  height: 160px !important;
+}
+
+/* v40: never replace Element's own media state with a Smart Element error tile.
+   The gallery renderer now waits until cloned thumbnails have actually loaded
+   before hiding the native Element image. If a cloned thumbnail cannot load, its
+   gallery item is suppressed and the native message stays visible. */
+.mg-gallery-item-fallback-to-native,
+.mg-gallery-item-error {
+  display: none !important;
+}
+
+.mg-gallery-item-error::after {
+  content: none !important;
+  display: none !important;
+}
+
+/* v46: side thread view uses the same light gray as inline thread blocks. */
+#mg-thread-side-panel,
+#mg-thread-side-messages {
+  background: #f3f4f6 !important;
+}

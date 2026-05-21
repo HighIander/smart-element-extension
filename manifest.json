@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Smart Element",
-  "version": "1.0.25",
+  "version": "1.0.3",
   "description": "Smart Element by Thomas Kluge",
   "permissions": [
     "storage",
@@ -18,7 +18,12 @@
     "http://*/_matrix/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "scripts": [
+      "background.js"
+    ],
+    "preferred_environment": [
+      "document"
+    ]
   },
   "web_accessible_resources": [
     {
@@ -68,7 +73,6 @@
       "run_at": "document_idle"
     }
   ],
-  "minimum_chrome_version": "114",
   "browser_specific_settings": {
     "gecko": {
       "id": "smart-element@t-kluge.de",

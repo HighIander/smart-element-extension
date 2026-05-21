@@ -9,22 +9,19 @@
   const FEATURE_KEYS = [
     "enableGallery",
     "enableMattermostTools",
-    "enableMatrixMobile",
-    "enableThreadView"
+    "enableMatrixMobile"
   ];
 
   const FEATURE_LABELS = {
     enableGallery: "Image gallery",
     enableMattermostTools: "Mattermost importer and exporter",
-    enableMatrixMobile: "Matrix mobile layout",
-    enableThreadView: "Thread view"
+    enableMatrixMobile: "Matrix mobile layout"
   };
 
   const DEFAULT_FEATURES = {
     enableGallery: true,
     enableMattermostTools: true,
-    enableMatrixMobile: true,
-    enableThreadView: true
+    enableMatrixMobile: true
   };
 
   const DEFAULT_SELECTOR_REFRESH_SECONDS = 60;
@@ -69,6 +66,12 @@
     for (const key of FEATURE_KEYS) {
       normalized[key] = raw[key] !== false;
     }
+
+    // Thread view is not an independent feature switch anymore. It follows the
+    // Smart Element mobile layout so the gallery and thread renderers cannot be
+    // configured into a duplicate/half-active state. Keep the field for backward
+    // compatibility with older stored settings.
+    normalized.enableThreadView = normalized.enableMatrixMobile !== false;
 
     const refreshRaw = Number(raw.selectorBackgroundRefreshSeconds);
     normalized.selectorBackgroundRefreshSeconds = Number.isFinite(refreshRaw)

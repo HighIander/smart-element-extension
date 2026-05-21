@@ -78,6 +78,8 @@
   let suppressThreadAutoUntil = 0;
   let suppressThreadOpenUntil = 0;
   let lastThreadTriggerClickAt = 0;
+  let suppressChatAutoScrollUntil = 0;
+  let threadReturnScrollState = null;
   let observerFlushTimer = null;
   let spacesPanelRefreshTimer = null;
   let chatListBackgroundRefreshTimer = null;
@@ -87,6 +89,8 @@
   let chatListBackgroundRefreshRun = 0;
   let homeChatListBackgroundRefreshRun = 0;
   let nativeDomActionRun = 0;
+  let chatImageGateRun = 0;
+  let chatImageGateTimer = null;
   let panelProgressVisibleSince = 0;
   let panelProgressHideTimer = null;
   let panelProgressIconLoadRun = 0;
@@ -129,6 +133,7 @@
   let nativeParseViewportCreated = false;
   const nativeParseForcedStyles = new Map();
   const nativeReturnLeftPaneForcedStyles = new Map();
+  const nativeDirectMessageSpacePanelForcedStyles = new Map();
   const chatViewportForcedStyles = new Map();
   let chatViewportMetricsFrame = null;
   let selectorReturnNativeLayoutRun = 0;
@@ -482,6 +487,7 @@
     restoreChatViewportScrollLock();
     restoreViewportMeta();
     restoreNativeReturnLeftPaneMinimize();
+    restoreNativeSpacePanelCollapsedFallback();
 
     document.getElementById("mmlc-toolbar")?.remove();
     document.getElementById("mmlc-toolbar-hamburger")?.remove();
@@ -512,6 +518,207 @@
     currentPanel = "";
     renderToken += 1;
     mobileRuntimeStarted = false;
+  }
+
+  function directMessagesLabel() {
+    const lang = String(document.documentElement.lang || navigator.language || "").toLowerCase();
+    return lang.startsWith("en") ? "Direct messages" : "Direktnachrichten";
+  }
+
+  function displayLabelForItem(item) {
+    if (item?.type === "start" || /^(startseite|home)$/i.test(normalizeSpaces(item?.label || ""))) {
+      return directMessagesLabel();
+    }
+    return item?.displayLabel || item?.label || "";
+  }
+
+  function displayLabelForPathSegment(segment) {
+    if (segment?.type === "start" || /^(startseite|home)$/i.test(normalizeSpaces(segment?.label || ""))) {
+      return directMessagesLabel();
+    }
+    return segment?.displayLabel || segment?.label || "";
+  }
+
+  function cancelPendingChatImageGate(reason = "cancel-image-gate") {
+    chatImageGateRun += 1;
+    if (chatImageGateTimer) {
+      clearTimeout(chatImageGateTimer);
+      chatImageGateTimer = null;
+    }
+    document.documentElement.classList.remove("mmlc-image-gate-pending");
+    try { document.documentElement.dataset.mmlcImageGateCancelled = String(reason || "cancel-image-gate"); } catch {}
+  }
+
+  function closeImageViewingOverlays(reason = "return-to-selector") {
+    try {
+      document.dispatchEvent(new CustomEvent("smart-element-close-image-overlays", {
+        detail: { reason: String(reason || "return-to-selector") }
+      }));
+    } catch {}
+
+    // Close Smart Element's own lightbox immediately even if the gallery content
+    // script listener has not run yet. This avoids an overlay intercepting the
+    // selector after leaving chat view.
+    for (const selector of ["#mg-lightbox", ".mg-lightbox"]) {
+      for (const overlay of Array.from(document.querySelectorAll(selector))) {
+        if (overlay instanceof HTMLElement) overlay.remove();
+      }
+    }
+
+    closeNativeImageViewingOverlays(reason);
+  }
+
+  function closeNativeImageViewingOverlays(reason = "return-to-selector") {
+    const selectors = [
+      ".mx_ImageView",
+      "[class*='ImageView']",
+      ".mx_Lightbox",
+      "[class*='Lightbox']",
+      "[data-testid*='image-viewer']",
+      "[data-testid*='media-viewer']",
+      "[aria-label*='Bildanzeige']",
+      "[aria-label*='image viewer' i]",
+      "[aria-label*='media viewer' i]"
+    ];
+
+    const overlays = uniqueElements(selectors.flatMap(selector => {
+      try { return Array.from(document.querySelectorAll(selector)); } catch { return []; }
+    })).filter(element => element instanceof HTMLElement && !element.closest(OWNED_SELECTOR));
+
+    for (const overlay of overlays) {
+      const dialog = overlay.closest("[role='dialog'], .mx_Dialog, [class*='Dialog'], [class*='Overlay']") || overlay;
+      const closeButton = findCloseButtonForNativeImageOverlay(dialog);
+      if (closeButton instanceof Element) {
+        try {
+          closeButton.dataset.mmlcClosedImageOverlay = String(reason || "return-to-selector");
+          clickElement(closeButton);
+          continue;
+        } catch {}
+      }
+
+      // Only remove clearly image/media-related overlays. Generic dialogs such
+      // as Element settings must not be removed here.
+      const label = normalizeSpaces(`${dialog.getAttribute?.("aria-label") || ""} ${dialog.className || ""} ${overlay.getAttribute?.("aria-label") || ""}`).toLowerCase();
+      const containsImage = Boolean(dialog.querySelector?.("img, picture, video, canvas"));
+      if (containsImage && /image|bild|media|lightbox|viewer|ansicht/.test(label)) {
+        try { dialog.remove(); } catch {}
+      }
+    }
+
+    // Esc is a final fallback for Element's own media viewer, but use it only
+    // when a likely image/media overlay existed. This avoids closing unrelated
+    // settings dialogs during normal selector navigation.
+    if (overlays.length) {
+      for (const delayMs of [0, 60]) {
+        setTimeout(() => {
+          try { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })); } catch {}
+          try { document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true, cancelable: true })); } catch {}
+        }, delayMs);
+      }
+    }
+  }
+
+  function findCloseButtonForNativeImageOverlay(root) {
+    if (!(root instanceof Element)) return null;
+    const controls = Array.from(root.querySelectorAll("button, [role='button'], [aria-label], [title]")).filter(control => {
+      if (!(control instanceof Element) || control.closest(OWNED_SELECTOR) || !isRendered(control)) return false;
+      const label = normalizeSpaces(`${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""} ${visibleText(control) || ""}`).toLowerCase();
+      if (!label) return false;
+      if (/settings|einstellungen|option|benachrichtigung|notification|download|share|reply|thread/.test(label)) return false;
+      return /close|schließen|schliessen|zurück|back|esc|×/.test(label);
+    });
+    return controls[0] || null;
+  }
+
+  function visibleNativeMessageImagesForGate(roomView) {
+    if (!(roomView instanceof Element)) return [];
+
+    const selectors = [
+      ".mx_EventTile img",
+      "[class*='EventTile'] img",
+      "[data-event-id] img",
+      "[role='article'] img"
+    ].join(", ");
+
+    return uniqueElements(Array.from(roomView.querySelectorAll(selectors))).filter(img => {
+      if (!(img instanceof HTMLImageElement)) return false;
+      if (img.closest(OWNED_SELECTOR)) return false;
+      if (img.closest(".mx_BaseAvatar, [class*='Avatar'], [class*='avatar'], .mx_Emoji, [class*='Emoji'], .mx_ReactionsRow, [class*='Reaction']")) return false;
+      const src = img.currentSrc || img.src || img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-full-src") || "";
+      if (!src) return false;
+      const rect = img.getBoundingClientRect();
+      return rect.width >= 24 || rect.height >= 24 || /_matrix\/media|mxc:|blob:|data:image/i.test(src);
+    });
+  }
+
+  function imageIsStillLoadingForGate(img) {
+    if (!(img instanceof HTMLImageElement)) return false;
+    if (!img.isConnected) return false;
+    const src = img.currentSrc || img.src || img.getAttribute("src") || img.getAttribute("data-src") || img.getAttribute("data-full-src") || "";
+    if (!src) return false;
+    return !img.complete || (img.complete && img.naturalWidth === 0 && img.naturalHeight === 0 && !img.dataset.mmlcImageGateErrored);
+  }
+
+  function shouldDelayMobileChatActionsForImages(roomView, options = {}) {
+    if (options.skipImageGate) return false;
+    if (!isMobileLayoutEnabled()) return false;
+    if (!(roomView instanceof Element)) return false;
+    if (document.documentElement.classList.contains("mmlc-has-promoted-chat-pane")) return false;
+    const images = visibleNativeMessageImagesForGate(roomView);
+    return images.some(imageIsStillLoadingForGate);
+  }
+
+  function scheduleMobileChatModeAfterNativeImages(roomView, options = {}) {
+    cancelPendingChatImageGate("new-image-gate");
+    const run = ++chatImageGateRun;
+    const started = Date.now();
+    const maxWaitMs = Math.max(1200, Number(options.imageGateMaxWaitMs || 10000));
+    document.documentElement.classList.add("mmlc-image-gate-pending");
+
+    const settle = () => {
+      if (run !== chatImageGateRun) return;
+      const currentView = findActiveRoomView() || roomView;
+      const images = visibleNativeMessageImagesForGate(currentView);
+      const pending = images.filter(imageIsStillLoadingForGate);
+
+      if (!pending.length || Date.now() - started >= maxWaitMs) {
+        document.documentElement.classList.remove("mmlc-image-gate-pending");
+        setMode("chat", { ...options, skipImageGate: true });
+        return;
+      }
+
+      for (const img of pending) {
+        if (img.dataset.mmlcImageGateWatch === String(run)) continue;
+        img.dataset.mmlcImageGateWatch = String(run);
+        img.addEventListener("load", () => {
+          if (run === chatImageGateRun) scheduleMobileChatModeImageGateTick(run, 40);
+        }, { once: true });
+        img.addEventListener("error", () => {
+          img.dataset.mmlcImageGateErrored = "1";
+          if (run === chatImageGateRun) scheduleMobileChatModeImageGateTick(run, 80);
+        }, { once: true });
+      }
+
+      scheduleMobileChatModeImageGateTick(run, 250);
+    };
+
+    const tick = () => {
+      if (run !== chatImageGateRun) return;
+      settle();
+    };
+
+    window[`__mmlcChatImageGateTick_${run}`] = tick;
+    tick();
+  }
+
+  function scheduleMobileChatModeImageGateTick(run, delayMs) {
+    if (run !== chatImageGateRun) return;
+    if (chatImageGateTimer) clearTimeout(chatImageGateTimer);
+    chatImageGateTimer = setTimeout(() => {
+      chatImageGateTimer = null;
+      const fn = window[`__mmlcChatImageGateTick_${run}`];
+      if (typeof fn === "function") fn();
+    }, Math.max(20, delayMs));
   }
 
   function clearForcedMiddlePaneState() {
@@ -1148,6 +1355,109 @@
       }
     }
     nativeReturnLeftPaneForcedStyles.clear();
+  }
+
+  function nativeSpacePanelElement() {
+    const nav = document.querySelector("nav.mx_SpacePanel, nav[aria-label='Spaces'], .mx_SpacePanel");
+    return nav instanceof HTMLElement && !nav.closest(OWNED_SELECTOR) ? nav : null;
+  }
+
+  function nativeSpacePanelIsCollapsed(panel = nativeSpacePanelElement()) {
+    if (!(panel instanceof HTMLElement)) return true;
+    const rect = panel.getBoundingClientRect();
+    const style = getComputedStyle(panel);
+    const label = normalizeSpaces(panel.querySelector(".mx_SpacePanel_toggleCollapse, [class*='SpacePanel_toggleCollapse']")?.getAttribute("aria-label") || "").toLowerCase();
+    return panel.classList.contains("collapsed") || /ausklappen|show|open|expand/.test(label) || rect.width <= 72 || style.display === "none" || style.visibility === "hidden";
+  }
+
+  function findNativeSpacePanelCollapseButton() {
+    const panel = nativeSpacePanelElement();
+    if (!(panel instanceof HTMLElement)) return null;
+
+    const controls = uniqueElements(Array.from(panel.querySelectorAll([
+      ".mx_SpacePanel_toggleCollapse",
+      "[class*='SpacePanel_toggleCollapse']",
+      "button[aria-label='Verbergen']",
+      "[role='button'][aria-label='Verbergen']",
+      "button[aria-label='Hide']",
+      "[role='button'][aria-label='Hide']",
+      "button[aria-label='Collapse']",
+      "[role='button'][aria-label='Collapse']"
+    ].join(", "))));
+
+    return controls.find(control => {
+      if (!(control instanceof Element) || control.closest(OWNED_SELECTOR) || !isRendered(control)) return false;
+      if (!control.closest("nav.mx_SpacePanel, nav[aria-label='Spaces'], .mx_SpacePanel")) return false;
+      if (control.closest(".mx_SpaceButton, [class*='SpaceButton'], .mx_UserMenu, [class*='UserMenu'], .mx_QuickSettingsButton, .mx_ThreadsActivityCentreButton")) return false;
+      const text = normalizeSpaces(`${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""} ${visibleText(control) || ""}`).toLowerCase();
+      if (/option|settings|einstellungen|quick|schnelleinstellungen|threads?|benutzermen|user menu|new space|neuen space/.test(text)) return false;
+      return /verbergen|hide|collapse|einklapp|minimi/.test(text) || control.className.toString().includes("SpacePanel_toggleCollapse");
+    }) || null;
+  }
+
+  function rememberDirectMessageSpacePanelFallbackStyle(element) {
+    if (!(element instanceof HTMLElement) || nativeDirectMessageSpacePanelForcedStyles.has(element)) return;
+    nativeDirectMessageSpacePanelForcedStyles.set(element, {
+      flex: element.style.flex,
+      width: element.style.width,
+      minWidth: element.style.minWidth,
+      maxWidth: element.style.maxWidth,
+      overflow: element.style.overflow,
+      transform: element.style.transform
+    });
+  }
+
+  function forceNativeSpacePanelCollapsedFallback(reason = "direct-message-open") {
+    const panel = nativeSpacePanelElement();
+    if (!(panel instanceof HTMLElement)) return false;
+    rememberDirectMessageSpacePanelFallbackStyle(panel);
+    panel.dataset.mmlcDmSpacePanelCollapsed = String(reason || "direct-message-open");
+    panel.style.flex = "0 0 48px";
+    panel.style.width = "48px";
+    panel.style.minWidth = "48px";
+    panel.style.maxWidth = "48px";
+    panel.style.overflow = "hidden";
+    panel.classList.add("collapsed");
+    return true;
+  }
+
+  function restoreNativeSpacePanelCollapsedFallback() {
+    for (const [element, styles] of nativeDirectMessageSpacePanelForcedStyles.entries()) {
+      if (!(element instanceof HTMLElement)) continue;
+      element.removeAttribute("data-mmlc-dm-space-panel-collapsed");
+      element.classList.remove("collapsed");
+      for (const [property, value] of Object.entries(styles)) {
+        try { element.style[property] = value; } catch {}
+      }
+    }
+    nativeDirectMessageSpacePanelForcedStyles.clear();
+  }
+
+  async function collapseNativeSpacePanelBeforeDirectChatOpen(reason = "direct-message-open") {
+    const panel = nativeSpacePanelElement();
+    if (!(panel instanceof HTMLElement)) return false;
+    if (nativeSpacePanelIsCollapsed(panel)) return true;
+
+    const button = findNativeSpacePanelCollapseButton();
+    if (button instanceof Element) {
+      try {
+        button.dataset.mmlcDmSpacePanelCollapseClicked = String(reason || "direct-message-open");
+        clickElement(button);
+      } catch {}
+      await delay(180);
+      if (nativeSpacePanelIsCollapsed(panel)) {
+        dispatchNativeParseResize();
+        return true;
+      }
+    }
+
+    // Last resort: only squeeze the SpacePanel itself. Do not touch #left-panel,
+    // the room view, the timeline, or media nodes. This keeps the v44 image
+    // loading behaviour intact while still freeing width for the native chat pane.
+    forceNativeSpacePanelCollapsedFallback(reason);
+    dispatchNativeParseResize();
+    await nextAnimationFrame();
+    return true;
   }
 
   async function waitForNativeRightSpaceOverviewAfterLeftMinimize(label = currentSpaceLabel, maxWaitMs = 1800) {
@@ -2352,8 +2662,9 @@
       id: "start-page",
       type: "start",
       label: "Startseite",
+      displayLabel: directMessagesLabel(),
       element: findStartPageControl(),
-      icon: "H",
+      icon: "D",
       unread: cloneUnreadState(startPageUnreadState())
     }, ...sortedSpaces, makeCreateTile("space")];
 
@@ -2655,7 +2966,7 @@
       { label: "Startseite", type: "start" }
     ];
 
-    const token = beginPanelRender("home-chats", "Chats", "Startseite");
+    const token = beginPanelRender("home-chats", "Chats", directMessagesLabel());
     enterPanelMode("rooms");
     renderHierarchyPath(currentSpacePath);
 
@@ -2750,7 +3061,7 @@
     renderList(items, {
       listKey,
       disableDragSort: true,
-      emptyText: "No chats found in the Startseite center pane yet.",
+      emptyText: "No direct messages found in the center pane yet.",
       onSelect: async item => {
         if (item.action) {
           item.action();
@@ -3092,7 +3403,7 @@
       const button = document.createElement("button");
       button.type = "button";
       button.className = "mmlc-breadcrumb-button";
-      button.title = segment.type === "root" ? "Spaces" : segment.label;
+      button.title = segment.type === "root" ? "Spaces" : displayLabelForPathSegment(segment);
       button.setAttribute("aria-label", button.title);
 
       if (segment.type === "root") {
@@ -3106,7 +3417,7 @@
 
         const label = document.createElement("span");
         label.className = "mmlc-breadcrumb-label";
-        label.textContent = segment.label;
+        label.textContent = displayLabelForPathSegment(segment);
         button.appendChild(label);
 
         const unreadBadge = makeUnreadBadge(unreadForBreadcrumbSegment(normalizedPath, index), "mmlc-breadcrumb-unread-badge");
@@ -3235,10 +3546,10 @@
         avatar.classList.add("mmlc-list-avatar-image");
         const image = document.createElement("img");
         image.alt = "";
-        setAvatarImageSource(image, itemAvatarSrc, item.label);
+        setAvatarImageSource(image, itemAvatarSrc, displayLabelForItem(item));
         avatar.appendChild(image);
       } else {
-        avatar.textContent = item.icon || initialsForLabel(item.label);
+        avatar.textContent = item.icon || initialsForLabel(displayLabelForItem(item));
       }
 
       const body = document.createElement("span");
@@ -3246,7 +3557,7 @@
 
       const label = document.createElement("strong");
       label.className = "mmlc-list-label";
-      label.textContent = item.label;
+      label.textContent = displayLabelForItem(item);
 
       const meta = document.createElement("span");
       meta.className = "mmlc-list-meta";
@@ -3633,6 +3944,33 @@
       unreadCachePersistTimer = null;
       persistUnreadCache();
     }, 160);
+  }
+
+  function flushPersistentState() {
+    try {
+      if (hierarchyCachePersistTimer) {
+        clearTimeout(hierarchyCachePersistTimer);
+        hierarchyCachePersistTimer = null;
+        persistHierarchyCache();
+      }
+      if (unreadCachePersistTimer) {
+        clearTimeout(unreadCachePersistTimer);
+        unreadCachePersistTimer = null;
+        persistUnreadCache();
+      }
+      if (sortSettingsPersistTimer) {
+        clearTimeout(sortSettingsPersistTimer);
+        sortSettingsPersistTimer = null;
+        persistSortSettings();
+      }
+      if (viewStatePersistTimer) {
+        clearTimeout(viewStatePersistTimer);
+        viewStatePersistTimer = null;
+        persistViewState();
+      }
+    } catch (error) {
+      console.warn("Smart Element persistent state flush failed.", error);
+    }
   }
 
   function persistUnreadCache() {
@@ -5181,13 +5519,21 @@
   }
 
   function enterPanelMode(mode) {
-    const returningFromChat = currentMode === "chat" && (mode === "spaces" || mode === "rooms");
+    const returningFromChat = (currentMode === "chat" || currentMode === "thread") && (mode === "spaces" || mode === "rooms");
+
+    if (returningFromChat) {
+      closeImageViewingOverlays("return-from-chat-to-selector");
+    }
 
     if (currentMode !== "spaces" && currentMode !== "rooms") {
       panelReturnMode = currentMode || "normal";
     }
 
     setMode(mode, { closeThread: false });
+
+    if (returningFromChat) {
+      setTimeout(() => closeImageViewingOverlays("return-from-chat-to-selector-after-mode"), 120);
+    }
 
     if (returningFromChat) {
       chooserReturnFromChatAt = Date.now();
@@ -5218,7 +5564,17 @@
 
     const chatPane = mode === "chat" ? findActiveRoomView() : null;
 
+    if (mode === "chat" && shouldDelayMobileChatActionsForImages(chatPane, options)) {
+      scheduleMobileChatModeAfterNativeImages(chatPane, options);
+      return;
+    }
+    if (mode !== "chat") {
+      cancelPendingChatImageGate(`mode-${mode}`);
+      if (mode === "spaces" || mode === "rooms") closeImageViewingOverlays(`mode-${mode}`);
+    }
+
     currentMode = mode;
+    if (mode !== "chat" && mode !== "thread") restoreNativeSpacePanelCollapsedFallback();
     document.documentElement.dataset.mmlcMode = mode;
     document.documentElement.classList.toggle("mmlc-mode-spaces", mode === "spaces");
     document.documentElement.classList.toggle("mmlc-mode-rooms", mode === "rooms");
@@ -5253,24 +5609,170 @@
     if (mode === "chat") {
       restoreNativeReturnLeftPaneMinimize();
       dismissVirtualKeyboard("enter-chat-mode");
-      scrollActiveChatToBottom("enter-chat-mode-immediate");
-      scheduleChatModeStabilization();
-      scheduleActiveChatScrollToBottom("enter-chat-mode");
+      ensureToolbarAvailableAfterThreadReturn();
+
+      if (options.preserveScroll || options.fromThreadReturn) {
+        suppressChatAutoScrollUntil = Date.now() + 6500;
+        forceChatFullWidthAfterThreadReturn("set-mode-chat-preserve-scroll");
+        scheduleRestoreThreadReturnScroll(options.scrollState || threadReturnScrollState, "set-mode-chat-preserve-scroll");
+      } else {
+        scrollActiveChatToBottom("enter-chat-mode-immediate");
+        scheduleActiveChatScrollToBottom("enter-chat-mode");
+      }
+
+      scheduleChatModeStabilization({ preserveScroll: Boolean(options.preserveScroll || options.fromThreadReturn) });
     }
 
     persistViewStateSoon();
   }
 
-  function scheduleChatModeStabilization() {
-    for (const ms of [120, 360, 760, 1300, 2200]) {
+  function captureChatScrollState(reason = "thread-open") {
+    const view = document.querySelector(".mmlc-promoted-chat-pane") || findActiveRoomView();
+    if (!(view instanceof Element)) return null;
+
+    const scroller = findChatTimelineScrollContainers(view)[0];
+    if (!(scroller instanceof Element)) return null;
+
+    const scrollerRect = scroller.getBoundingClientRect();
+    const anchor = findChatScrollAnchorEvent(view, scroller);
+    const anchorRect = anchor?.getBoundingClientRect?.();
+
+    return {
+      reason: String(reason || "thread-open"),
+      href: location.href,
+      label: currentChatLabel || activeRoomLabel(view) || "",
+      scrollTop: scroller.scrollTop,
+      scrollLeft: scroller.scrollLeft,
+      scrollHeight: scroller.scrollHeight,
+      clientHeight: scroller.clientHeight,
+      bottomDistance: Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop),
+      reverse: timelineUsesReverseScroll(scroller),
+      anchorEventId: anchor?.getAttribute?.("data-event-id") || "",
+      anchorText: normalizeSpaces(anchor?.textContent || "").slice(0, 120),
+      anchorTopOffset: anchorRect ? anchorRect.top - scrollerRect.top : 0,
+      capturedAt: Date.now()
+    };
+  }
+
+  function findChatScrollAnchorEvent(view, scroller) {
+    if (!(view instanceof Element) || !(scroller instanceof Element)) return null;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const events = uniqueElements(Array.from(view.querySelectorAll([
+      ".mx_EventTile",
+      "[class*='EventTile']",
+      "[data-event-id]",
+      "[data-testid*='event']",
+      "[role='article']"
+    ].join(", "))).filter(element => {
+      if (!(element instanceof Element) || element.closest(OWNED_SELECTOR)) return false;
+      if (!isRendered(element)) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.bottom >= scrollerRect.top + 4 && rect.top <= scrollerRect.bottom - 4;
+    }));
+
+    if (!events.length) return null;
+    const targetY = scrollerRect.top + Math.min(160, Math.max(48, scrollerRect.height * 0.28));
+    return events
+      .map(element => ({ element, distance: Math.abs(element.getBoundingClientRect().top - targetY) }))
+      .sort((a, b) => a.distance - b.distance)[0]?.element || events[0];
+  }
+
+  function scheduleRestoreThreadReturnScroll(state = threadReturnScrollState, reason = "thread-return") {
+    if (!state) return;
+    for (const ms of [0, 80, 180, 360, 760, 1400, 2600, 4200]) {
+      setTimeout(() => {
+        if (currentMode !== "chat") return;
+        restoreThreadReturnScrollState(state, reason);
+      }, ms);
+    }
+  }
+
+  function restoreThreadReturnScrollState(state = threadReturnScrollState, reason = "thread-return") {
+    if (!state) return false;
+    const view = document.querySelector(".mmlc-promoted-chat-pane") || findActiveRoomView();
+    if (!(view instanceof Element)) return false;
+
+    const scroller = findChatTimelineScrollContainers(view)[0];
+    if (!(scroller instanceof Element)) return false;
+
+    try {
+      scroller.style.scrollBehavior = "auto";
+      const scrollerRect = scroller.getBoundingClientRect();
+      let restored = false;
+
+      if (state.anchorEventId) {
+        const anchor = view.querySelector(`[data-event-id="${cssEscape(state.anchorEventId)}"]`);
+        if (anchor instanceof Element) {
+          const before = scroller.scrollTop;
+          const rect = anchor.getBoundingClientRect();
+          scroller.scrollTop = before + (rect.top - scrollerRect.top - Number(state.anchorTopOffset || 0));
+          restored = true;
+        }
+      }
+
+      if (!restored && Number.isFinite(state.scrollTop)) {
+        const maxTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+        const wasNearBottom = Number(state.bottomDistance) < 240;
+        const target = wasNearBottom
+          ? Math.max(0, maxTop - Number(state.bottomDistance || 0))
+          : Number(state.scrollTop || 0);
+        scroller.scrollTop = Math.max(0, Math.min(maxTop, target));
+        restored = true;
+      }
+
+      if (Number.isFinite(state.scrollLeft)) scroller.scrollLeft = Number(state.scrollLeft || 0);
+      return restored;
+    } catch {
+      return false;
+    }
+  }
+
+  function ensureToolbarAvailableAfterThreadReturn() {
+    if (!isMobileLayoutEnabled()) return;
+    let toolbar = document.getElementById("mmlc-toolbar");
+    let hamburger = document.getElementById("mmlc-toolbar-hamburger");
+    if (!(toolbar instanceof HTMLElement) || !(hamburger instanceof HTMLElement)) {
+      createToolbar();
+      toolbar = document.getElementById("mmlc-toolbar");
+      hamburger = document.getElementById("mmlc-toolbar-hamburger");
+    }
+
+    if (toolbar instanceof HTMLElement) toolbar.hidden = false;
+    if (hamburger instanceof HTMLElement) hamburger.hidden = false;
+    updateHierarchyBar();
+    scheduleThreadClosePosition();
+  }
+
+  function forceChatFullWidthAfterThreadReturn(reason = "thread-return") {
+    if (!isMobileLayoutEnabled() || currentMode !== "chat") return false;
+
+    clearThreadPanelMarks();
+    const promoted = promoteChatPane();
+    document.documentElement.classList.add("mmlc-mode-chat");
+    document.documentElement.classList.remove("mmlc-mode-thread", "mmlc-has-promoted-thread-pane", "mmlc-has-thread-panel");
+    document.body?.setAttribute("data-mmlc-mode", "chat");
+    document.documentElement.classList.toggle("mmlc-has-promoted-chat-pane", Boolean(promoted));
+    applyChatViewportScrollLock();
+    repairPromotedChatLayout(reason);
+    return Boolean(promoted);
+  }
+
+  function scheduleChatModeStabilization(options = {}) {
+    for (const ms of [120, 360, 760, 1300, 2200, 3600]) {
       setTimeout(() => {
         if (currentMode !== "chat") return;
         applyChatViewportScrollLock();
-        closeNativeThreadPanel();
+        if (Date.now() >= suppressThreadOpenUntil) closeNativeThreadPanel();
         refreshPromotedPanes();
         repairPromotedChatLayout("chat-mode-stabilization");
+        ensureToolbarAvailableAfterThreadReturn();
+        forceChatFullWidthAfterThreadReturn("chat-mode-stabilization");
         dismissVirtualKeyboard("chat-mode-stabilization");
-        scrollActiveChatToBottom("chat-mode-stabilization");
+        if (options.preserveScroll || Date.now() < suppressChatAutoScrollUntil) {
+          restoreThreadReturnScrollState(threadReturnScrollState, "chat-mode-stabilization");
+        } else {
+          scrollActiveChatToBottom("chat-mode-stabilization");
+        }
       }, ms);
     }
   }
@@ -5459,6 +5961,7 @@
     for (const ms of [80, 220, 520, 950, 1600, 2600]) {
       setTimeout(() => {
         if (currentMode !== "chat") return;
+        if (Date.now() < suppressChatAutoScrollUntil) return;
         scrollActiveChatToBottom(reason);
       }, ms);
     }
@@ -6448,15 +6951,16 @@
       if (!middlePaneNeedsExpansion(pane)) return true;
 
       if (attempt === 0) {
+        // Do not synthesize keyboard events on Element's resize/separator handle.
+        // Recent Element builds assert when keyboard navigation cannot resolve a
+        // matching panel, which aborts Smart Element initialization and breaks
+        // subsequent media rendering. Prefer pointer/click handling and use the
+        // style fallback below if Element does not expand the pane itself.
         clickElement(handle);
-        dispatchKeyboardLike(handle, "keydown", "Enter", "Enter");
-        dispatchKeyboardLike(handle, "keyup", "Enter", "Enter");
       } else if (attempt === 1) {
         dragMiddlePaneHandle(handle, preferredMiddlePaneWidth());
       } else {
-        dispatchKeyboardLike(handle, "keydown", "ArrowRight", "ArrowRight");
-        dispatchKeyboardLike(handle, "keyup", "ArrowRight", "ArrowRight");
-        clickElement(handle);
+        forceMiddlePaneOpen(pane);
       }
 
       await delay(attempt === 0 ? 260 : 420);
@@ -8814,7 +9318,13 @@
         }
 
         if (findNativeThreadPanel()) {
-          maybeEnterThreadMode(true);
+          if (Date.now() < suppressThreadOpenUntil || Date.now() < suppressThreadAutoUntil) {
+            closeNativeThreadPanel();
+            clearThreadPanelMarks();
+            forceChatFullWidthAfterThreadReturn("thread-reopen-suppressed");
+          } else {
+            maybeEnterThreadMode(true);
+          }
         } else if (Date.now() - lastThreadTriggerClickAt < 2000) {
           maybeEnterThreadMode(false);
         }
@@ -8851,18 +9361,23 @@
       return;
     }
 
+    if (Date.now() < suppressThreadOpenUntil || Date.now() < suppressThreadAutoUntil) {
+      clearThreadPanelMarks();
+      return;
+    }
+
     if (isChooserOpen()) {
       clearThreadPanelMarks();
       keepChooserPanelVisible();
       return;
     }
 
-    if (!force && Date.now() < suppressThreadAutoUntil) return;
     if (!force && Date.now() - lastThreadTriggerClickAt > 2300) return;
 
     const panel = findNativeThreadPanel();
     if (!panel) return;
 
+    threadReturnScrollState = captureChatScrollState("enter-thread-mode") || threadReturnScrollState;
     markThreadPanel(panel);
     closePanel();
     setMode("thread", { closeThread: false });
@@ -8903,6 +9418,7 @@
   function markThreadPanel(panel) {
     if (!isThreadViewFeatureEnabled()) return;
     if (!(panel instanceof Element)) return;
+    threadReturnScrollState = captureChatScrollState("mark-thread-panel") || threadReturnScrollState;
 
     const rightPanel = panel.closest(RIGHT_PANEL_SELECTOR) || panel;
     const resizeWrapper = panel.closest(".mx_RightPanel_ResizeWrapper, [class*='RightPanel_ResizeWrapper']");
@@ -8935,14 +9451,55 @@
     button.setAttribute("aria-label", "Back to chat");
     button.title = "Back to chat";
     button.textContent = "Back to chat";
-    button.addEventListener("click", () => {
-      suppressThreadAutoUntil = Date.now() + 1600;
-      closeNativeThreadPanel();
-      setMode("chat", { closeThread: false });
-    });
+
+    const handleClose = event => {
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+      event?.stopImmediatePropagation?.();
+      returnFromThreadToChatNow();
+    };
+
+    button.addEventListener("pointerdown", handleClose, true);
+    button.addEventListener("touchstart", handleClose, true);
+    button.addEventListener("mousedown", handleClose, true);
+    button.addEventListener("click", handleClose, true);
     document.body.appendChild(button);
     scheduleThreadClosePosition();
     return button;
+  }
+
+  function returnFromThreadToChatNow() {
+    const state = threadReturnScrollState || captureChatScrollState("return-from-thread-click");
+    if (state) threadReturnScrollState = state;
+
+    suppressThreadAutoUntil = Date.now() + 9000;
+    suppressThreadOpenUntil = Date.now() + 9000;
+    suppressChatAutoScrollUntil = Date.now() + 7000;
+    lastThreadTriggerClickAt = 0;
+
+    closeNativeThreadPanel();
+    clearThreadPanelMarks();
+    setMode("chat", {
+      closeThread: false,
+      allowChooserExit: true,
+      skipImageGate: true,
+      fromThreadReturn: true,
+      preserveScroll: true,
+      scrollState: state
+    });
+
+    for (const ms of [40, 120, 260, 520, 1000, 1800, 3200]) {
+      setTimeout(() => {
+        if (currentMode !== "chat") return;
+        suppressThreadAutoUntil = Math.max(suppressThreadAutoUntil, Date.now() + 5500);
+        suppressThreadOpenUntil = Math.max(suppressThreadOpenUntil, Date.now() + 5500);
+        closeNativeThreadPanel();
+        clearThreadPanelMarks();
+        forceChatFullWidthAfterThreadReturn("return-from-thread");
+        restoreThreadReturnScrollState(state, "return-from-thread");
+        ensureToolbarAvailableAfterThreadReturn();
+      }, ms);
+    }
   }
 
   function clearThreadPanelMarks() {
@@ -9418,6 +9975,10 @@
   }
   async function openHomeCenterPaneChatItem(item, beforeHref = location.href, beforeLabel = "") {
     restoreNativeReturnLeftPaneMinimize();
+    // Keep Element's space rail narrow before activating the native direct
+    // message row. If the rail is still expanded, Firefox mobile keeps the
+    // actual room pane hidden even though the middle-pane row becomes selected.
+    await collapseNativeSpacePanelBeforeDirectChatOpen("before-direct-message-row-click");
     // Chats shown on Element's Startseite/Home screen are regular entries in
     // the native Element left/middle pane. They do not expose the SpaceHierarchy
     // row action "View"/"Anzeigen" that space-overview rooms use, so they must
@@ -9425,6 +9986,7 @@
     const onStartPage = await ensureStartPageSelected({ maxWaitMs: 2200 });
     await ensureMiddlePaneExpanded();
     if (!onStartPage) return false;
+    await collapseNativeSpacePanelBeforeDirectChatOpen("direct-message-row-click");
 
     const resolved = resolveHomeCenterPaneChatItem(item) || item;
     const rowElement = resolved?.element instanceof Element ? resolved.element : null;
@@ -9457,21 +10019,24 @@
       hoverElement(target);
       await delay(120);
 
+      await collapseNativeSpacePanelBeforeDirectChatOpen("direct-message-target-click");
       clickElement(target);
-      if (await waitForOpenedRoom(item?.label, 3200, beforeHref, beforeLabel)) return true;
+      if (await waitForOpenedRoom(item?.label, 3200, beforeHref, beforeLabel, { collapseSpacePanel: true })) return true;
 
       // Some Element builds bind room opening to keyboard activation rather
       // than to the synthetic mouse click when a row has focus handling.
+      await collapseNativeSpacePanelBeforeDirectChatOpen("direct-message-key-activation");
       dispatchKeyboardLike(target, "keydown", "Enter", "Enter");
       dispatchKeyboardLike(target, "keyup", "Enter", "Enter");
-      if (await waitForOpenedRoom(item?.label, 2600, beforeHref, beforeLabel)) return true;
+      if (await waitForOpenedRoom(item?.label, 2600, beforeHref, beforeLabel, { collapseSpacePanel: true })) return true;
     }
 
     const href = resolved?.href || item?.href || roomHrefForElement(rowElement) || roomHrefForElement(activationElement);
     if (href) {
       try {
+        await collapseNativeSpacePanelBeforeDirectChatOpen("direct-message-href-open");
         location.assign(new URL(href, location.href).toString());
-        if (await waitForOpenedRoom(item?.label, 4200, beforeHref, beforeLabel)) return true;
+        if (await waitForOpenedRoom(item?.label, 4200, beforeHref, beforeLabel, { collapseSpacePanel: true })) return true;
       } catch {}
     }
 
@@ -9664,12 +10229,13 @@
       })[0]?.control || null;
   }
 
-  async function waitForOpenedRoom(label, timeoutMs, beforeHref = location.href, beforeLabel = "") {
+  async function waitForOpenedRoom(label, timeoutMs, beforeHref = location.href, beforeLabel = "", options = {}) {
     const started = Date.now();
     const normalizedTarget = normalizeSpaces(label || "").toLowerCase();
     const normalizedBefore = normalizeSpaces(beforeLabel || "").toLowerCase();
 
     while (Date.now() - started < timeoutMs) {
+      if (options.collapseSpacePanel) await collapseNativeSpacePanelBeforeDirectChatOpen("wait-for-direct-message-room");
       const view = findActiveRoomView();
       if (view instanceof Element) {
         const activeLabel = normalizeSpaces(activeRoomLabel(view)).toLowerCase();

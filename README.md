@@ -157,14 +157,21 @@ Official Edge reference: <https://learn.microsoft.com/en-us/microsoft-edge/exten
 
 ## Install temporarily in Firefox Desktop
 
-Firefox Desktop can load the extension temporarily for development/testing.
+Firefox needs the Firefox-specific manifest variant. Do **not** load the Chrome/Edge ZIP directly in Firefox: Firefox currently rejects `background.service_worker` and expects a background script entry such as `"scripts": ["background.js"]`.
 
-1. Download and unzip the Smart Element release ZIP.
+Use one of these Firefox packages instead:
+
+- `smart-element_v*_firefox.xpi` for normal Firefox testing/installing.
+- `smart-element_v*_firefox_unpacked.zip` if you specifically want to load an unpacked temporary add-on from `about:debugging`.
+
+Temporary unpacked install:
+
+1. Download and unzip `smart-element_v*_firefox_unpacked.zip`.
 2. Open Firefox.
 3. Go to `about:debugging`.
 4. Click **This Firefox**.
 5. Click **Load Temporary Add-on...**.
-6. Select `manifest.json` from the unzipped Smart Element folder.
+6. Select `manifest.json` from the unzipped Firefox-specific folder.
 7. Open or reload your Element Web tab.
 
 Important details:
@@ -172,6 +179,7 @@ Important details:
 - Temporary add-ons are removed when Firefox restarts.
 - To reload changes, use the **Reload** button for the temporary extension in `about:debugging`.
 - If a feature does not appear, reload the Element tab after reloading the extension.
+- Chrome/Edge and Firefox packages intentionally use different `background` manifest blocks.
 
 Official Firefox reference: <https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Your_first_WebExtension#installing>
 
@@ -347,9 +355,24 @@ Then unzip the package and load the extracted folder through **Load unpacked**.
 
 ### Packaging as Firefox XPI
 
-Firefox XPI packages must have `manifest.json` at the archive root, not inside an additional parent folder.
+Firefox XPI packages must have `manifest.json` at the archive root, not inside an additional parent folder. They must also use the Firefox-specific background entry:
 
-From inside the extension folder:
+```json
+"background": {
+  "scripts": ["background.js"],
+  "preferred_environment": ["document"]
+}
+```
+
+Do not package the Chrome/Edge manifest as a Firefox XPI, because that manifest contains:
+
+```json
+"background": {
+  "service_worker": "background.js"
+}
+```
+
+From inside the Firefox-specific extension folder:
 
 ```bash
 zip -r ../smart-element.xpi .
