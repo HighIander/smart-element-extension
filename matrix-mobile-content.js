@@ -82,6 +82,8 @@
   let spacesPanelRefreshTimer = null;
   let chatListBackgroundRefreshTimer = null;
   let homeChatListBackgroundRefreshTimer = null;
+  let selectorPeriodicBackgroundRefreshTimer = null;
+  let selectorPeriodicBackgroundRefreshRun = 0;
   let chatListBackgroundRefreshRun = 0;
   let homeChatListBackgroundRefreshRun = 0;
   let nativeDomActionRun = 0;
@@ -112,7 +114,8 @@
     enableGallery: true,
     enableMattermostTools: true,
     enableMatrixMobile: true,
-    enableThreadView: true
+    enableThreadView: true,
+    selectorBackgroundRefreshSeconds: 60
   };
   let mobileRuntimeStarted = false;
   let mobileRuntimeListenersInstalled = false;
@@ -180,6 +183,7 @@
       applyCombinedFeatureVisibility();
       if (isMobileLayoutEnabled()) {
         initializeMobileRuntime();
+        scheduleSelectorPeriodicBackgroundRefresh("settings-changed");
       } else {
         teardownMobileRuntime();
       }
@@ -442,6 +446,11 @@
       clearTimeout(homeChatListBackgroundRefreshTimer);
       homeChatListBackgroundRefreshTimer = null;
     }
+    if (selectorPeriodicBackgroundRefreshTimer) {
+      clearTimeout(selectorPeriodicBackgroundRefreshTimer);
+      selectorPeriodicBackgroundRefreshTimer = null;
+    }
+    selectorPeriodicBackgroundRefreshRun += 1;
     chatListBackgroundRefreshRun += 1;
     homeChatListBackgroundRefreshRun += 1;
     if (panelProgressHideTimer) {
@@ -1967,6 +1976,7 @@
       renderSpacesList(cachedSpaces, token);
       showPanelProgress(false);
       persistViewStateSoon();
+      scheduleSelectorPeriodicBackgroundRefresh("spaces-panel-opened");
       return;
     }
 
@@ -2017,10 +2027,113 @@
       clearTimeout(homeChatListBackgroundRefreshTimer);
       homeChatListBackgroundRefreshTimer = null;
     }
+    if (selectorPeriodicBackgroundRefreshTimer) {
+      clearTimeout(selectorPeriodicBackgroundRefreshTimer);
+      selectorPeriodicBackgroundRefreshTimer = null;
+    }
+    selectorPeriodicBackgroundRefreshRun += 1;
     chatListBackgroundRefreshRun += 1;
     homeChatListBackgroundRefreshRun += 1;
 
     try { document.documentElement.dataset.mmlcNativeDomActionCancelled = String(reason || "cancel-native-actions"); } catch {}
+  }
+
+  function selectorBackgroundRefreshIntervalMs() {
+    const seconds = Number(combinedFeatureConfig.selectorBackgroundRefreshSeconds);
+    if (!Number.isFinite(seconds) || seconds <= 0) return 0;
+    return Math.max(5000, Math.min(3600_000, Math.round(seconds * 1000)));
+  }
+
+  function scheduleSelectorPeriodicBackgroundRefresh(reason = "selector-periodic") {
+    if (selectorPeriodicBackgroundRefreshTimer) {
+      clearTimeout(selectorPeriodicBackgroundRefreshTimer);
+      selectorPeriodicBackgroundRefreshTimer = null;
+    }
+
+    const intervalMs = selectorBackgroundRefreshIntervalMs();
+    if (!intervalMs || !isMobileLayoutEnabled()) return;
+    if (!currentPanel || (currentMode !== "spaces" && currentMode !== "rooms")) return;
+
+    const run = ++selectorPeriodicBackgroundRefreshRun;
+    selectorPeriodicBackgroundRefreshTimer = setTimeout(() => {
+      selectorPeriodicBackgroundRefreshTimer = null;
+      runSelectorPeriodicBackgroundRefresh(run, reason).catch(error => {
+        console.warn("Smart Element selector periodic background refresh failed.", error);
+        scheduleSelectorPeriodicBackgroundRefresh("periodic-error");
+      });
+    }, intervalMs);
+  }
+
+  async function runSelectorPeriodicBackgroundRefresh(run, reason = "selector-periodic") {
+    if (run !== selectorPeriodicBackgroundRefreshRun) return;
+    if (!isMobileLayoutEnabled() || !currentPanel || (currentMode !== "spaces" && currentMode !== "rooms")) return;
+
+    const token = renderToken;
+    try {
+      if (currentPanel === "spaces") {
+        await refreshSpacesPanel(token, { showProgress: false, delayMs: 0, backgroundRefresh: true });
+      } else if (currentPanel === "home-chats") {
+        scheduleHomeChatListBackgroundRefresh(token, { delayMs: 0, periodic: true });
+      } else if (currentPanel === "chats") {
+        scheduleChatListBackgroundRefresh(token, currentSpaceLabel, currentSpacePathForPanel(currentSpaceLabel), { delayMs: 0, periodic: true });
+      } else if (currentPanel === "space-detail") {
+        scheduleSpaceDetailBackgroundRefresh(token, currentSpaceLabel, currentSpacePathForPanel(currentSpaceLabel), { delayMs: 0, periodic: true });
+      }
+    } finally {
+      if (run === selectorPeriodicBackgroundRefreshRun) {
+        scheduleSelectorPeriodicBackgroundRefresh(reason || "selector-periodic");
+      }
+    }
+  }
+
+  function scheduleSpaceDetailBackgroundRefresh(token, selectedLabel, path, options = {}) {
+    if (!isMobileLayoutEnabled()) return;
+    const delayMs = Math.max(0, Math.min(2500, Number(options.delayMs || 0)));
+    const run = beginNativeDomAction("space-detail-background-refresh");
+    const labelSnapshot = normalizeSpaces(selectedLabel || currentSpaceLabel || "");
+    const pathSnapshot = cloneSpacePathForBackground(path || currentSpacePathForPanel(labelSnapshot));
+
+    setTimeout(() => {
+      refreshSpaceDetailInBackground(run, token, labelSnapshot, pathSnapshot).catch(error => {
+        console.warn("Smart Element space-detail background refresh failed.", error);
+      });
+    }, delayMs);
+  }
+
+  async function refreshSpaceDetailInBackground(actionRun, token, selectedLabel, pathSnapshot) {
+    if (isNativeDomActionCancelled(actionRun)) return;
+    if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "space-detail") return;
+    if (!spacePanelStillMatchesSnapshot(selectedLabel, pathSnapshot)) return;
+
+    const previousLabel = currentSpaceLabel;
+    const previousPath = currentSpacePath;
+    if (selectedLabel) currentSpaceLabel = selectedLabel;
+    if (Array.isArray(pathSnapshot) && pathSnapshot.length) currentSpacePath = pathSegmentsFromSpacePath(pathSnapshot);
+
+    try {
+      const subspaces = await collectSubspacesForCurrentSpace({
+        token,
+        forceOpen: true,
+        preferLeftRail: true,
+        minimizeLeftPaneAfterSelect: true,
+        actionRun
+      });
+      if (isNativeDomActionCancelled(actionRun)) return;
+      if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "space-detail") return;
+      if (!spacePanelStillMatchesSnapshot(selectedLabel, pathSnapshot)) return;
+      if (!subspaces.length) return;
+
+      const cacheKey = spaceDetailCacheKey(currentSpacePathForPanel(currentSpaceLabel), currentSpaceLabel);
+      cacheListItems(cacheKey, subspaces);
+      renderSpaceDetailList(subspaces, token);
+      showPanelProgress(false);
+      persistViewStateSoon();
+    } finally {
+      if (currentPanel !== "space-detail" || token !== renderToken) {
+        currentSpaceLabel = previousLabel;
+        currentSpacePath = previousPath;
+      }
+    }
   }
 
   function scheduleHomeChatListBackgroundRefresh(token, options = {}) {
@@ -2054,6 +2167,7 @@
     renderHomeChatsList(chats, token);
     showPanelProgress(false);
     persistViewStateSoon();
+    scheduleSelectorPeriodicBackgroundRefresh("home-chats-updated");
   }
 
   function scheduleChatListBackgroundRefresh(token, selectedLabel, path, options = {}) {
@@ -2134,6 +2248,7 @@
       renderChatsList(chatItems, token);
       showPanelProgress(false);
       persistViewStateSoon();
+      scheduleSelectorPeriodicBackgroundRefresh("space-chats-updated");
     } finally {
       if (currentPanel !== "chats" || token !== renderToken) {
         currentSpaceLabel = previousLabel;
@@ -2211,7 +2326,8 @@
       type: "start",
       label: "Startseite",
       element: findStartPageControl(),
-      icon: "H"
+      icon: "H",
+      unread: cloneUnreadState(startPageUnreadState())
     }, ...sortedSpaces, makeCreateTile("space")];
 
     renderList(items, {
@@ -2327,6 +2443,7 @@
     if (!manualRefresh) {
       showPanelProgress(false);
       persistViewStateSoon();
+      scheduleSelectorPeriodicBackgroundRefresh("space-detail-opened");
       return;
     }
 
@@ -2359,6 +2476,7 @@
     renderSpaceDetailList(finalSubspaces, token);
     showPanelProgress(false);
     persistViewStateSoon();
+    scheduleSelectorPeriodicBackgroundRefresh("space-detail-manual-refresh");
   }
 
   async function collectSubspacesForCurrentSpace(options = {}) {
@@ -2366,10 +2484,12 @@
       const token = options.token || renderToken;
       const navigationToken = options.navigationToken;
 
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
       await ensureCurrentSpaceOverview({
         forceOpen: Boolean(options.forceOpen),
         preferLeftRail: Boolean(options.preferLeftRail),
         minimizeLeftPaneAfterSelect: Boolean(options.minimizeLeftPaneAfterSelect),
+        actionRun: options.actionRun,
         // For the companion's space-detail view, a parent overview that merely
         // contains the selected subspace is not sufficient. Element sometimes
         // leaves the parent overview visible after navigation from a chat/mobile
@@ -2380,7 +2500,9 @@
       if (navigationToken && !isCurrentChooserNavigation(navigationToken)) return [];
       if (token !== renderToken || currentPanel !== "space-detail") return [];
 
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
       await forceLoadSpaceOverviewContent();
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
       if (navigationToken && !isCurrentChooserNavigation(navigationToken)) return [];
       if (token !== renderToken || currentPanel !== "space-detail") return [];
 
@@ -2519,6 +2641,7 @@
       showPanelProgress(false);
       persistViewStateSoon();
       scheduleHomeChatListBackgroundRefresh(token, { delayMs: 520 });
+      scheduleSelectorPeriodicBackgroundRefresh("home-chats-opened");
       return;
     }
 
@@ -2534,6 +2657,7 @@
     renderHomeChatsList(finalChats, token);
     showPanelProgress(false);
     persistViewStateSoon();
+    scheduleSelectorPeriodicBackgroundRefresh("home-chats-manual-refresh");
   }
 
   async function collectHomeCenterPaneChats(options = {}) {
@@ -2648,6 +2772,7 @@
       showPanelProgress(false);
       persistViewStateSoon();
       scheduleChatListBackgroundRefresh(token, selectedLabel, path, { delayMs: 520 });
+      scheduleSelectorPeriodicBackgroundRefresh("space-chats-opened");
       return;
     }
 
@@ -2672,6 +2797,7 @@
     renderChatsList(finalChatItems, token);
     showPanelProgress(false);
     persistViewStateSoon();
+    scheduleSelectorPeriodicBackgroundRefresh("space-chats-manual-refresh");
   }
 
   function renderChatsList(chatItems, token) {
@@ -3372,9 +3498,19 @@
     return { ...item, unread: cloneUnreadState(unread) };
   }
 
+  function startPageUnreadState() {
+    return directUnreadForSpacePath([
+      { label: "Spaces", type: "root" },
+      { label: "Startseite", type: "start" }
+    ], "Startseite");
+  }
+
   function enrichSpaceItemsWithUnread(items) {
     return (items || []).map(item => {
-      if (!item || item.type === "start" || /^create-/.test(String(item.type || ""))) return item;
+      if (!item || /^create-/.test(String(item.type || ""))) return item;
+      if (item.type === "start") {
+        return { ...item, unread: cloneUnreadState(mergeSameUnreadStates(item.unread, startPageUnreadState())) };
+      }
       const unread = directUnreadForSpaceItem(item);
       return { ...item, unread: cloneUnreadState(mergeSameUnreadStates(item.unread, unread)) };
     });
@@ -3424,12 +3560,14 @@
 
   function unreadForBreadcrumbSegment(path, index) {
     const segment = path?.[index];
-    if (!segment || segment.type === "root" || segment.type === "start") return null;
+    if (!segment || segment.type === "root") return null;
+    if (segment.type === "start") return startPageUnreadState();
     const spacePath = path.slice(0, index + 1);
     return directUnreadForSpacePath(spacePath, segment.label);
   }
 
   function panelTitleUnreadState(panelType, label) {
+    if (panelType === "home-chats") return startPageUnreadState();
     if (panelType !== "space-detail" && panelType !== "chats") return null;
     return directUnreadForSpacePath(currentSpacePathForPanel(label || currentSpaceLabel), label || currentSpaceLabel);
   }
@@ -5001,6 +5139,11 @@
     showPanelProgress(false);
     document.documentElement.classList.remove("mmlc-panel-open");
     currentPanel = "";
+    if (selectorPeriodicBackgroundRefreshTimer) {
+      clearTimeout(selectorPeriodicBackgroundRefreshTimer);
+      selectorPeriodicBackgroundRefreshTimer = null;
+    }
+    selectorPeriodicBackgroundRefreshRun += 1;
 
     if (!options.skipModeRestore && (currentMode === "spaces" || currentMode === "rooms")) {
       setMode(panelReturnMode || "normal", { closeThread: false, allowChooserExit: Boolean(options.force) });

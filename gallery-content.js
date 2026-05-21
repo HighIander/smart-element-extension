@@ -3360,13 +3360,25 @@
     }
 
     for (const group of data.threads || []) {
-      if (group?.rootEventId) {
-        threadGroupsByRootEventId.set(group.rootEventId, {
-          ...group,
-          events: Array.isArray(group.events) ? group.events : []
-        });
-      }
+      if (!group?.rootEventId) continue;
+
+      const threadEvents = (Array.isArray(group.events) ? group.events : [])
+        .filter(item => isActualThreadTimelineItem(item, group.rootEventId));
+
+      if (!threadEvents.length) continue;
+
+      threadGroupsByRootEventId.set(group.rootEventId, {
+        ...group,
+        events: threadEvents
+      });
     }
+  }
+
+  function isActualThreadTimelineItem(item, rootEventId = "") {
+    if (!item?.eventId) return false;
+    const root = String(rootEventId || item.threadRootId || "");
+    if (!root || item.eventId === root) return false;
+    return item.relationType === "m.thread" || item.isThreadRelation === true || item.threadRootId === root;
   }
 
   async function rebuildMergedThreadView() {
@@ -3555,7 +3567,7 @@
   function buildMergedThreadBlocks(eventElements) {
     for (const group of threadGroupsByRootEventId.values()) {
       const allReplies = group.events
-        .filter(item => item?.eventId && item.eventId !== group.rootEventId)
+        .filter(item => isActualThreadTimelineItem(item, group.rootEventId))
         .sort((a, b) => (a.ts || 0) - (b.ts || 0));
       const replies = allReplies.filter(isRenderableThreadItem);
       const rootElement = eventElements.get(group.rootEventId);

@@ -1252,10 +1252,6 @@
           threadRootEvent?.event?.event_id ||
           ""
         );
-      const threadRootId =
-        (relationThreadRootId && relationThreadRootId !== eventId ? relationThreadRootId : "") ||
-        (sdkThreadRootId && sdkThreadRootId !== eventId ? sdkThreadRootId : "") ||
-        "";
 
       const replyToEventId =
         relatesTo["m.in_reply_to"]?.event_id ||
@@ -1273,6 +1269,17 @@
       const isThreadFallbackReply = Boolean(isThreadRelation && replyToEventId && threadFallbackFlag === true);
       const isMatrixReply = Boolean(replyToEventId && !isThreadFallbackReply);
       const matrixReplyToEventId = isMatrixReply ? replyToEventId : "";
+
+      // Only real Matrix thread relations may enter the merged-thread model.
+      // Element/Matrix SDK can still expose event.thread for ordinary rich replies
+      // to messages that are also thread roots. Treating those normal replies as
+      // thread messages hides their source tiles; image replies then disappear
+      // when Smart Element thread view is enabled. Therefore SDK-derived roots are
+      // used only when the event itself is an m.thread relation.
+      const threadRootId =
+        (isThreadRelation && relationThreadRootId && relationThreadRootId !== eventId ? relationThreadRootId : "") ||
+        (isThreadRelation && sdkThreadRootId && sdkThreadRootId !== eventId ? sdkThreadRootId : "") ||
+        "";
 
       const sender = event.getSender?.() || event.event?.sender || event.sender || "";
 

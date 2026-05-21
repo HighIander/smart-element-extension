@@ -90,3 +90,24 @@ h1 {
     color: #86efac;
   }
 }
+
+.feature-option-number {
+  display: grid;
+  gap: 6px;
+}
+
+.feature-number-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.feature-number-row input {
+  width: 96px;
+  padding: 6px 8px;
+}
+
+.feature-option-number small {
+  color: #64748b;
+  font-size: 12px;
+}

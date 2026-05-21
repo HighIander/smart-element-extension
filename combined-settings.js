@@ -27,6 +27,10 @@
     enableThreadView: true
   };
 
+  const DEFAULT_SELECTOR_REFRESH_SECONDS = 60;
+  const MIN_SELECTOR_REFRESH_SECONDS = 0;
+  const MAX_SELECTOR_REFRESH_SECONDS = 3600;
+
   const HOST_ID = "mcs-settings-host";
   const OVERLAY_ID = "mcs-settings-overlay";
   const DIALOG_ID = "mcs-settings-dialog";
@@ -65,6 +69,11 @@
     for (const key of FEATURE_KEYS) {
       normalized[key] = raw[key] !== false;
     }
+
+    const refreshRaw = Number(raw.selectorBackgroundRefreshSeconds);
+    normalized.selectorBackgroundRefreshSeconds = Number.isFinite(refreshRaw)
+      ? Math.max(MIN_SELECTOR_REFRESH_SECONDS, Math.min(MAX_SELECTOR_REFRESH_SECONDS, Math.round(refreshRaw)))
+      : DEFAULT_SELECTOR_REFRESH_SECONDS;
 
     return normalized;
   }
@@ -331,6 +340,34 @@
           width: 18px !important;
           height: 18px !important;
         }
+        .mcs-settings-number-option {
+          display: grid !important;
+          gap: 6px !important;
+          padding: 10px 12px !important;
+          border: 1px solid #d8dee8 !important;
+          border-radius: 12px !important;
+          background: #f8fafc !important;
+          color: #0f172a !important;
+          font: 600 14px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        }
+        .mcs-settings-number-row {
+          display: flex !important;
+          align-items: center !important;
+          gap: 8px !important;
+        }
+        .mcs-settings-number-row input {
+          width: 92px !important;
+          min-width: 92px !important;
+          height: 34px !important;
+          padding: 4px 8px !important;
+          border: 1px solid #cbd5e1 !important;
+          border-radius: 8px !important;
+          font: 600 14px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        }
+        .mcs-settings-subhint {
+          color: #64748b !important;
+          font: 12px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+        }
         .mcs-settings-hint {
           margin-top: 12px !important;
           color: #475569 !important;
@@ -350,6 +387,14 @@
                 <span>${escapeHtml(FEATURE_LABELS[key])}</span>
               </label>
             `).join("")}
+            <label class="mcs-settings-number-option">
+              <span>Space selector background update interval</span>
+              <span class="mcs-settings-number-row">
+                <input type="number" min="0" max="3600" step="5" data-mcs-setting="selectorBackgroundRefreshSeconds" value="${escapeHtml(config.selectorBackgroundRefreshSeconds)}">
+                <span>seconds</span>
+              </span>
+              <span class="mcs-settings-subhint">Set to 0 to disable periodic background updates. Default: 60 seconds.</span>
+            </label>
           </div>
           <div class="mcs-settings-hint">
             Changes are applied immediately where the current page already has the corresponding content script loaded.
@@ -374,6 +419,9 @@
       const key = input.getAttribute("data-mcs-feature");
       input.checked = config[key] !== false;
     }
+
+    const refreshInput = overlay.querySelector("[data-mcs-setting='selectorBackgroundRefreshSeconds']");
+    if (refreshInput) refreshInput.value = String(config.selectorBackgroundRefreshSeconds);
   }
 
   function bindDialogEvents(overlay, state) {
@@ -432,6 +480,19 @@
         }
       }, false);
     }
+
+    const refreshInput = overlay.querySelector("[data-mcs-setting='selectorBackgroundRefreshSeconds']");
+    refreshInput?.addEventListener("change", async event => {
+      stopEverywhere(event);
+      const value = Number(event.target.value);
+      const next = await setConfigPatch({
+        selectorBackgroundRefreshSeconds: Number.isFinite(value) ? Math.max(0, Math.min(3600, Math.round(value))) : DEFAULT_SELECTOR_REFRESH_SECONDS
+      });
+      if (activeDialogState === state && !state.closedExplicitly) {
+        state.config = next;
+        renderSettingsDialog(state, { forceFullRender: false });
+      }
+    }, false);
   }
 
   function escapeHtml(value) {
@@ -448,6 +509,7 @@
     FEATURE_KEYS: [...FEATURE_KEYS],
     FEATURE_LABELS: { ...FEATURE_LABELS },
     DEFAULT_FEATURES: { ...DEFAULT_FEATURES },
+    DEFAULT_SELECTOR_REFRESH_SECONDS,
     normalizeConfig,
     getConfig,
     setConfigPatch,

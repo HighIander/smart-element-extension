@@ -1678,3 +1678,98 @@ html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*
   min-height: 0 !important;
   height: auto !important;
 }
+
+/* Smart Element v35 composer bottom anchoring.
+   Keep the promoted room exactly inside the visual viewport and reserve the last
+   flex row for Element's composer. This prevents the textbox from drifting below
+   the page after gallery/thread re-rendering. */
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane body {
+  height: var(--mmlc-chat-viewport-height, 100dvh) !important;
+  max-height: var(--mmlc-chat-viewport-height, 100dvh) !important;
+  overflow: hidden !important;
+  overscroll-behavior: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane {
+  position: fixed !important;
+  inset: 0 auto auto 0 !important;
+  width: var(--mmlc-chat-viewport-width, 100vw) !important;
+  max-width: var(--mmlc-chat-viewport-width, 100vw) !important;
+  height: var(--mmlc-chat-viewport-height, 100dvh) !important;
+  max-height: var(--mmlc-chat-viewport-height, 100dvh) !important;
+  min-height: 0 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_body,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_body"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MainSplit,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MainSplit"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_timeline,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_timeline"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-timeline {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: none !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 0 !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-scroll,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [data-virtuoso-scroller="true"] {
+  flex: 1 1 0 !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  margin-bottom: 0 !important;
+  padding-bottom: 0 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  overscroll-behavior-y: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane > .mx_MessageComposer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane > [class~="mx_MessageComposer"] {
+  position: relative !important;
+  bottom: auto !important;
+  flex: 0 0 auto !important;
+  min-height: 48px !important;
+  max-height: min(38dvh, calc(var(--mmlc-chat-viewport-height, 100dvh) * 0.38)) !important;
+  margin-top: 0 !important;
+  margin-bottom: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: max(3px, env(safe-area-inset-bottom, 0px)) !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  background: #fff !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer .mx_MessageComposer_row,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [class*="MessageComposer_row"] {
+  min-height: 44px !important;
+  max-height: min(34dvh, calc(var(--mmlc-chat-viewport-height, 100dvh) * 0.34)) !important;
+  padding-top: 2px !important;
+  padding-bottom: 2px !important;
+  align-items: center !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [contenteditable="true"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [role="textbox"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer textarea {
+  min-height: 42px !important;
+  line-height: 20px !important;
+  padding: 9px 10px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+}
