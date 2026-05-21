@@ -603,6 +603,21 @@ html.mmlc-mode-thread #mmlc-toolbar-hamburger {
   object-fit: cover;
 }
 
+.mmlc-avatar-load-failed {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: #e0f2fe !important;
+  color: #075985 !important;
+  font: 900 18px/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+}
+
+.mmlc-toolbar-avatar.mmlc-avatar-load-failed,
+.mmlc-breadcrumb-avatar.mmlc-avatar-load-failed,
+.mmlc-panel-title-avatar.mmlc-avatar-load-failed {
+  font-size: 10px !important;
+}
+
 .mmlc-list-body {
   min-width: 0;
   width: 100%;
@@ -1155,4 +1170,511 @@ html.mmlc-feature-disabled #mmlc-toolbar,
 html.mmlc-feature-disabled #mmlc-toolbar-hamburger,
 html.mmlc-feature-disabled #mmlc-panel {
   display: none !important;
+}
+
+/* Temporary native Element parse layout.
+   Firefox Android portrait often keeps Element's room list / SpaceHierarchy DOM
+   unmounted while the viewport is narrow. During Smart Element parsing we make
+   the native panes visible again and request a desktop-width layout viewport
+   from JavaScript. This block deliberately appears after the normal mobile
+   hiding rules so it can override them only while parsing. */
+html.mmlc-native-parse-layout #matrixchat,
+html.mmlc-native-parse-layout .mx_MatrixChat_wrapper,
+html.mmlc-native-parse-layout .mx_MatrixChat,
+html.mmlc-native-parse-layout [data-group="true"] {
+  min-width: 980px !important;
+}
+
+html.mmlc-native-parse-layout .mx_SpacePanel,
+html.mmlc-native-parse-layout [class*="SpacePanel"],
+html.mmlc-native-parse-layout #left-panel,
+html.mmlc-native-parse-layout [data-testid="left-panel"],
+html.mmlc-native-parse-layout #left-panel .mx_LeftPanel,
+html.mmlc-native-parse-layout #left-panel .mx_LeftPanel_panel,
+html.mmlc-native-parse-layout #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-native-parse-layout #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-native-parse-layout #left-panel .mx_RoomListPanel,
+html.mmlc-native-parse-layout #left-panel [aria-label="Chatliste"],
+html.mmlc-native-parse-layout #left-panel [aria-label="Room list"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-native-parse-layout #left-panel,
+html.mmlc-native-parse-layout [data-testid="left-panel"] {
+  flex: 0 0 360px !important;
+  width: 360px !important;
+  min-width: 280px !important;
+  max-width: 460px !important;
+  overflow: visible !important;
+}
+
+html.mmlc-native-parse-layout #left-panel .mx_LeftPanel_panel,
+html.mmlc-native-parse-layout #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-native-parse-layout #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-native-parse-layout #left-panel .mx_RoomListPanel {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+html.mmlc-native-parse-layout .mx_RoomView,
+html.mmlc-native-parse-layout [data-testid="room-view"],
+html.mmlc-native-parse-layout [class*="RoomView"],
+html.mmlc-native-parse-layout .mx_SpaceRoomView,
+html.mmlc-native-parse-layout [class*="SpaceRoomView"],
+html.mmlc-native-parse-layout .mx_MainSplit,
+html.mmlc-native-parse-layout [class*="MainSplit"],
+html.mmlc-native-parse-layout .mx_RightPanel_ResizeWrapper,
+html.mmlc-native-parse-layout [class*="RightPanel_ResizeWrapper"],
+html.mmlc-native-parse-layout .mx_RightPanel,
+html.mmlc-native-parse-layout [class*="RightPanel"],
+html.mmlc-native-parse-layout .mx_SpaceHierarchy,
+html.mmlc-native-parse-layout [class*="SpaceHierarchy"],
+html.mmlc-native-parse-layout .mx_SpaceRoomDirectory,
+html.mmlc-native-parse-layout [class*="SpaceRoomDirectory"],
+html.mmlc-native-parse-layout [data-mmlc-native-parse-forced="true"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  transform: none !important;
+}
+
+html.mmlc-native-parse-layout .mmlc-promoted-chat-pane,
+html.mmlc-native-parse-layout .mmlc-promoted-thread-wrapper,
+html.mmlc-native-parse-layout .mmlc-promoted-thread-shell,
+html.mmlc-native-parse-layout .mmlc-promoted-thread-pane {
+  position: relative !important;
+  inset: auto !important;
+  z-index: auto !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
+}
+
+/* Prevent Smart Element navigation taps from being interpreted as text-entry gestures on mobile browsers. */
+#mmlc-toolbar,
+#mmlc-toolbar *,
+#mmlc-toolbar-hamburger,
+#mmlc-toolbar-hamburger *,
+#mmlc-panel,
+#mmlc-panel * {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* Smart Element mobile chat composer rescue.
+   Element's composer contains several nested components whose class names all
+   include "MessageComposer". Earlier broad fallback selectors deliberately keep
+   the native composer visible, but on very narrow Firefox Android layouts they
+   can leave the formatting toolbar and action buttons consuming all horizontal
+   space. The rules below restore a stable mobile layout: editor first, action
+   buttons at the right, no horizontal overflow, and a visible text box at the
+   bottom of the promoted chat pane. */
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessageComposer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane > [class*="MessageComposer"] {
+  position: relative !important;
+  inset: auto !important;
+  bottom: auto !important;
+  left: auto !important;
+  right: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  flex: 0 0 auto !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+  background: #ffffff !important;
+  box-sizing: border-box !important;
+  padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  z-index: 2147483002 !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessageComposer_wrapper,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessageComposer_wrapper"] {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessageComposer_row,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessageComposer_row"] {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: flex-end !important;
+  justify-content: flex-start !important;
+  gap: 4px !important;
+  direction: ltr !important;
+  box-sizing: border-box !important;
+  overflow: visible !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_SendWysiwygComposer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="SendWysiwygComposer"] {
+  order: 1 !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  width: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_FormattingButtons,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="FormattingButtons"] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_WysiwygComposer_Editor,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="WysiwygComposer_Editor"] {
+  order: 1 !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  flex: 1 1 auto !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_WysiwygComposer_Editor_container,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="WysiwygComposer_Editor_container"] {
+  flex: 1 1 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  display: block !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_WysiwygComposer_Editor_content,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="WysiwygComposer_Editor_content"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [contenteditable="true"][role="textbox"] {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  min-height: 38px !important;
+  max-height: 30dvh !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  box-sizing: border-box !important;
+  direction: auto !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_EmojiButton,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="EmojiButton"] {
+  flex: 0 0 36px !important;
+  width: 36px !important;
+  min-width: 36px !important;
+  max-width: 36px !important;
+  height: 36px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessageComposer_actions,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessageComposer_actions"] {
+  order: 2 !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 132px !important;
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 2px !important;
+  margin-left: 2px !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  direction: ltr !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessageComposer_button,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessageComposer_button"] {
+  flex: 0 0 34px !important;
+  width: 34px !important;
+  min-width: 34px !important;
+  max-width: 34px !important;
+  height: 34px !important;
+  min-height: 34px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+/* Smart Element v23 chat layout stabilizer.
+   Firefox Android portrait mode can mount the timeline before the complete
+   RoomView/composer tree is measurable. The promoted node must therefore keep
+   the native RoomView as a vertical flex shell and reserve a stable bottom row
+   for Element's own composer. These rules intentionally use Smart Element marker
+   classes added by matrix-mobile-content.js, so they avoid forcing unrelated
+   Element panels into the same layout. */
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  justify-content: stretch !important;
+  overflow: hidden !important;
+  contain: none !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomHeader,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomHeader"] {
+  flex: 0 0 auto !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  z-index: 2147483003 !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_body,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_body"] {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_body > *,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_body"] > *,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MainSplit,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MainSplit"] {
+  min-height: 0 !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  flex: 1 1 auto !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-timeline,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_TimelinePanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="TimelinePanel"] {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-scroll,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_ScrollPanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="ScrollPanel"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessagePanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessagePanel"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [data-virtuoso-scroller="true"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [role="log"] {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  -webkit-overflow-scrolling: touch !important;
+  overscroll-behavior-y: contain !important;
+  touch-action: pan-y !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MessagePanel_myReadMarker,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MessagePanel_myReadMarker"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="readMarker"] {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-message-list-compact {
+  height: auto !important;
+  min-height: 0 !important;
+  padding-bottom: 0 !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_messageListWrapper,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_messageListWrapper"] {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane > .mx_MessageComposer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane > [class~="mx_MessageComposer"] {
+  flex: 0 0 auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  overflow: visible !important;
+  pointer-events: auto !important;
+  background: #ffffff !important;
+  box-sizing: border-box !important;
+  margin-bottom: 6px !important;
+  padding-bottom: max(10px, env(safe-area-inset-bottom, 0px)) !important;
+  z-index: 2147483004 !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer .mx_MessageComposer_row,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [class*="MessageComposer_row"] {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr) auto !important;
+  grid-auto-flow: column !important;
+  align-items: end !important;
+  column-gap: 4px !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100vw !important;
+  overflow: visible !important;
+  direction: ltr !important;
+  box-sizing: border-box !important;
+  padding-bottom: 2px !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer .mx_SendWysiwygComposer,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [class*="SendWysiwygComposer"] {
+  grid-column: 1 !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: visible !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer .mx_MessageComposer_actions,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [class*="MessageComposer_actions"] {
+  grid-column: 2 !important;
+  min-width: 36px !important;
+  max-width: 144px !important;
+  width: auto !important;
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  justify-content: flex-end !important;
+  gap: 2px !important;
+  overflow: visible !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [contenteditable="true"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer [role="textbox"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mmlc-chat-composer textarea {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  min-height: 38px !important;
+  max-height: 28dvh !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  box-sizing: border-box !important;
+}
+
+/* Smart Element chat viewport scroll guard.
+   The promoted chat pane must be the viewport-sized shell, with only the
+   timeline scrolling. Element may keep a large virtualized message-list height,
+   so non-timeline rows must not flex into the white space between messages and
+   the composer. */
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane {
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 0 !important;
+  width: var(--mmlc-chat-viewport-width, 100vw) !important;
+  height: var(--mmlc-chat-viewport-height, 100dvh) !important;
+  min-height: 0 !important;
+  max-height: var(--mmlc-chat-viewport-height, 100dvh) !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_MainSplit,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="MainSplit"] {
+  display: flex !important;
+  flex-direction: column !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_timeline,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_timeline"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane main.mx_RoomView_timeline {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_AuxPanel,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="AuxPanel"],
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_statusArea,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_statusArea"] {
+  flex: 0 0 auto !important;
+  min-height: 0 !important;
+  height: auto !important;
+  max-height: 40vh !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane .mx_RoomView_statusAreaBox,
+html.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane [class*="RoomView_statusAreaBox"] {
+  min-height: 0 !important;
+  height: auto !important;
 }

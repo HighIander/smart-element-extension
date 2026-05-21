@@ -1,6 +1,18 @@
-MIT License
+Smart Element License
 
 Copyright (c) 2026 Thomas Kluge
+
+The software code, documentation, and extension assets in this package are
+licensed under the MIT License below, with this explicit exception:
+
+The name "Smart Element" is excluded from the MIT License grant and remains
+copyright © Thomas Kluge, 2026. Permission to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of this software does not include
+permission to use the name "Smart Element" or a confusingly similar name as
+the name of a derived, redistributed, or competing software project without
+separate written permission from Thomas Kluge.
+
+MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

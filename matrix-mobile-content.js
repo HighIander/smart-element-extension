@@ -68,6 +68,7 @@
   let currentSpaceLabel = "";
   let currentChatLabel = "";
   let currentChatAvatarSrc = "";
+  let currentChatHref = "";
   let currentSpaceElement = null;
   let currentSpaceSource = "";
   let currentSpacePath = [];
@@ -75,16 +76,25 @@
   let currentSpaceTop = 0;
   let renderToken = 0;
   let suppressThreadAutoUntil = 0;
+  let suppressThreadOpenUntil = 0;
   let lastThreadTriggerClickAt = 0;
   let observerFlushTimer = null;
   let spacesPanelRefreshTimer = null;
+  let chatListBackgroundRefreshTimer = null;
+  let homeChatListBackgroundRefreshTimer = null;
+  let chatListBackgroundRefreshRun = 0;
+  let homeChatListBackgroundRefreshRun = 0;
+  let nativeDomActionRun = 0;
   let panelProgressVisibleSince = 0;
   let panelProgressHideTimer = null;
   let panelProgressIconLoadRun = 0;
   let middlePaneExpandTimer = null;
   let threadClosePositionFrame = null;
   let threadClosePositionTimer = null;
+  let keyboardDismissRun = 0;
   let chooserNavigationToken = 0;
+  let chooserReturnFromChatAt = 0;
+  let chooserReturnNativeSpaceRestoreRun = 0;
   let hierarchyBarSignature = "";
   let hierarchyCachePersistTimer = null;
   let viewStatePersistTimer = null;
@@ -111,6 +121,15 @@
   let mobileMaintenanceIntervalId = null;
   let originalViewportMetaContent = undefined;
   let viewportMetaCreatedByMobileRuntime = false;
+  let nativeParseLayoutDepth = 0;
+  let nativeParseViewportOriginalContent = undefined;
+  let nativeParseViewportCreated = false;
+  const nativeParseForcedStyles = new Map();
+  const nativeReturnLeftPaneForcedStyles = new Map();
+  const chatViewportForcedStyles = new Map();
+  let chatViewportMetricsFrame = null;
+  let selectorReturnNativeLayoutRun = 0;
+  let selectorReturnRestoreRunning = false;
 
 
   function scheduleBoot() {
@@ -188,6 +207,123 @@
     }
   }
 
+
+  function isTextEntryElement(element) {
+    if (!(element instanceof Element)) return false;
+
+    const tag = element.tagName?.toLowerCase?.() || "";
+    if (tag === "textarea") return true;
+
+    if (tag === "input") {
+      const type = String(element.getAttribute("type") || "text").toLowerCase();
+      return !/^(button|checkbox|radio|range|color|file|image|reset|submit|hidden)$/i.test(type);
+    }
+
+    if (element.isContentEditable) return true;
+    if (element.getAttribute("contenteditable") === "true") return true;
+    if (element.getAttribute("role") === "textbox") return true;
+
+    return false;
+  }
+
+  function blurActiveTextEntry() {
+    const active = document.activeElement;
+    if (!isTextEntryElement(active)) return false;
+
+    try {
+      active.blur();
+    } catch {}
+
+    try {
+      if (window.getSelection?.()?.type === "Caret") window.getSelection().removeAllRanges();
+    } catch {}
+
+    return true;
+  }
+
+  function keyboardDismissFocusCatcher() {
+    let catcher = document.getElementById("mmlc-keyboard-dismiss-focus-catcher");
+    if (catcher instanceof HTMLElement) return catcher;
+
+    catcher = document.createElement("button");
+    catcher.id = "mmlc-keyboard-dismiss-focus-catcher";
+    catcher.type = "button";
+    catcher.tabIndex = -1;
+    catcher.setAttribute("aria-hidden", "true");
+    catcher.className = "mmlc";
+    catcher.style.position = "fixed";
+    catcher.style.left = "0";
+    catcher.style.top = "0";
+    catcher.style.width = "1px";
+    catcher.style.height = "1px";
+    catcher.style.padding = "0";
+    catcher.style.border = "0";
+    catcher.style.opacity = "0";
+    catcher.style.pointerEvents = "none";
+    catcher.style.zIndex = "-1";
+    catcher.style.background = "transparent";
+    document.body?.appendChild(catcher);
+    return catcher;
+  }
+
+  function dismissVirtualKeyboard(reason = "navigation") {
+    keyboardDismissRun += 1;
+    const run = keyboardDismissRun;
+
+    const dismissOnce = () => {
+      if (run !== keyboardDismissRun || !isMobileLayoutEnabled()) return;
+
+      blurActiveTextEntry();
+
+      // Firefox Android can keep the soft keyboard open until focus moves to a
+      // non-text control. A hidden button is used as a harmless focus target; it
+      // does not open the keyboard and is blurred again immediately afterwards.
+      const catcher = keyboardDismissFocusCatcher();
+      try { catcher?.focus?.({ preventScroll: true }); } catch {}
+      try { catcher?.blur?.(); } catch {}
+
+      try {
+        if (window.getSelection?.()?.type === "Caret") window.getSelection().removeAllRanges();
+      } catch {}
+    };
+
+    dismissOnce();
+    for (const ms of [40, 120, 260, 520, 900]) {
+      setTimeout(dismissOnce, ms);
+    }
+  }
+
+  function suppressVirtualKeyboardForCompanionEvent(event) {
+    if (!isMobileLayoutEnabled()) return;
+
+    const target = event?.target instanceof Element ? event.target : null;
+    if (target && isTextEntryElement(target)) return;
+
+    // Firefox Android keeps the soft keyboard open when Element's composer/search
+    // stays focused while the overlay is tapped. Any tap inside the Smart Element
+    // UI, or any tap while the chooser panel is open, is navigation rather than
+    // text entry, so the native text field is explicitly blurred.
+    if ((target && target.closest(OWNED_SELECTOR)) || isChooserOpen()) {
+      dismissVirtualKeyboard("companion-event");
+    }
+  }
+
+  function installVirtualKeyboardSuppression() {
+    const options = { capture: true, passive: true };
+    for (const eventName of ["pointerdown", "touchstart", "mousedown", "click"]) {
+      document.addEventListener(eventName, suppressVirtualKeyboardForCompanionEvent, options);
+    }
+
+    // A delayed blur catches the case where Element focuses its composer/search
+    // after the tap handler has already run. It is intentionally limited to
+    // Smart Element UI interactions so normal composer taps still open the keyboard.
+    document.addEventListener("click", event => {
+      const target = event.target instanceof Element ? event.target : null;
+      if (!isMobileLayoutEnabled() || !target?.closest(OWNED_SELECTOR)) return;
+      dismissVirtualKeyboard("companion-click");
+    }, true);
+  }
+
   function openCombinedSettingsDialog(event) {
     if (event) {
       event.preventDefault?.();
@@ -255,9 +391,13 @@
     if (!mobileRuntimeListenersInstalled) {
       mobileRuntimeListenersInstalled = true;
       installThreadClickWatcher();
+      installVirtualKeyboardSuppression();
       window.addEventListener("resize", () => { if (isMobileLayoutEnabled()) updateHierarchyBar(); }, { passive: true });
       window.addEventListener("resize", () => { if (isMobileLayoutEnabled()) scheduleThreadClosePosition(); }, { passive: true });
       window.addEventListener("resize", () => { if (isMobileLayoutEnabled()) refreshPromotedPanesSoon(); }, { passive: true });
+      window.addEventListener("resize", () => { if (isMobileLayoutEnabled()) scheduleChatViewportMetricsUpdate(); }, { passive: true });
+      window.visualViewport?.addEventListener?.("resize", () => { if (isMobileLayoutEnabled()) scheduleChatViewportMetricsUpdate(); }, { passive: true });
+      window.visualViewport?.addEventListener?.("scroll", () => { if (isMobileLayoutEnabled()) scheduleChatViewportMetricsUpdate(); }, { passive: true });
       window.addEventListener("beforeunload", flushPersistentState);
       window.addEventListener("pagehide", flushPersistentState);
       document.addEventListener("visibilitychange", () => {
@@ -268,6 +408,7 @@
         setTimeout(updateHierarchyBar, 180);
         setTimeout(positionThreadCloseButton, 180);
         setTimeout(refreshPromotedPanes, 180);
+        setTimeout(scheduleChatViewportMetricsUpdate, 180);
       }, { passive: true });
       mobileMaintenanceIntervalId = setInterval(() => {
         if (!isMobileLayoutEnabled()) return;
@@ -293,6 +434,16 @@
       clearTimeout(spacesPanelRefreshTimer);
       spacesPanelRefreshTimer = null;
     }
+    if (chatListBackgroundRefreshTimer) {
+      clearTimeout(chatListBackgroundRefreshTimer);
+      chatListBackgroundRefreshTimer = null;
+    }
+    if (homeChatListBackgroundRefreshTimer) {
+      clearTimeout(homeChatListBackgroundRefreshTimer);
+      homeChatListBackgroundRefreshTimer = null;
+    }
+    chatListBackgroundRefreshRun += 1;
+    homeChatListBackgroundRefreshRun += 1;
     if (panelProgressHideTimer) {
       clearTimeout(panelProgressHideTimer);
       panelProgressHideTimer = null;
@@ -309,17 +460,24 @@
       clearTimeout(threadClosePositionTimer);
       threadClosePositionTimer = null;
     }
+    if (chatViewportMetricsFrame) {
+      cancelAnimationFrame(chatViewportMetricsFrame);
+      chatViewportMetricsFrame = null;
+    }
 
     closePanel({ force: true, skipModeRestore: true });
     clearPromotedChatPane();
     clearThreadPanelMarks();
     clearForcedMiddlePaneState();
     clearNativeMobileMarks();
+    restoreChatViewportScrollLock();
     restoreViewportMeta();
+    restoreNativeReturnLeftPaneMinimize();
 
     document.getElementById("mmlc-toolbar")?.remove();
     document.getElementById("mmlc-toolbar-hamburger")?.remove();
     document.getElementById("mmlc-panel")?.remove();
+    document.getElementById("mmlc-keyboard-dismiss-focus-catcher")?.remove();
 
     document.documentElement.classList.remove(
       "mmlc-enabled",
@@ -348,6 +506,7 @@
   }
 
   function clearForcedMiddlePaneState() {
+    restoreNativeElementParsePanes();
     for (const element of document.querySelectorAll("[data-mmlc-forced-middle-pane]")) {
       element.removeAttribute("data-mmlc-forced-middle-pane");
       if (element instanceof HTMLElement) {
@@ -422,6 +581,732 @@
     } else if (originalViewportMetaContent !== undefined) {
       viewport.setAttribute("content", originalViewportMetaContent);
     }
+  }
+
+  async function withNativeElementParseLayout(callback, options = {}) {
+    if (typeof callback !== "function") return undefined;
+
+    const firstActivator = nativeParseLayoutDepth === 0;
+    nativeParseLayoutDepth += 1;
+
+    try {
+      if (firstActivator) {
+        activateNativeElementParseLayout(options);
+        await waitForNativeElementParseLayout(options);
+      }
+
+      return await callback();
+    } finally {
+      nativeParseLayoutDepth = Math.max(0, nativeParseLayoutDepth - 1);
+      if (nativeParseLayoutDepth === 0) {
+        deactivateNativeElementParseLayout();
+      }
+    }
+  }
+
+  async function withForcedNativePaneVisibility(callback, options = {}) {
+    if (typeof callback !== "function") return undefined;
+
+    const forceOptions = { ...options, forceDesktopWidth: false };
+    try {
+      forceNativeElementParsePanes(forceOptions);
+      dispatchNativeParseResize();
+      await nextAnimationFrame();
+      return await callback();
+    } finally {
+      if (nativeParseLayoutDepth === 0) {
+        restoreNativeElementParsePanes();
+        dispatchNativeParseResize();
+      }
+    }
+  }
+
+  function clearStaleNativeParseLayout() {
+    if (nativeParseLayoutDepth !== 0) return;
+    if (!document.documentElement.classList.contains("mmlc-native-parse-layout") && !nativeParseForcedStyles.size) return;
+    deactivateNativeElementParseLayout();
+  }
+
+  function activateNativeElementParseLayout(options = {}) {
+    document.documentElement.classList.add("mmlc-native-parse-layout");
+    document.documentElement.dataset.mmlcNativeParseReason = String(options.reason || "parse");
+
+    // Android portrait often makes Element choose a narrow/mobile layout where
+    // the native left, middle, and right panes are either collapsed or not
+    // mounted. A content script cannot reliably overwrite window.innerWidth, but
+    // on mobile browsers the viewport meta tag controls the CSS layout viewport.
+    // We therefore temporarily request a desktop-width viewport and also force
+    // the native Element pane containers to a visible flex layout.
+    const desiredWidth = Math.max(1120, Math.min(1600, Number(options.width || 1280)));
+    let viewport = document.querySelector('meta[name="viewport"]');
+    if (!viewport) {
+      viewport = document.createElement("meta");
+      viewport.name = "viewport";
+      document.head?.appendChild(viewport);
+      nativeParseViewportCreated = true;
+      nativeParseViewportOriginalContent = null;
+    } else if (nativeParseViewportOriginalContent === undefined) {
+      nativeParseViewportOriginalContent = viewport.getAttribute("content");
+      nativeParseViewportCreated = false;
+    }
+
+    viewport.setAttribute("content", `width=${desiredWidth}, initial-scale=1, viewport-fit=cover`);
+    forceNativeElementParsePanes(options);
+    dispatchNativeParseResize();
+  }
+
+  async function waitForNativeElementParseLayout(options = {}) {
+    const waitMs = Math.max(260, Math.min(1400, Number(options.waitMs || 640)));
+    for (let pass = 0; pass < 3; pass += 1) {
+      await nextAnimationFrame();
+      forceNativeElementParsePanes(options);
+      dispatchNativeParseResize();
+      await delay(Math.round(waitMs / 3));
+    }
+  }
+
+  function deactivateNativeElementParseLayout() {
+    document.documentElement.classList.remove("mmlc-native-parse-layout");
+    document.documentElement.removeAttribute("data-mmlc-native-parse-reason");
+
+    const viewport = document.querySelector('meta[name="viewport"]');
+    if (viewport) {
+      if (nativeParseViewportCreated) {
+        viewport.remove();
+      } else if (nativeParseViewportOriginalContent === null) {
+        viewport.removeAttribute("content");
+      } else if (nativeParseViewportOriginalContent !== undefined) {
+        viewport.setAttribute("content", nativeParseViewportOriginalContent);
+      }
+    }
+
+    restoreNativeElementParsePanes();
+    nativeParseViewportOriginalContent = undefined;
+    nativeParseViewportCreated = false;
+    dispatchNativeParseResize();
+  }
+
+  function dispatchNativeParseResize() {
+    try { window.dispatchEvent(new Event("resize")); } catch {}
+    try { window.visualViewport?.dispatchEvent?.(new Event("resize")); } catch {}
+  }
+
+  function forceNativeElementParsePanes(options = {}) {
+    const forceDesktopWidth = options.forceDesktopWidth !== false;
+    const rootSelectors = [
+      "#matrixchat",
+      ".mx_MatrixChat_wrapper",
+      ".mx_MatrixChat",
+      "[data-group='true']"
+    ];
+    const spaceSelectors = [
+      SPACE_PANEL_SELECTOR,
+      ".mx_SpaceTreeLevel"
+    ];
+    const leftSelectors = [
+      "#left-panel",
+      "[data-testid='left-panel']",
+      "#left-panel .mx_LeftPanel",
+      "#left-panel .mx_LeftPanel_panel",
+      "#left-panel .mx_LeftPanel_outerWrapper",
+      "#left-panel .mx_LeftPanel_wrapper",
+      "#left-panel .mx_RoomListPanel",
+      "#left-panel [aria-label='Chatliste']",
+      "#left-panel [aria-label='Room list']"
+    ];
+    const middleSelectors = [
+      ".mx_RoomView",
+      "[data-testid='room-view']",
+      "[class*='RoomView']",
+      ".mx_SpaceRoomView",
+      "[class*='SpaceRoomView']",
+      ".mx_MainSplit",
+      "[class*='MainSplit']",
+      ".mx_RoomView_wrapper",
+      "[class*='RoomView_wrapper']",
+      "[data-panel='true']:not(#left-panel):not([data-testid='left-panel'])"
+    ];
+    const rightSelectors = [
+      ".mx_RightPanel_ResizeWrapper",
+      "[class*='RightPanel_ResizeWrapper']",
+      ".mx_RightPanel",
+      "[class*='RightPanel']",
+      ".mx_SpaceHierarchy",
+      "[class*='SpaceHierarchy']",
+      ".mx_SpaceRoomDirectory",
+      "[class*='SpaceRoomDirectory']"
+    ];
+    const all = uniqueElements([
+      ...queryNativeParseElements(rootSelectors),
+      ...queryNativeParseElements(spaceSelectors),
+      ...queryNativeParseElements(leftSelectors),
+      ...queryNativeParseElements(middleSelectors),
+      ...queryNativeParseElements(rightSelectors)
+    ]).filter(element => element instanceof HTMLElement && !element.closest(OWNED_SELECTOR));
+
+    for (const element of all) {
+      rememberNativeParseStyle(element);
+      element.dataset.mmlcNativeParseForced = "true";
+      element.removeAttribute("inert");
+      element.style.visibility = "visible";
+      element.style.opacity = "1";
+      element.style.pointerEvents = "auto";
+      element.style.transform = "none";
+    }
+
+    for (const element of queryNativeParseElements(rootSelectors)) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberNativeParseStyle(element);
+      element.style.display = "flex";
+      if (forceDesktopWidth) {
+        element.style.minWidth = `${Math.max(1120, Number(options.width || 1280))}px`;
+      }
+      element.style.width = element.id === "matrixchat" ? element.style.width || "100%" : element.style.width;
+      element.style.overflow = "visible";
+    }
+
+    for (const element of queryNativeParseElements(spaceSelectors)) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberNativeParseStyle(element);
+      element.style.display = "flex";
+      element.style.visibility = "visible";
+      element.style.opacity = "1";
+      element.style.flexShrink = "0";
+    }
+
+    for (const element of queryNativeParseElements(leftSelectors)) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberNativeParseStyle(element);
+      element.style.display = "flex";
+      element.style.visibility = "visible";
+      element.style.opacity = "1";
+      element.style.flexShrink = "0";
+      if (element.matches("#left-panel, [data-testid='left-panel']")) {
+        element.style.flex = "0 0 360px";
+        element.style.width = "360px";
+        element.style.minWidth = "300px";
+        element.style.maxWidth = "460px";
+        element.style.overflow = "visible";
+      } else {
+        element.style.width = element.style.width || "100%";
+        element.style.maxWidth = element.style.maxWidth || "100%";
+      }
+    }
+
+    for (const element of queryNativeParseElements(middleSelectors)) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberNativeParseStyle(element);
+      element.style.display = "flex";
+      element.style.visibility = "visible";
+      element.style.opacity = "1";
+      element.style.pointerEvents = "auto";
+      element.style.position = element.classList.contains("mmlc-promoted-chat-pane") ? "relative" : element.style.position;
+      element.style.inset = element.classList.contains("mmlc-promoted-chat-pane") ? "auto" : element.style.inset;
+      element.style.zIndex = element.classList.contains("mmlc-promoted-chat-pane") ? "auto" : element.style.zIndex;
+      const isCenterDataPanel = element.matches("[data-panel='true']:not(#left-panel):not([data-testid='left-panel'])");
+      element.style.flex = element.style.flex || (isCenterDataPanel ? "1 1 0px" : "1 1 620px");
+      element.style.minWidth = isCenterDataPanel && !forceDesktopWidth ? "0px" : "420px";
+      element.style.maxWidth = "none";
+      element.style.width = element.style.width || "auto";
+      element.style.overflow = element.style.overflow || "visible";
+    }
+
+    for (const element of queryNativeParseElements(rightSelectors)) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberNativeParseStyle(element);
+      element.style.display = "flex";
+      element.style.visibility = "visible";
+      element.style.opacity = "1";
+      element.style.pointerEvents = "auto";
+      element.style.flex = element.style.flex || "0 0 360px";
+      element.style.width = element.style.width || "360px";
+      element.style.minWidth = element.style.minWidth || "280px";
+      element.style.maxWidth = element.style.maxWidth || "520px";
+      element.style.overflow = element.style.overflow || "visible";
+    }
+
+    const middlePane = findMiddlePanePanel();
+    if (middlePane instanceof Element) {
+      forceMiddlePaneOpen(middlePane);
+    }
+  }
+
+  function minimizeNativeLeftPaneForSpaceOverview(reason = "space-overview") {
+    // Element's Android portrait layout often keeps the native left room-list pane
+    // expanded after selecting a space. In that state the right-hand space
+    // hierarchy/detail pane is not rendered or remains stuck on the old chat.
+    // During explicit manual refreshes, hide only the native room-list pane while
+    // keeping the space rail and right/middle panes visible for parsing.
+    const selectors = [
+      "#left-panel",
+      "[data-testid='left-panel']",
+      "#left-panel .mx_LeftPanel",
+      "#left-panel .mx_LeftPanel_panel",
+      "#left-panel .mx_LeftPanel_outerWrapper",
+      "#left-panel .mx_LeftPanel_wrapper",
+      "#left-panel .mx_RoomListPanel",
+      "#left-panel [aria-label='Chatliste']",
+      "#left-panel [aria-label='Room list']"
+    ];
+
+    for (const element of queryNativeParseElements(selectors)) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberNativeParseStyle(element);
+      element.dataset.mmlcNativeLeftMinimized = String(reason || "space-overview");
+      element.removeAttribute("inert");
+      element.style.display = "none";
+      element.style.visibility = "hidden";
+      element.style.opacity = "0";
+      element.style.pointerEvents = "none";
+      element.style.flex = "0 0 0px";
+      element.style.flexShrink = "1";
+      element.style.width = "0px";
+      element.style.minWidth = "0px";
+      element.style.maxWidth = "0px";
+      element.style.overflow = "hidden";
+    }
+
+    dispatchNativeParseResize();
+  }
+
+
+  function scheduleNativeLeftPaneMinimizeOnSelectorReturn(label = currentSpaceLabel, reason = "return-to-selector") {
+    selectorReturnNativeLayoutRun += 1;
+    const run = selectorReturnNativeLayoutRun;
+    const selectedLabel = normalizeSpaces(label || currentSpaceLabel || "");
+
+    runNativeSelectorReturnRestoreSequence(selectedLabel, reason, run).catch(error => {
+      console.warn("Smart Element selector return restore failed.", error);
+    });
+  }
+
+  async function runNativeSelectorReturnRestoreSequence(label = currentSpaceLabel, reason = "return-to-selector", run = selectorReturnNativeLayoutRun) {
+    const checkpoints = [40, 760, 1640, 2680];
+    let previous = 0;
+
+    selectorReturnRestoreRunning = true;
+    try {
+      for (const checkpoint of checkpoints) {
+        await delay(Math.max(0, checkpoint - previous));
+        previous = checkpoint;
+
+        if (run !== selectorReturnNativeLayoutRun) return false;
+        if (currentMode !== "spaces" && currentMode !== "rooms") return false;
+
+        await minimizeNativeLeftPaneForSelectorReturn(label, reason, run);
+      }
+
+      return true;
+    } finally {
+      if (run === selectorReturnNativeLayoutRun) {
+        selectorReturnRestoreRunning = false;
+      }
+    }
+  }
+
+  async function minimizeNativeLeftPaneForSelectorReturn(label = currentSpaceLabel, reason = "return-to-selector", run = selectorReturnNativeLayoutRun) {
+    if (!isMobileLayoutEnabled()) return false;
+    if (currentMode !== "spaces" && currentMode !== "rooms") return false;
+    if (run !== selectorReturnNativeLayoutRun) return false;
+
+    const selectedLabel = normalizeSpaces(label || currentSpaceLabel || "");
+    const pathSnapshot = currentSpacePathSnapshotForLabel(selectedLabel);
+
+    clearStaleNativeParseLayout();
+    clearPromotedChatPane();
+    clearThreadPanelMarks();
+    closeNativeThreadPanel();
+    restoreChatViewportScrollLock();
+    restoreNativeReturnLeftPaneMinimize();
+    dismissVirtualKeyboard(reason || "return-to-selector");
+    requestElementLayoutRefresh(reason);
+    dispatchNativeParseResize();
+
+    if (selectedLabel && !/^(startseite|home)$/i.test(selectedLabel)) {
+      await withForcedNativePaneVisibility(async () => {
+        await ensureMiddlePaneExpanded({ allowStyleFallback: true });
+        await clickCurrentSpaceButtonInNativeSpaceRailTwice(selectedLabel, reason, run, { forceDesktopWidth: false });
+        if (run !== selectorReturnNativeLayoutRun) return false;
+        await ensureCurrentSpaceSelectedInLeftPanel(selectedLabel, {
+          reason: `${reason}:restore-selector-space`,
+          maxWaitMs: 1300,
+          forceDesktopWidth: false,
+          pathSnapshot
+        });
+        restoreSpacePathSnapshotIfDegraded(pathSnapshot, selectedLabel);
+
+        const clicked = clickNativeLeftPaneMinimizeButton(reason);
+        if (clicked) await delay(220);
+        return true;
+      }, { reason, width: 1280 });
+      if (run !== selectorReturnNativeLayoutRun) return false;
+    } else {
+      const clicked = clickNativeLeftPaneMinimizeButton(reason);
+      if (clicked) await delay(220);
+    }
+
+    if (!isNativeLeftPaneMinimized()) {
+      forceNativeLeftPaneMinimizedForSelectorReturn(reason);
+    }
+
+    restoreSpacePathSnapshotIfDegraded(pathSnapshot, selectedLabel);
+    clearStaleNativeParseLayout();
+    dispatchNativeParseResize();
+    return true;
+  }
+
+  async function clickCurrentSpaceButtonInNativeSpaceRailTwice(label = currentSpaceLabel, reason = "return-to-selector", run = selectorReturnNativeLayoutRun, options = {}) {
+    const clean = normalizeSpaces(label || currentSpaceLabel || "");
+    if (!clean || /^(startseite|home)$/i.test(clean)) return false;
+
+    let selected = false;
+    for (let pass = 0; pass < 2; pass += 1) {
+      if (run !== selectorReturnNativeLayoutRun) return selected;
+
+      forceNativeElementParsePanes({
+        reason: `${reason}:select-space-${pass + 1}`,
+        width: 1280,
+        forceDesktopWidth: options.forceDesktopWidth !== false
+      });
+      dispatchNativeParseResize();
+      await nextAnimationFrame();
+
+      selected = clickCurrentSpaceButtonInNativeSpaceRail(clean) || selected;
+      await delay(pass === 0 ? 220 : 320);
+    }
+
+    return selected;
+  }
+
+  function clickCurrentSpaceButtonInNativeSpaceRail(label = currentSpaceLabel) {
+    const clean = normalizeSpaces(label || currentSpaceLabel || "");
+    if (!clean || /^(startseite|home)$/i.test(clean)) return false;
+
+    const item = findSpaceItemForCurrentPathOrLabel(clean) || findSpaceItemByLabel(clean);
+    const activation = item?.element instanceof Element
+      ? findNativeLeftRailSpaceActivationElement(item.element)
+      : null;
+
+    if (!(activation instanceof Element) || activation.closest(OWNED_SELECTOR)) return false;
+    clickElement(activation);
+    return true;
+  }
+
+  function clickNativeLeftPaneMinimizeButton(reason = "return-to-selector") {
+    const button = findNativeLeftPaneMinimizeButton();
+    if (!(button instanceof Element)) return false;
+
+    try {
+      button.dataset.mmlcNativeLeftMinimizeClicked = String(reason || "return-to-selector");
+    } catch {}
+    clickElement(button);
+    return true;
+  }
+
+  function findNativeLeftPaneMinimizeButton() {
+    const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
+    if (!(leftPanel instanceof Element) || leftPanel.closest(OWNED_SELECTOR)) return null;
+
+    const exactSelectors = [
+      "button[aria-label='Menü für Spaces öffnen']",
+      "[role='button'][aria-label='Menü für Spaces öffnen']",
+      "button[aria-label='Open spaces menu']",
+      "[role='button'][aria-label='Open spaces menu']",
+      "button[aria-label='Open space menu']",
+      "[role='button'][aria-label='Open space menu']"
+    ];
+
+    for (const selector of exactSelectors) {
+      const control = leftPanel.querySelector(selector);
+      if (isSafeNativeLeftPaneMinimizeControl(control)) return control;
+    }
+
+    const header = leftPanel.querySelector("[data-testid='room-list-header'], header[aria-label], .mx_RoomListPanel header, [class*='header']");
+    const scopedRoots = [header, leftPanel].filter(root => root instanceof Element);
+
+    for (const root of scopedRoots) {
+      const candidates = uniqueElements(Array.from(root.querySelectorAll("button, [role='button']")))
+        .filter(isSafeNativeLeftPaneMinimizeControl)
+        .map(control => ({ control, score: nativeLeftPaneMinimizeControlScore(control, leftPanel, header) }))
+        .filter(entry => entry.score > 0)
+        .sort((a, b) => b.score - a.score);
+
+      if (candidates[0]?.control) return candidates[0].control;
+    }
+
+    return null;
+  }
+
+  function nativeLeftPaneMinimizeControlScore(control, leftPanel, header) {
+    if (!(control instanceof Element)) return 0;
+    const label = normalizeSpaces(`${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""} ${visibleText(control) || ""}`).toLowerCase();
+    if (!label) return 0;
+
+    let score = 0;
+    if (/^menü für spaces öffnen$/.test(label)) score += 220;
+    if (/^open spaces? menu$/.test(label)) score += 220;
+    if (/menü.*spaces|spaces.*menü|spaces?.*menu|menu.*spaces?/.test(label)) score += 140;
+    if (/space/.test(label) && /open|show|öffnen|anzeigen/.test(label)) score += 80;
+    if (/collapse|hide|minimi[sz]e|verberg|einklapp/.test(label) && /left|room|chat|pane|panel|liste|seitenleiste/.test(label)) score += 80;
+    if (header instanceof Element && header.contains(control)) score += 60;
+    if (leftPanel instanceof Element && leftPanel.contains(control)) score += 20;
+    return score;
+  }
+
+  function isSafeNativeLeftPaneMinimizeControl(control) {
+    if (!(control instanceof Element)) return false;
+    if (control.closest(OWNED_SELECTOR)) return false;
+    if (!isRendered(control)) return false;
+    if (!control.closest("#left-panel, [data-testid='left-panel']")) return false;
+    if (control.closest(".mx_SpaceButton_menuButton, [class*='SpaceButton_menuButton']")) return false;
+    if (control.closest(".mx_RoomListItemView, [class*='RoomListItem']")) return false;
+
+    const label = normalizeSpaces(`${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""} ${visibleText(control) || ""}`).toLowerCase();
+    if (!label) return false;
+
+    // These are known to open dialogs/menus unrelated to collapsing the native
+    // room-list pane. Never use them for Smart Element's restore sequence.
+    if (/chatoptionen|weitere optionen|benachrichtigungsoptionen|filterliste|suchen|search|quick settings|schnelleinstellungen|threads?|benutzermen|user menu|space-optionen|^optionen$|settings|einstellungen|notifications?/.test(label)) return false;
+
+    return /menü für spaces öffnen|open spaces? menu|spaces?.*menu|menu.*spaces?|collapse|hide|minimi[sz]e|verberg|einklapp/.test(label);
+  }
+
+  function isNativeLeftPaneMinimized() {
+    const panels = uniqueElements(Array.from(document.querySelectorAll("#left-panel, [data-testid='left-panel']")))
+      .filter(panel => panel instanceof HTMLElement && !panel.closest(OWNED_SELECTOR));
+    if (!panels.length) return true;
+
+    return panels.every(panel => {
+      const rect = panel.getBoundingClientRect();
+      const style = getComputedStyle(panel);
+      return rect.width <= 36 || rect.height <= 36 || style.display === "none" || style.visibility === "hidden" || style.opacity === "0";
+    });
+  }
+
+  function rememberNativeReturnLeftPaneStyle(element) {
+    if (!(element instanceof HTMLElement) || nativeReturnLeftPaneForcedStyles.has(element)) return;
+    nativeReturnLeftPaneForcedStyles.set(element, {
+      display: element.style.display,
+      visibility: element.style.visibility,
+      opacity: element.style.opacity,
+      pointerEvents: element.style.pointerEvents,
+      flex: element.style.flex,
+      flexShrink: element.style.flexShrink,
+      width: element.style.width,
+      minWidth: element.style.minWidth,
+      maxWidth: element.style.maxWidth,
+      overflow: element.style.overflow
+    });
+  }
+
+  function forceNativeLeftPaneMinimizedForSelectorReturn(reason = "return-to-selector") {
+    const selectors = [
+      "#left-panel",
+      "[data-testid='left-panel']",
+      "#left-panel .mx_LeftPanel_panel",
+      "#left-panel .mx_LeftPanel_outerWrapper",
+      "#left-panel .mx_LeftPanel_wrapper",
+      "#left-panel .mx_LeftPanel",
+      "#left-panel .mx_LeftPanel_roomListContainer",
+      "#left-panel .mx_RoomListPanel",
+      "#left-panel [aria-label='Chatliste']",
+      "#left-panel [aria-label='Room list']"
+    ];
+
+    for (const element of queryNativeParseElements(selectors)) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberNativeReturnLeftPaneStyle(element);
+      element.dataset.mmlcNativeReturnLeftMinimized = String(reason || "return-to-selector");
+      element.style.display = "none";
+      element.style.visibility = "hidden";
+      element.style.opacity = "0";
+      element.style.pointerEvents = "none";
+      element.style.flex = "0 0 0px";
+      element.style.flexShrink = "1";
+      element.style.width = "0px";
+      element.style.minWidth = "0px";
+      element.style.maxWidth = "0px";
+      element.style.overflow = "hidden";
+    }
+  }
+
+  function restoreNativeReturnLeftPaneMinimize() {
+    for (const [element, styles] of nativeReturnLeftPaneForcedStyles.entries()) {
+      if (!(element instanceof HTMLElement)) continue;
+      element.removeAttribute("data-mmlc-native-return-left-minimized");
+      for (const [property, value] of Object.entries(styles)) {
+        try { element.style[property] = value; } catch {}
+      }
+    }
+    nativeReturnLeftPaneForcedStyles.clear();
+  }
+
+  async function waitForNativeRightSpaceOverviewAfterLeftMinimize(label = currentSpaceLabel, maxWaitMs = 1800) {
+    const clean = normalizeSpaces(label || currentSpaceLabel || "").toLowerCase();
+    const started = Date.now();
+
+    while (Date.now() - started < Math.max(400, maxWaitMs)) {
+      dispatchNativeParseResize();
+      await nextAnimationFrame();
+      const pane = findSpaceOverviewPane();
+      if (pane && (!clean || spaceOverviewTitleMatchesCurrentSpace(pane, clean) || spaceOverviewMatchesCurrentSpace({ allowContainedRow: false }))) {
+        return true;
+      }
+      await delay(120);
+    }
+
+    return Boolean(findSpaceOverviewPane());
+  }
+
+  function queryNativeParseElements(selectors) {
+    const result = [];
+    for (const selector of selectors) {
+      try {
+        result.push(...document.querySelectorAll(selector));
+      } catch {}
+    }
+    return result;
+  }
+
+  function rememberNativeParseStyle(element) {
+    if (!(element instanceof HTMLElement) || nativeParseForcedStyles.has(element)) return;
+    nativeParseForcedStyles.set(element, {
+      display: element.style.display,
+      visibility: element.style.visibility,
+      opacity: element.style.opacity,
+      pointerEvents: element.style.pointerEvents,
+      transform: element.style.transform,
+      position: element.style.position,
+      inset: element.style.inset,
+      zIndex: element.style.zIndex,
+      flex: element.style.flex,
+      flexShrink: element.style.flexShrink,
+      width: element.style.width,
+      minWidth: element.style.minWidth,
+      maxWidth: element.style.maxWidth,
+      height: element.style.height,
+      minHeight: element.style.minHeight,
+      maxHeight: element.style.maxHeight,
+      overflow: element.style.overflow
+    });
+  }
+
+  function restoreNativeElementParsePanes() {
+    for (const [element, styles] of nativeParseForcedStyles.entries()) {
+      if (!(element instanceof HTMLElement)) continue;
+      delete element.dataset.mmlcNativeParseForced;
+      if (element.dataset.mmlcForcedMiddlePane !== undefined) delete element.dataset.mmlcForcedMiddlePane;
+      if (element.dataset.mmlcNativeLeftMinimized !== undefined) delete element.dataset.mmlcNativeLeftMinimized;
+      element.removeAttribute("data-mmlc-forced-middle-pane");
+      element.removeAttribute("data-mmlc-native-left-minimized");
+      for (const [property, value] of Object.entries(styles)) {
+        try { element.style[property] = value; } catch {}
+      }
+    }
+    nativeParseForcedStyles.clear();
+  }
+
+  function updateChatViewportMetrics() {
+    const width = Math.max(320, Math.round(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0));
+    const height = Math.max(320, Math.round(window.visualViewport?.height || window.innerHeight || document.documentElement.clientHeight || 0));
+
+    setStylePropertyIfChanged(document.documentElement, "--mmlc-chat-viewport-width", `${width}px`);
+    setStylePropertyIfChanged(document.documentElement, "--mmlc-chat-viewport-height", `${height}px`);
+  }
+
+  function scheduleChatViewportMetricsUpdate() {
+    if (chatViewportMetricsFrame) return;
+
+    chatViewportMetricsFrame = requestAnimationFrame(() => {
+      chatViewportMetricsFrame = null;
+      updateChatViewportMetrics();
+      if (currentMode === "chat" || currentMode === "thread") {
+        applyChatViewportScrollLock();
+      }
+    });
+  }
+
+  function rememberChatViewportStyle(element) {
+    if (!(element instanceof HTMLElement) || chatViewportForcedStyles.has(element)) return;
+
+    const properties = [
+      "overflow",
+      "overflow-x",
+      "overflow-y",
+      "overscroll-behavior",
+      "overscroll-behavior-y"
+    ];
+
+    chatViewportForcedStyles.set(element, Object.fromEntries(properties.map(property => [
+      property,
+      {
+        value: element.style.getPropertyValue(property),
+        priority: element.style.getPropertyPriority(property)
+      }
+    ])));
+  }
+
+  function applyChatViewportScrollLock() {
+    updateChatViewportMetrics();
+
+    for (const element of [document.documentElement, document.body]) {
+      if (!(element instanceof HTMLElement)) continue;
+      rememberChatViewportStyle(element);
+      setStylePropertyIfChanged(element, "overflow", "hidden", "important");
+      setStylePropertyIfChanged(element, "overflow-x", "hidden", "important");
+      setStylePropertyIfChanged(element, "overflow-y", "hidden", "important");
+      setStylePropertyIfChanged(element, "overscroll-behavior", "none", "important");
+      setStylePropertyIfChanged(element, "overscroll-behavior-y", "none", "important");
+    }
+
+    resetDocumentScrollForPromotedChat();
+  }
+
+  function setStylePropertyIfChanged(element, property, value, priority = "") {
+    if (!(element instanceof HTMLElement)) return;
+    if (element.style.getPropertyValue(property) === value && element.style.getPropertyPriority(property) === priority) return;
+    element.style.setProperty(property, value, priority);
+  }
+
+  function resetDocumentScrollForPromotedChat() {
+    try {
+      const scroller = document.scrollingElement;
+      if (scroller) {
+        scroller.scrollTop = 0;
+        scroller.scrollLeft = 0;
+      }
+      if (document.documentElement) {
+        document.documentElement.scrollTop = 0;
+        document.documentElement.scrollLeft = 0;
+      }
+      if (document.body) {
+        document.body.scrollTop = 0;
+        document.body.scrollLeft = 0;
+      }
+      window.scrollTo({ top: 0, left: 0, behavior: "auto" });
+    } catch {
+      try { window.scrollTo(0, 0); } catch {}
+    }
+  }
+
+  function restoreChatViewportScrollLock() {
+    for (const [element, styles] of chatViewportForcedStyles.entries()) {
+      if (!(element instanceof HTMLElement)) continue;
+
+      for (const [property, record] of Object.entries(styles)) {
+        try {
+          if (record.value) {
+            element.style.setProperty(property, record.value, record.priority || "");
+          } else {
+            element.style.removeProperty(property);
+          }
+        } catch {}
+      }
+    }
+
+    chatViewportForcedStyles.clear();
+    document.documentElement.style.removeProperty("--mmlc-chat-viewport-width");
+    document.documentElement.style.removeProperty("--mmlc-chat-viewport-height");
   }
 
   function createToolbar() {
@@ -534,13 +1419,25 @@
       }
 
       if (state.mode === "chat" || looksLikeRoomRoute()) {
-        const hasActiveRoom = await waitForActiveRoomView(looksLikeRoomRoute() ? 3400 : 1800);
+        await prepareChatRestoreFromPersistentState(state);
+        const hasActiveRoom = await waitForActiveRoomViewForRestore(looksLikeRoomRoute() ? 5200 : 3200);
         if (hasActiveRoom) {
           const activeView = findActiveRoomView();
           const activeLabel = activeRoomLabel(activeView);
           const activeAvatar = activeRoomAvatarSrc(activeView);
-          if (activeLabel) currentChatLabel = activeLabel;
-          if (activeAvatar) currentChatAvatarSrc = activeAvatar;
+          if (activeLabel) {
+            const previousLabel = currentChatLabel;
+            currentChatLabel = activeLabel;
+            currentChatHref = location.href || currentChatHref || "";
+            if (normalizeSpaces(activeLabel).toLowerCase() !== normalizeSpaces(previousLabel).toLowerCase()) {
+              currentChatHref = location.href || currentChatHref || "";
+              currentChatAvatarSrc = chatAvatarFromSelectorCache(activeLabel) || activeAvatar || currentChatAvatarSrc;
+            } else if (!currentChatAvatarSrc) {
+              currentChatAvatarSrc = chatAvatarFromSelectorCache(activeLabel) || activeAvatar || "";
+            }
+          } else if (activeAvatar && !currentChatAvatarSrc) {
+            currentChatAvatarSrc = activeAvatar;
+          }
           closePanel({ force: true });
           setMode("chat", { closeThread: true, allowChooserExit: true });
           updateHierarchyBar();
@@ -562,10 +1459,25 @@
       }
     }
 
-    const waitMs = looksLikeRoomRoute() ? 3400 : 1400;
-    const hasActiveRoom = await waitForActiveRoomView(waitMs);
+    const waitMs = looksLikeRoomRoute() ? 5200 : 1400;
+    const hasActiveRoom = looksLikeRoomRoute()
+      ? await waitForActiveRoomViewForRestore(waitMs)
+      : await waitForActiveRoomView(waitMs);
 
     if (hasActiveRoom) {
+      const activeView = findActiveRoomView();
+      const activeLabel = activeRoomLabel(activeView);
+      const activeAvatar = activeRoomAvatarSrc(activeView);
+      if (activeLabel) {
+        currentChatLabel = activeLabel;
+        currentChatHref = location.href || currentChatHref || "";
+        currentChatAvatarSrc = chatAvatarFromSelectorCache(activeLabel) || activeAvatar || currentChatAvatarSrc || "";
+        persistViewStateSoon();
+      } else if (activeAvatar && !currentChatAvatarSrc) {
+        currentChatAvatarSrc = activeAvatar;
+        currentChatHref = location.href || currentChatHref || "";
+        persistViewStateSoon();
+      }
       closePanel();
       setMode("chat", { closeThread: true });
       updateHierarchyBar();
@@ -576,34 +1488,48 @@
   }
 
 
+  async function prepareChatRestoreFromPersistentState(state) {
+    if (!state || typeof state !== "object") return false;
+
+    const storedHref = String(state.chatHref || state.href || "");
+    const storedRoute = roomRouteKey(storedHref);
+    const currentRoute = roomRouteKey(location.href);
+
+    if (!storedRoute || storedRoute === currentRoute) return false;
+
+    try {
+      const target = new URL(storedHref, location.href);
+      if (target.origin !== location.origin) return false;
+
+      location.assign(target.toString());
+      await delay(520);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function waitForActiveRoomViewForRestore(timeoutMs) {
+    if (await waitForActiveRoomView(Math.min(900, Math.max(300, timeoutMs)))) return true;
+
+    return await withNativeElementParseLayout(async () => {
+      return await waitForActiveRoomView(timeoutMs);
+    }, {
+      reason: "chat-restore",
+      width: 1280,
+      waitMs: 820
+    });
+  }
+
+
   async function triggerNormalRefreshAfterCacheRestore(panelType) {
-    const token = renderToken;
-    await waitForPanelImagesSettled(1400);
-    await delay(80);
-
-    if (token !== renderToken || currentPanel !== panelType) return;
-
-    if (panelType === "spaces") {
-      refreshSpacesPanel(token, { delayMs: 0, showProgress: true });
-      return;
-    }
-
-    if (panelType === "space-detail") {
-      showSpaceDetailPanel(currentSpaceLabel, {
-        forceOpen: true,
-        preferLeftRail: true
-      });
-      return;
-    }
-
-    if (panelType === "chats") {
-      showChatsPanel({ restoreFromCache: false });
-      return;
-    }
-
-    if (panelType === "home-chats") {
-      showHomeChatsPanel({ restoreFromCache: false });
-    }
+    // Do not perform automatic DOM refreshes after restoring a cached chooser
+    // panel. On Firefox Android portrait, automatic Element pane manipulation can
+    // leave the native layout in a half-restored state. The chooser therefore
+    // relies on the persistent Smart Element cache until the user explicitly taps
+    // the refresh button.
+    void panelType;
+    return;
   }
 
   async function waitForPanelImagesSettled(maxWaitMs = 1200) {
@@ -801,7 +1727,7 @@
         type: "chat",
         label: chatLabel,
         title: "Current chat",
-        avatarSrc: currentChatAvatarSrc,
+        avatarSrc: currentChatAvatarForToolbar(chatLabel),
         unread: unreadForChatLabelInCurrentSpace(chatLabel)
       });
     } else if (!spaces.length && /^startseite$/i.test(currentSpaceLabel)) {
@@ -818,11 +1744,82 @@
   function currentChatName() {
     const view = findActiveRoomView();
     const activeLabel = activeRoomLabel(view);
-    if (activeLabel) currentChatLabel = activeLabel;
-    const avatarSrc = activeRoomAvatarSrc(view);
-    if (avatarSrc) currentChatAvatarSrc = avatarSrc;
-    if (activeLabel || avatarSrc) persistViewStateSoon();
+    const previousLabel = currentChatLabel;
+    const activeAvatarSrc = activeRoomAvatarSrc(view);
+
+    if (activeLabel) {
+      currentChatLabel = activeLabel;
+      const selectorAvatar = chatAvatarFromSelectorCache(activeLabel);
+
+      if (normalizeSpaces(activeLabel).toLowerCase() !== normalizeSpaces(previousLabel).toLowerCase()) {
+        currentChatHref = location.href || currentChatHref || "";
+        currentChatAvatarSrc = selectorAvatar || "";
+      } else if (selectorAvatar) {
+        currentChatAvatarSrc = selectorAvatar;
+      }
+    }
+
+    if (activeLabel || activeAvatarSrc) persistViewStateSoon();
     return currentChatLabel;
+  }
+
+  function currentChatAvatarForToolbar(chatLabel) {
+    // The chat avatar in the Smart Element button row must match the avatar shown
+    // in the Smart Element selector. Native Element room headers can be ambiguous
+    // for rooms with identical display names, so do not use header avatars as a
+    // fallback here. If the selector has no image, the toolbar renders initials.
+    return chatAvatarFromSelectorCache(chatLabel) || "";
+  }
+
+  function chatAvatarFromSelectorCache(label) {
+    const item = findCachedChatItemForCurrentRoom(label);
+    return item?.avatarSrc || item?.avatarDataUrl || "";
+  }
+
+  function findCachedChatItemForCurrentRoom(label) {
+    const cleanLabel = normalizeSpaces(label || currentChatLabel || "").toLowerCase();
+    if (!cleanLabel) return null;
+
+    const routeKeys = uniqueValues([
+      roomRouteKey(currentChatHref),
+      roomRouteKey(location.href)
+    ]);
+
+    const matches = [];
+    for (const [cacheKey, items] of hierarchyListCache.entries()) {
+      if (!String(cacheKey || "").startsWith("chats:")) continue;
+      for (const item of items || []) {
+        if (String(item?.type || "") !== "room") continue;
+        if (normalizeSpaces(item?.label || "").toLowerCase() !== cleanLabel) continue;
+
+        const itemRoute = roomRouteKey(item?.href || "");
+        const routeScore = itemRoute && routeKeys.includes(itemRoute) ? 100 : 0;
+        const pathScore = chatItemPathMatchesCurrentSpace(item) ? 20 : 0;
+        const avatarScore = item?.avatarSrc || item?.avatarDataUrl ? 5 : 0;
+        matches.push({ item, score: routeScore + pathScore + avatarScore });
+      }
+    }
+
+    matches.sort((a, b) => b.score - a.score);
+    return matches[0]?.item || null;
+  }
+
+  function chatItemPathMatchesCurrentSpace(item) {
+    const itemPath = logicalPathWithoutRoot(item?.path || [])
+      .filter(segment => segment.type !== "room" && segment.type !== "start")
+      .map(segment => normalizeSpaces(segment.label).toLowerCase())
+      .filter(Boolean);
+    const currentPath = logicalPathWithoutRoot(currentSpacePath || [])
+      .filter(segment => segment.type !== "room" && segment.type !== "start")
+      .map(segment => normalizeSpaces(segment.label).toLowerCase())
+      .filter(Boolean);
+
+    if (!itemPath.length && /^startseite$/i.test(currentSpaceLabel)) {
+      return Array.isArray(item?.path) && item.path.some(segment => segment?.type === "start");
+    }
+
+    if (itemPath.length !== currentPath.length) return false;
+    return itemPath.every((segment, index) => segment === currentPath[index]);
   }
 
   function hierarchySpaceSegments() {
@@ -894,7 +1891,7 @@
 
     currentSpaceLabel = segment.label || currentSpaceLabel;
 
-    const item = segment.item || findSpaceItemByLabel(segment.label);
+    const item = (segment.item?.element instanceof Element ? segment.item : null) || findSpaceItemForCurrentPathOrLabel(segment.label) || findSpaceItemByLabel(segment.label);
     if (item?.element) {
       rememberCurrentSpace(item);
     }
@@ -939,13 +1936,17 @@
     updateSortToggle();
     document.getElementById("mmlc-refresh").addEventListener("click", () => {
       if (currentPanel === "spaces") {
-        showSpacesPanel();
+        showSpacesPanel({ manualRefresh: true });
       } else if (currentPanel === "space-detail") {
-        showSpaceDetailPanel(currentSpaceLabel);
+        showSpaceDetailPanel(currentSpaceLabel, {
+          manualRefresh: true,
+          forceOpen: true,
+          preferLeftRail: true
+        });
       } else if (currentPanel === "home-chats") {
-        showHomeChatsPanel({ forceOpen: true });
+        showHomeChatsPanel({ forceOpen: true, manualRefresh: true });
       } else if (currentPanel === "chats") {
-        showChatsPanel();
+        showChatsPanel({ manualRefresh: true, forceOpen: true, preferLeftRail: true });
       }
     });
 
@@ -959,60 +1960,190 @@
     enterPanelMode("spaces");
     renderHierarchyPath([{ label: "Spaces", type: "root" }]);
 
-    // Show the same activity indicator on the root chooser that is already used
-    // for nested space and chat views. The root list can need an asynchronous
-    // Element repaint after returning from a chat/mobile layout, so users should
-    // see that the top-level space view is refreshing as well.
-    showPanelProgress(true);
+    const manualRefresh = Boolean(options.manualRefresh || options.forceRefresh);
+    const cachedSpaces = cachedListItems(spaceCacheKey());
 
-    // The root chooser must prefer Element's current DOM over the cached list.
-    // When returning from a promoted chat pane, cached entries can still point to
-    // detached or hidden space buttons; rendering those first makes the chooser
-    // look correct while clicks target stale nodes.
+    if (!manualRefresh) {
+      renderSpacesList(cachedSpaces, token);
+      showPanelProgress(false);
+      persistViewStateSoon();
+      return;
+    }
+
+    showPanelProgress(true);
     const liveSpaces = collectSpaces();
     prefetchHierarchyCacheFromSpaceRail();
-    const cachedSpaces = cachedListItems(spaceCacheKey());
-    const initialSpaces = options.preferCacheFirst && cachedSpaces.length
-      ? cachedSpaces
-      : (liveSpaces.length ? liveSpaces : cachedSpaces);
+    const initialSpaces = liveSpaces.length ? liveSpaces : cachedSpaces;
     if (liveSpaces.length) cacheListItems(spaceCacheKey(), liveSpaces);
-
     renderSpacesList(initialSpaces, token);
     keepRootProgressUntilSpaceIconsLoaded(token);
-
-    // Give the layout one frame to leave chat mode and then force a fresh read of
-    // the space rail. This keeps the home/root chooser up to date after opening it
-    // from inside a chat.
-    requestAnimationFrame(() => {
-      if (token === renderToken && currentPanel === "spaces") {
-        refreshSpacesPanel(token, { delayMs: 40, showProgress: true });
-      }
-    });
-
-    scheduleSpacesPanelRefreshes(token);
+    refreshSpacesPanel(token, { delayMs: 40, showProgress: true, manualRefresh: true });
   }
 
   function scheduleSpacesPanelRefreshes(token) {
-    for (const delayMs of [160, 520, 1200, 2400, 4200, 6500, 9000]) {
-      setTimeout(() => {
-        if (token === renderToken && currentPanel === "spaces") {
-          refreshSpacesPanel(token, { delayMs: 0, showProgress: false });
-        }
-      }, delayMs);
-    }
+    // Automatic background refresh is intentionally disabled. Smart Element keeps
+    // the chooser stable from cache and only reparses Element when the user uses
+    // the explicit refresh button.
+    void token;
   }
 
   function refreshSpacesPanelSoon() {
-    if (spacesPanelRefreshTimer) return;
+    // Suppress implicit space/root refreshes. The refresh button remains the
+    // explicit path for reparsing Element's native space hierarchy. Room lists are
+    // handled separately by a quiet background refresh because cached room rows do
+    // not always remain actionable after returning from a mobile chat view.
+  }
 
-    spacesPanelRefreshTimer = setTimeout(() => {
-      spacesPanelRefreshTimer = null;
-      if (currentPanel !== "spaces") return;
-      refreshSpacesPanel(renderToken, { delayMs: 0, showProgress: false });
-    }, 160);
+  function beginNativeDomAction(reason = "native-action") {
+    nativeDomActionRun += 1;
+    try { document.documentElement.dataset.mmlcNativeDomAction = String(reason || "native-action"); } catch {}
+    return nativeDomActionRun;
+  }
+
+  function isNativeDomActionCancelled(run) {
+    return Boolean(run && run !== nativeDomActionRun);
+  }
+
+  function cancelPendingNativeDomActions(reason = "cancel-native-actions") {
+    nativeDomActionRun += 1;
+    selectorReturnNativeLayoutRun += 1;
+    chooserReturnNativeSpaceRestoreRun += 1;
+
+    if (chatListBackgroundRefreshTimer) {
+      clearTimeout(chatListBackgroundRefreshTimer);
+      chatListBackgroundRefreshTimer = null;
+    }
+    if (homeChatListBackgroundRefreshTimer) {
+      clearTimeout(homeChatListBackgroundRefreshTimer);
+      homeChatListBackgroundRefreshTimer = null;
+    }
+    chatListBackgroundRefreshRun += 1;
+    homeChatListBackgroundRefreshRun += 1;
+
+    try { document.documentElement.dataset.mmlcNativeDomActionCancelled = String(reason || "cancel-native-actions"); } catch {}
+  }
+
+  function scheduleHomeChatListBackgroundRefresh(token, options = {}) {
+    if (!isMobileLayoutEnabled()) return;
+    if (homeChatListBackgroundRefreshTimer) clearTimeout(homeChatListBackgroundRefreshTimer);
+
+    const run = ++homeChatListBackgroundRefreshRun;
+    const delayMs = Math.max(120, Math.min(2500, Number(options.delayMs || 420)));
+    homeChatListBackgroundRefreshTimer = setTimeout(() => {
+      homeChatListBackgroundRefreshTimer = null;
+      refreshHomeChatListInBackground(run, token).catch(error => {
+        console.warn("Smart Element home chat background refresh failed.", error);
+      });
+    }, delayMs);
+  }
+
+  async function refreshHomeChatListInBackground(run, token) {
+    if (run !== homeChatListBackgroundRefreshRun) return;
+    if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "home-chats") return;
+
+    const actionRun = beginNativeDomAction("home-chat-background-refresh");
+    const cacheKey = homeChatsCacheKey();
+    const chats = await collectHomeCenterPaneChats({ waitForNavigation: 180, backgroundRefresh: true, actionRun });
+
+    if (isNativeDomActionCancelled(actionRun)) return;
+    if (run !== homeChatListBackgroundRefreshRun) return;
+    if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "home-chats") return;
+    if (!chats.length) return;
+
+    cacheListItems(cacheKey, chats);
+    renderHomeChatsList(chats, token);
+    showPanelProgress(false);
+    persistViewStateSoon();
+  }
+
+  function scheduleChatListBackgroundRefresh(token, selectedLabel, path, options = {}) {
+    if (!isMobileLayoutEnabled()) return;
+    if (chatListBackgroundRefreshTimer) clearTimeout(chatListBackgroundRefreshTimer);
+
+    const run = ++chatListBackgroundRefreshRun;
+    const delayMs = Math.max(120, Math.min(2500, Number(options.delayMs || 420)));
+    const labelSnapshot = normalizeSpaces(selectedLabel || currentSpaceLabel || "");
+    const pathSnapshot = cloneSpacePathForBackground(path || currentSpacePathForPanel(labelSnapshot));
+
+    chatListBackgroundRefreshTimer = setTimeout(() => {
+      chatListBackgroundRefreshTimer = null;
+      refreshChatListInBackground(run, token, labelSnapshot, pathSnapshot).catch(error => {
+        console.warn("Smart Element chat list background refresh failed.", error);
+      });
+    }, delayMs);
+  }
+
+  function cloneSpacePathForBackground(path) {
+    if (!Array.isArray(path)) return [];
+    return path.map(segment => ({
+      label: segment?.label || "",
+      type: segment?.type || "space",
+      avatarSrc: segment?.avatarSrc || "",
+      avatarDataUrl: segment?.avatarDataUrl || "",
+      icon: segment?.icon || "",
+      source: segment?.source || "cache"
+    })).filter(segment => segment.label || segment.type === "root");
+  }
+
+  function spacePathSignature(path) {
+    return (Array.isArray(path) ? path : [])
+      .filter(segment => segment && segment.type !== "room" && normalizeSpaces(segment.label || ""))
+      .map(segment => `${segment.type || "space"}:${normalizeSpaces(segment.label || "").toLowerCase()}`)
+      .join("> ");
+  }
+
+  function spacePanelStillMatchesSnapshot(label, pathSnapshot) {
+    const clean = normalizeSpaces(label || "").toLowerCase();
+    const currentClean = normalizeSpaces(currentSpaceLabel || "").toLowerCase();
+    if (clean && currentClean && clean !== currentClean) return false;
+
+    const wanted = spacePathSignature(pathSnapshot);
+    const current = spacePathSignature(currentSpacePathForPanel(currentSpaceLabel));
+    if (wanted && current && wanted !== current) return false;
+
+    return currentPanel === "chats";
+  }
+
+  async function refreshChatListInBackground(run, token, selectedLabel, pathSnapshot) {
+    if (run !== chatListBackgroundRefreshRun) return;
+    if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "chats") return;
+
+    const actionRun = beginNativeDomAction("space-chat-background-refresh");
+    const previousLabel = currentSpaceLabel;
+    const previousPath = currentSpacePath;
+    if (selectedLabel) currentSpaceLabel = selectedLabel;
+    if (Array.isArray(pathSnapshot) && pathSnapshot.length) currentSpacePath = pathSegmentsFromSpacePath(pathSnapshot);
+
+    try {
+      const chatItems = await collectDirectChatsForCurrentSpace({
+        forceOpen: true,
+        preferLeftRail: true,
+        minimizeLeftPaneAfterSelect: true,
+        backgroundRefresh: true,
+        actionRun
+      });
+
+      if (isNativeDomActionCancelled(actionRun)) return;
+      if (run !== chatListBackgroundRefreshRun) return;
+      if (!isMobileLayoutEnabled() || token !== renderToken || currentPanel !== "chats") return;
+      if (!spacePanelStillMatchesSnapshot(selectedLabel, pathSnapshot)) return;
+      if (!chatItems.length) return;
+
+      const cacheKey = chatsCacheKey(currentSpacePathForPanel(currentSpaceLabel), currentSpaceLabel);
+      cacheListItems(cacheKey, chatItems);
+      renderChatsList(chatItems, token);
+      showPanelProgress(false);
+      persistViewStateSoon();
+    } finally {
+      if (currentPanel !== "chats" || token !== renderToken) {
+        currentSpaceLabel = previousLabel;
+        currentSpacePath = previousPath;
+      }
+    }
   }
 
   function abortActivePanelWorkForSelection() {
+    cancelPendingNativeDomActions("selection-started");
     // Abort delayed refreshes and in-flight async renders from the parent panel
     // before opening a child space or room. Without this guard, a delayed parent
     // refresh can redraw the old space after the user already selected a
@@ -1021,6 +2152,16 @@
       clearTimeout(spacesPanelRefreshTimer);
       spacesPanelRefreshTimer = null;
     }
+    if (chatListBackgroundRefreshTimer) {
+      clearTimeout(chatListBackgroundRefreshTimer);
+      chatListBackgroundRefreshTimer = null;
+    }
+    if (homeChatListBackgroundRefreshTimer) {
+      clearTimeout(homeChatListBackgroundRefreshTimer);
+      homeChatListBackgroundRefreshTimer = null;
+    }
+    chatListBackgroundRefreshRun += 1;
+    homeChatListBackgroundRefreshRun += 1;
 
     panelProgressIconLoadRun += 1;
     renderToken += 1;
@@ -1169,47 +2310,46 @@
     if (!isMobileLayoutEnabled()) return;
     if (options.navigationToken && !isCurrentChooserNavigation(options.navigationToken)) return;
 
-    // Prefer the logical space selected in the companion panel over Element's
-    // currently active left-rail space. The left rail often remains on the
-    // top-level parent while the user navigates nested rows in the SpaceHierarchy
-    // overview, so reading it first makes nested spaces jump back to the parent.
     const selectedLabel = label || currentSpaceLabel || getCurrentSpaceLabel() || "Current space";
     currentSpaceLabel = selectedLabel;
 
     const token = beginPanelRender("space-detail", "Spaces", selectedLabel);
     enterPanelMode("spaces");
-    await ensureMiddlePaneExpanded();
-    syncCurrentSpaceFromVisibleList(selectedLabel, { preserveOverviewSelection: !options.preferLeftRail });
+    if (options.navigationToken && !isCurrentChooserNavigation(options.navigationToken)) return;
+    if (token !== renderToken) return;
+
     const path = currentSpacePathForPanel(selectedLabel);
     const cacheKey = spaceDetailCacheKey(path, selectedLabel);
     renderHierarchyPath(path);
-
-    prefetchHierarchyCacheFromSpaceRail();
     renderSpaceDetailList(cachedListItemsWithFallback(cacheKey, selectedLabel), token);
-    showPanelProgress(true);
 
-    await ensureCurrentSpaceOverview({
-      forceOpen: Boolean(options.forceOpen),
-      preferLeftRail: Boolean(options.preferLeftRail),
-      // For the companion's space-detail view, a parent overview that merely
-      // contains the selected subspace is not sufficient. Element sometimes
-      // leaves the parent overview visible after navigation from a chat/mobile
-      // layout; accepting a contained row then makes the parser see no direct
-      // children until the user manually clicks the space button again.
-      allowContainedRow: false
+    const manualRefresh = Boolean(options.manualRefresh || options.forceRefresh);
+    if (!manualRefresh) {
+      showPanelProgress(false);
+      persistViewStateSoon();
+      return;
+    }
+
+    showPanelProgress(true);
+    await ensureMiddlePaneExpanded();
+    await ensureNativeSpaceContentsAfterChatReturn(selectedLabel, {
+      ...options,
+      minimizeLeftPaneAfterSelect: true,
+      reason: options.reason || "manual-refresh-space-detail"
     });
     if (options.navigationToken && !isCurrentChooserNavigation(options.navigationToken)) return;
     if (token !== renderToken) return;
-    await forceLoadSpaceOverviewContent();
-    if (options.navigationToken && !isCurrentChooserNavigation(options.navigationToken)) return;
-    if (token !== renderToken) return;
 
-    prefetchHierarchyCacheFromOverview(findSpaceOverviewPane());
-    let subspaces = collectSubspaces();
+    syncCurrentSpaceFromVisibleList(selectedLabel, { preserveOverviewSelection: !options.preferLeftRail });
+    prefetchHierarchyCacheFromSpaceRail();
 
-    if (!subspaces.length) {
-      subspaces = await refreshCurrentSpaceSubspacesOnce({ token, navigationToken: options.navigationToken });
-    }
+    const subspaces = await collectSubspacesForCurrentSpace({
+      forceOpen: Boolean(options.forceOpen),
+      preferLeftRail: Boolean(options.preferLeftRail),
+      token,
+      navigationToken: options.navigationToken,
+      minimizeLeftPaneAfterSelect: true
+    });
 
     const finalSubspaces = subspaces.length
       ? subspaces
@@ -1218,6 +2358,41 @@
     if (subspaces.length) cacheListItems(cacheKey, subspaces);
     renderSpaceDetailList(finalSubspaces, token);
     showPanelProgress(false);
+    persistViewStateSoon();
+  }
+
+  async function collectSubspacesForCurrentSpace(options = {}) {
+    return await withNativeElementParseLayout(async () => {
+      const token = options.token || renderToken;
+      const navigationToken = options.navigationToken;
+
+      await ensureCurrentSpaceOverview({
+        forceOpen: Boolean(options.forceOpen),
+        preferLeftRail: Boolean(options.preferLeftRail),
+        minimizeLeftPaneAfterSelect: Boolean(options.minimizeLeftPaneAfterSelect),
+        // For the companion's space-detail view, a parent overview that merely
+        // contains the selected subspace is not sufficient. Element sometimes
+        // leaves the parent overview visible after navigation from a chat/mobile
+        // layout; accepting a contained row then makes the parser see no direct
+        // children until the user manually clicks the space button again.
+        allowContainedRow: false
+      });
+      if (navigationToken && !isCurrentChooserNavigation(navigationToken)) return [];
+      if (token !== renderToken || currentPanel !== "space-detail") return [];
+
+      await forceLoadSpaceOverviewContent();
+      if (navigationToken && !isCurrentChooserNavigation(navigationToken)) return [];
+      if (token !== renderToken || currentPanel !== "space-detail") return [];
+
+      prefetchHierarchyCacheFromOverview(findSpaceOverviewPane());
+      let subspaces = collectSubspaces();
+
+      if (!subspaces.length) {
+        subspaces = await refreshCurrentSpaceSubspacesOnce({ token, navigationToken });
+      }
+
+      return subspaces;
+    }, { reason: "space-detail", width: 1280, waitMs: 760 });
   }
 
   async function refreshCurrentSpaceSubspacesOnce(options = {}) {
@@ -1319,11 +2494,11 @@
     if (!isMobileLayoutEnabled()) return;
 
     startChooserNavigation();
-    openStartPage();
 
     currentSpaceLabel = "Startseite";
     currentChatLabel = "";
     currentChatAvatarSrc = "";
+    currentChatHref = "";
     currentSpaceElement = null;
     currentSpaceSource = "start";
     currentSpacePath = [
@@ -1337,12 +2512,21 @@
 
     const cacheKey = homeChatsCacheKey();
     const cached = cachedListItems(cacheKey);
-    if (options.restoreFromCache || cached.length) {
-      renderHomeChatsList(cached, token);
+    renderHomeChatsList(cached, token);
+
+    const manualRefresh = Boolean(options.manualRefresh || options.forceRefresh);
+    if (!manualRefresh) {
+      showPanelProgress(false);
+      persistViewStateSoon();
+      scheduleHomeChatListBackgroundRefresh(token, { delayMs: 520 });
+      return;
     }
 
     showPanelProgress(true);
-    const chats = await collectHomeCenterPaneChats({ waitForNavigation: options.restoreFromCache ? 250 : 700 });
+    await ensureNativeSpaceContentsAfterChatReturn("Startseite");
+    if (token !== renderToken || currentPanel !== "home-chats") return;
+
+    const chats = await collectHomeCenterPaneChats({ waitForNavigation: 700 });
     if (token !== renderToken || currentPanel !== "home-chats") return;
 
     const finalChats = chats.length ? chats : cached;
@@ -1355,20 +2539,34 @@
   async function collectHomeCenterPaneChats(options = {}) {
     const waitForNavigation = Number(options.waitForNavigation || 0);
     if (waitForNavigation > 0) await delay(waitForNavigation);
+    if (isNativeDomActionCancelled(options.actionRun)) return [];
+
+    // Startseite/Home chats are parsed from Element's native home room list.
+    // Unlike space-detail parsing, this path does not need the right-hand
+    // hierarchy/details pane. Avoid the desktop-like parse layout here, because
+    // forcing all three panes visible can destabilize the mobile UI and make the
+    // home list flicker or disappear. Only restore a previously minimized native
+    // room-list pane and then select Startseite in Element's own space rail.
+    restoreNativeReturnLeftPaneMinimize();
+    dispatchNativeParseResize();
+    await nextAnimationFrame();
 
     // Element keeps the Startseite/Home chat list in the native left/middle pane.
     // Always switch the native Element space rail back to Startseite immediately
     // before parsing that pane; otherwise a previous space selection can leave a
     // stale room list in the DOM and the mobile chooser displays the wrong chats.
-    let onStartPage = await ensureStartPageSelected({ maxWaitMs: Math.max(1600, waitForNavigation + 1400) });
+    let onStartPage = await ensureStartPageSelected({ maxWaitMs: Math.max(1800, waitForNavigation + 1600) });
+    if (isNativeDomActionCancelled(options.actionRun)) return [];
     await ensureMiddlePaneExpanded();
 
     if (!onStartPage) return [];
 
     let chats = collectMiddlePaneChats();
-    for (let attempt = 0; !chats.length && attempt < 4; attempt += 1) {
-      await delay(300);
-      onStartPage = await ensureStartPageSelected({ maxWaitMs: 800 });
+    for (let attempt = 0; !chats.length && attempt < 5; attempt += 1) {
+      await delay(360);
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
+      onStartPage = await ensureStartPageSelected({ maxWaitMs: 900 });
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
       await ensureMiddlePaneExpanded();
       if (!onStartPage) return [];
       chats = collectMiddlePaneChats();
@@ -1390,12 +2588,17 @@
 
   function renderHomeChatsList(chatItems, token) {
     const listKey = homeChatsCacheKey();
+    // The Startseite/Home room list is curated by Element itself and may include
+    // recency, pinning, and notification-driven ordering that is not equivalent
+    // to Smart Element's A-Z or user-defined order. Keep the parsed Element order
+    // exactly as seen in the native home list, and disable drag sorting for this
+    // panel so cached manual orders cannot reshuffle it later.
     const enrichedChats = enrichChatItemsWithUnread(chatItems);
-    const sortedChats = sortPanelItems(enrichedChats, listKey);
-    const items = [...sortedChats, makeCreateTile("chat")];
+    const items = [...enrichedChats, makeCreateTile("chat")];
 
     renderList(items, {
       listKey,
+      disableDragSort: true,
       emptyText: "No chats found in the Startseite center pane yet.",
       onSelect: async item => {
         if (item.action) {
@@ -1411,7 +2614,8 @@
         }
 
         currentChatLabel = item.label || currentChatLabel;
-        currentChatAvatarSrc = item.avatarSrc || currentChatAvatarSrc;
+        currentChatAvatarSrc = item.avatarSrc || item.avatarDataUrl || "";
+        currentChatHref = item.href || location.href || currentChatHref;
         currentSpaceLabel = "Startseite";
         currentSpacePath = Array.isArray(item.path) && item.path.length
           ? pathSegmentsFromSpacePath(item.path)
@@ -1429,25 +2633,35 @@
   async function showChatsPanel(options = {}) {
     if (!isMobileLayoutEnabled()) return;
     startChooserNavigation();
-    // Keep the panel-selected space label. Using getCurrentSpaceLabel() first is
-    // wrong for SpaceHierarchy navigation because Element's selected space button
-    // can still be the top-level parent, while the companion panel is focused on
-    // a nested subspace from the right-hand hierarchy.
     const selectedLabel = currentSpaceLabel || getCurrentSpaceLabel() || "Current space";
     currentSpaceLabel = selectedLabel;
 
     const token = beginPanelRender("chats", "Chats", selectedLabel);
     enterPanelMode("rooms");
-    await ensureMiddlePaneExpanded();
     const path = currentSpacePathForPanel(selectedLabel);
     const cacheKey = chatsCacheKey(path, selectedLabel);
     renderHierarchyPath(path);
+    renderChatsList(cachedListItemsWithFallback(cacheKey, selectedLabel), token);
+
+    const manualRefresh = Boolean(options.manualRefresh || options.forceRefresh);
+    if (!manualRefresh) {
+      showPanelProgress(false);
+      persistViewStateSoon();
+      scheduleChatListBackgroundRefresh(token, selectedLabel, path, { delayMs: 520 });
+      return;
+    }
+
+    showPanelProgress(true);
+    await ensureMiddlePaneExpanded();
+    await ensureNativeSpaceContentsAfterChatReturn(selectedLabel, {
+      ...options,
+      minimizeLeftPaneAfterSelect: true,
+      reason: options.reason || "manual-refresh-space-chats"
+    });
+    if (token !== renderToken || currentPanel !== "chats") return;
 
     prefetchHierarchyCacheFromSpaceRail();
-    renderChatsList(cachedListItemsWithFallback(cacheKey, selectedLabel), token);
-    showPanelProgress(true);
-
-    const chatItems = await collectDirectChatsForCurrentSpace();
+    const chatItems = await collectDirectChatsForCurrentSpace({ minimizeLeftPaneAfterSelect: true });
     if (token !== renderToken || currentPanel !== "chats") return;
 
     const finalChatItems = chatItems.length
@@ -1457,6 +2671,7 @@
     if (chatItems.length) cacheListItems(cacheKey, chatItems);
     renderChatsList(finalChatItems, token);
     showPanelProgress(false);
+    persistViewStateSoon();
   }
 
   function renderChatsList(chatItems, token) {
@@ -1482,7 +2697,8 @@
         }
 
         currentChatLabel = item.label || currentChatLabel;
-        currentChatAvatarSrc = item.avatarSrc || currentChatAvatarSrc;
+        currentChatAvatarSrc = item.avatarSrc || item.avatarDataUrl || "";
+        currentChatHref = item.href || location.href || currentChatHref;
         rememberOpenedChatPath(item);
         persistViewStateSoon();
         closePanel({ force: true });
@@ -1497,29 +2713,111 @@
     const spacePath = item.path.filter(segment => segment && segment.type !== "room");
     if (!spacePath.length) return;
 
-    currentSpacePath = pathSegmentsFromSpacePath(spacePath);
-    const lastSpace = currentSpacePath[currentSpacePath.length - 1];
+    const nextPath = pathSegmentsFromSpacePath(spacePath);
+    const nextLast = lastSelectableSpacePathSegment(nextPath);
+    currentSpacePath = chooseStableSpacePathForLabel(nextPath, nextLast?.label || currentSpaceLabel || "");
+    const lastSpace = lastSelectableSpacePathSegment(currentSpacePath);
     if (lastSpace?.label) currentSpaceLabel = lastSpace.label;
     updateHierarchyBar();
     persistViewStateSoon();
   }
 
+  function cloneSpacePathSegments(path) {
+    return (Array.isArray(path) ? path : [])
+      .filter(segment => segment && normalizeSpaces(segment.label || ""))
+      .map(segment => ({
+        ...segment,
+        label: normalizeSpaces(segment.label || ""),
+        type: segment.type || "space",
+        avatarSrc: segment.avatarSrc || segment.item?.avatarSrc || "",
+        icon: segment.icon || segment.item?.icon || ""
+      }));
+  }
+
+  function lastSelectableSpacePathSegment(path) {
+    if (!Array.isArray(path)) return null;
+
+    for (let index = path.length - 1; index >= 0; index -= 1) {
+      const segment = path[index];
+      if (!segment || segment.type === "root" || segment.type === "room") continue;
+      if (normalizeSpaces(segment.label || "")) return segment;
+    }
+
+    return null;
+  }
+
+  function spacePathDepth(path) {
+    return (Array.isArray(path) ? path : [])
+      .filter(segment => segment && segment.type !== "root" && segment.type !== "room" && normalizeSpaces(segment.label || ""))
+      .length;
+  }
+
+  function spacePathLastLabelMatches(path, label) {
+    const clean = normalizeSpaces(label || "").toLowerCase();
+    const last = lastSelectableSpacePathSegment(path);
+    if (!clean || !last) return false;
+    return normalizeSpaces(last.label || "").toLowerCase() === clean;
+  }
+
+  function currentSpacePathSnapshotForLabel(label = currentSpaceLabel) {
+    const clean = normalizeSpaces(label || currentSpaceLabel || "");
+    if (!clean || !spacePathLastLabelMatches(currentSpacePath, clean)) return null;
+    return cloneSpacePathSegments(currentSpacePath);
+  }
+
+  function chooseStableSpacePathForLabel(nextPath, label = currentSpaceLabel, snapshot = null) {
+    const clean = normalizeSpaces(label || currentSpaceLabel || "");
+    const existing = Array.isArray(snapshot) && snapshot.length ? snapshot : currentSpacePathSnapshotForLabel(clean);
+    const normalizedNext = cloneSpacePathSegments(nextPath);
+
+    if (
+      existing &&
+      spacePathLastLabelMatches(existing, clean) &&
+      spacePathLastLabelMatches(normalizedNext, clean) &&
+      spacePathDepth(existing) > spacePathDepth(normalizedNext)
+    ) {
+      return cloneSpacePathSegments(existing);
+    }
+
+    return normalizedNext;
+  }
+
+  function restoreSpacePathSnapshotIfDegraded(snapshot, label = currentSpaceLabel) {
+    if (!Array.isArray(snapshot) || snapshot.length < 2) return false;
+
+    const clean = normalizeSpaces(label || currentSpaceLabel || "");
+    if (!clean || !spacePathLastLabelMatches(snapshot, clean)) return false;
+    if (spacePathDepth(snapshot) <= spacePathDepth(currentSpacePath)) return false;
+
+    const currentLast = lastSelectableSpacePathSegment(currentSpacePath);
+    if (currentLast && normalizeSpaces(currentLast.label || "").toLowerCase() !== clean.toLowerCase()) return false;
+
+    currentSpacePath = cloneSpacePathSegments(snapshot);
+    const restoredLast = lastSelectableSpacePathSegment(currentSpacePath);
+    if (restoredLast?.label) currentSpaceLabel = restoredLast.label;
+    updateHierarchyBar();
+    persistViewStateSoon();
+    return true;
+  }
+
   function showSpacesFromToolbar() {
-    const selected = findSelectedSpaceItem(collectSpaceControls());
-    if (selected) {
-      rememberCurrentSpace(selected);
-      showSpaceDetailPanel(selected.label, { forceOpen: true });
+    const lastPathSegment = lastSelectableSpacePathSegment(currentSpacePath);
+    const lastPathLabel = normalizeSpaces(lastPathSegment?.label || "");
+    if (currentSpacePath.length > 1 && lastPathLabel && !/^(startseite|home)$/i.test(lastPathLabel)) {
+      currentSpaceLabel = lastPathLabel;
+      showSpaceDetailPanel(lastPathLabel, { forceOpen: true });
       return;
     }
 
-    if (currentSpaceElement instanceof Element && isRendered(currentSpaceElement) && currentSpaceLabel && !/^startseite$/i.test(currentSpaceLabel)) {
+    if (currentSpaceElement instanceof Element && isRendered(currentSpaceElement) && currentSpaceLabel && !/^(startseite|home)$/i.test(currentSpaceLabel)) {
       showSpaceDetailPanel(currentSpaceLabel, { forceOpen: true });
       return;
     }
 
-    const lastPathLabel = currentSpacePath[currentSpacePath.length - 1]?.label || "";
-    if (currentSpacePath.length > 1 && lastPathLabel && !/^startseite$/i.test(lastPathLabel)) {
-      showSpaceDetailPanel(lastPathLabel, { forceOpen: true });
+    const selected = findSelectedSpaceItem(collectSpaceControls());
+    if (selected) {
+      rememberCurrentSpace(selected);
+      showSpaceDetailPanel(selected.label, { forceOpen: true });
       return;
     }
 
@@ -1665,7 +2963,7 @@
       button.addEventListener("click", event => {
         event.preventDefault();
         event.stopPropagation();
-        jumpToSpacePathSegment(segment);
+        jumpToSpacePathSegment(segment, normalizedPath.slice(0, index + 1));
       });
       current.appendChild(button);
     });
@@ -1709,25 +3007,42 @@
     return null;
   }
 
-  async function jumpToSpacePathSegment(segment) {
+  async function jumpToSpacePathSegment(segment, targetPath = null) {
     if (!segment || segment.type === "root") {
       showSpacesPanel();
       return;
     }
 
     if (segment.type === "start") {
+      if (Array.isArray(targetPath) && targetPath.length) {
+        currentSpacePath = cloneSpacePathSegments(targetPath);
+      }
       await showHomeChatsPanel({ forceOpen: true });
       return;
     }
 
+    const targetSpacePath = Array.isArray(targetPath) && targetPath.length
+      ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(targetPath).filter(pathSegment => pathSegment.type !== "room"))
+      : null;
+    if (targetSpacePath?.length > 1) {
+      currentSpacePath = cloneSpacePathSegments(targetSpacePath);
+      const targetLast = lastSelectableSpacePathSegment(currentSpacePath);
+      if (targetLast?.label) currentSpaceLabel = targetLast.label;
+      updateHierarchyBar();
+      persistViewStateSoon();
+    }
+
     const item = segment.item || findSpaceItemByLabel(segment.label);
     if (!item?.element) {
-      showSpaceDetailPanel(segment.label);
+      showSpaceDetailPanel(segment.label, { forceOpen: true });
       return;
     }
 
     const navigationToken = startChooserNavigation();
-    rememberCurrentSpace(item);
+    const itemWithPath = targetSpacePath?.length > 1
+      ? { ...item, path: logicalPathWithoutRoot(targetSpacePath) }
+      : item;
+    rememberCurrentSpace(itemWithPath);
     renderPanelStatus(`Selecting ${item.label}...`);
     await openSpaceItemOverview(item, { preferLeftRail: true, forceDoubleClick: true });
     if (isCurrentChooserNavigation(navigationToken)) {
@@ -1753,7 +3068,7 @@
       row.classList.toggle("mmlc-list-item-muted", item.joined === false);
       row.dataset.mmlcItemId = item.id;
 
-      const sortable = isUserSortMode() && isReorderableListItem(item);
+      const sortable = !options.disableDragSort && isUserSortMode() && isReorderableListItem(item);
       if (sortable) {
         row.draggable = true;
         row.dataset.mmlcSortId = sortableItemId(item);
@@ -2674,7 +3989,20 @@
   function cachedItemMergeKey(item) {
     const type = String(item?.type || "item").replace(/^subspace-unjoined$/, "subspace");
     const label = normalizeSpaces(item?.label || "").toLowerCase();
-    return label ? `${type}:${label}` : "";
+    if (!label) return "";
+
+    if (type === "room") {
+      const routeKey = roomRouteKey(item?.href || "");
+      if (routeKey) return `${type}:route:${routeKey}`;
+
+      const id = normalizeSpaces(item?.id || "");
+      if (id) return `${type}:id:${id}`;
+
+      const pathKey = hierarchyCachePathKey(item?.path || [], label);
+      if (pathKey) return `${type}:path:${pathKey}>${label}`;
+    }
+
+    return `${type}:${label}`;
   }
 
   function enrichCachedItemForStorage(item, previous = null) {
@@ -2883,11 +4211,58 @@
     const source = normalizeAvatarSource(avatarSrc);
     const cached = cachedAvatarDataUrlForSourceOrLabel(source, label);
     image.dataset.mmlcAvatarSrc = source;
+    image.dataset.mmlcAvatarLabel = label || "";
+    image.alt = "";
+    image.decoding = "async";
+    image.loading = "eager";
+    image.referrerPolicy = "no-referrer";
     image.src = cached || source;
 
+    const fallbackIfStillBroken = () => {
+      if (!image.isConnected) return;
+      if (image.complete && image.naturalWidth > 0) return;
+      replaceAvatarImageWithFallback(image, label);
+    };
+
+    image.addEventListener("error", () => {
+      if (!source || isDataUrl(source)) {
+        fallbackIfStillBroken();
+        return;
+      }
+
+      cacheAvatarImage(source).then(dataUrl => {
+        if (!image.isConnected) return;
+        if (dataUrl) {
+          image.src = dataUrl;
+        } else {
+          fallbackIfStillBroken();
+        }
+      }).catch(fallbackIfStillBroken);
+    }, { once: true });
+
+    image.addEventListener("load", () => {
+      if (image.naturalWidth > 0) return;
+      fallbackIfStillBroken();
+    }, { once: true });
+
     if (source && !cached && !isDataUrl(source)) {
-      cacheAvatarImage(source);
+      cacheAvatarImage(source).then(dataUrl => {
+        if (dataUrl && image.isConnected && image.src !== dataUrl) {
+          image.src = dataUrl;
+        }
+      }).catch(() => {});
     }
+  }
+
+  function replaceAvatarImageWithFallback(image, label = "") {
+    if (!(image instanceof HTMLImageElement)) return;
+    const parent = image.parentElement;
+    if (!(parent instanceof HTMLElement)) return;
+
+    const fallback = initialsForLabel(label || image.dataset.mmlcAvatarLabel || "?");
+    parent.classList.remove("mmlc-list-avatar-image");
+    parent.classList.add("mmlc-avatar-load-failed");
+    parent.textContent = fallback;
   }
 
   function normalizeAvatarSource(src) {
@@ -2987,6 +4362,22 @@
   }
 
   async function fetchAvatarDataUrl(src) {
+    let dataUrl = "";
+
+    try {
+      dataUrl = await fetchAvatarDataUrlFromPage(src);
+    } catch {}
+
+    if (dataUrl) return dataUrl;
+
+    try {
+      dataUrl = await fetchAvatarDataUrlThroughBackground(src);
+    } catch {}
+
+    return dataUrl || "";
+  }
+
+  async function fetchAvatarDataUrlFromPage(src) {
     const response = await fetch(src, {
       mode: "cors",
       credentials: "omit",
@@ -2999,6 +4390,39 @@
     if (!blob || !/^image\//i.test(blob.type || "")) return "";
     if (blob.size > AVATAR_IMAGE_CACHE_MAX_BYTES) return "";
     return blobToDataUrl(blob);
+  }
+
+  function fetchAvatarDataUrlThroughBackground(src) {
+    return new Promise(resolve => {
+      const runtime = globalThis.chrome?.runtime;
+      if (!runtime?.sendMessage) {
+        resolve("");
+        return;
+      }
+
+      try {
+        runtime.sendMessage({ type: "mmFetchDataUrl", url: src }, response => {
+          if (runtime.lastError || !response?.ok) {
+            resolve("");
+            return;
+          }
+
+          const result = response.result || {};
+          const dataUrl = typeof result.dataUrl === "string" ? result.dataUrl : "";
+          const contentType = typeof result.contentType === "string" ? result.contentType : "";
+          const size = Number(result.size || 0);
+
+          if (!dataUrl || !/^image\//i.test(contentType) || size > AVATAR_IMAGE_CACHE_MAX_BYTES) {
+            resolve("");
+            return;
+          }
+
+          resolve(dataUrl);
+        });
+      } catch {
+        resolve("");
+      }
+    });
   }
 
   function blobToDataUrl(blob) {
@@ -3278,6 +4702,7 @@
     currentSpaceLabel = normalizeSpaces(state.spaceLabel || currentSpaceLabel);
     currentChatLabel = normalizeSpaces(state.chatLabel || currentChatLabel);
     currentChatAvatarSrc = state.chatAvatarSrc || currentChatAvatarSrc || "";
+    currentChatHref = state.chatHref || currentChatHref || "";
 
     if (Array.isArray(state.spacePath) && state.spacePath.length) {
       currentSpacePath = serializablePath(state.spacePath);
@@ -3309,7 +4734,8 @@
         spaceLabel: normalizeSpaces(currentSpaceLabel || ""),
         spacePath: serializablePath(currentSpacePath),
         chatLabel: normalizeSpaces(currentChatLabel || ""),
-        chatAvatarSrc: currentChatAvatarSrc || ""
+        chatAvatarSrc: currentChatAvatarSrc || "",
+        chatHref: currentChatHref || ""
       };
 
       localStorage.setItem(STORAGE_VIEW_STATE_KEY, JSON.stringify(state));
@@ -3585,11 +5011,22 @@
   }
 
   function enterPanelMode(mode) {
+    const returningFromChat = currentMode === "chat" && (mode === "spaces" || mode === "rooms");
+
     if (currentMode !== "spaces" && currentMode !== "rooms") {
       panelReturnMode = currentMode || "normal";
     }
 
     setMode(mode, { closeThread: false });
+
+    if (returningFromChat) {
+      chooserReturnFromChatAt = Date.now();
+      // Returning from chat must reset Element's native layout in a strict
+      // order: remove the promoted chat, select the active space twice in the
+      // native left rail, then collapse the native left pane so the companion
+      // space/chat selector remains exposed.
+      scheduleNativeLeftPaneMinimizeOnSelectorReturn(currentSpaceLabel, "return-from-chat-to-selector");
+    }
   }
 
   function setMode(mode, options = {}) {
@@ -3626,6 +5063,12 @@
     document.documentElement.classList.toggle("mmlc-has-promoted-chat-pane", hasActiveRoomView);
     document.documentElement.classList.toggle("mmlc-has-promoted-thread-pane", mode === "thread" && Boolean(document.querySelector(".mmlc-promoted-thread-pane")));
 
+    if (mode === "chat" || mode === "thread") {
+      applyChatViewportScrollLock();
+    } else {
+      restoreChatViewportScrollLock();
+    }
+
     updateToolbarActiveState();
 
     if (mode === "spaces" || mode === "rooms") {
@@ -3633,7 +5076,12 @@
     }
 
     if (mode === "chat") {
+      cancelPendingNativeDomActions("entered-chat-mode");
+      restoreNativeReturnLeftPaneMinimize();
+      dismissVirtualKeyboard("enter-chat-mode");
+      scrollActiveChatToBottom("enter-chat-mode-immediate");
       scheduleChatModeStabilization();
+      scheduleActiveChatScrollToBottom("enter-chat-mode");
     }
 
     persistViewStateSoon();
@@ -3643,10 +5091,429 @@
     for (const ms of [120, 360, 760, 1300, 2200]) {
       setTimeout(() => {
         if (currentMode !== "chat") return;
+        applyChatViewportScrollLock();
         closeNativeThreadPanel();
         refreshPromotedPanes();
+        repairPromotedChatLayout("chat-mode-stabilization");
+        dismissVirtualKeyboard("chat-mode-stabilization");
+        scrollActiveChatToBottom("chat-mode-stabilization");
       }, ms);
     }
+  }
+
+  function scheduleNativeSpaceRestoreAfterChatReturn(label = currentSpaceLabel, options = {}) {
+    chooserReturnNativeSpaceRestoreRun += 1;
+    const run = chooserReturnNativeSpaceRestoreRun;
+    const selectedLabel = normalizeSpaces(label || currentSpaceLabel || "");
+    if (!selectedLabel) return;
+
+    setTimeout(() => {
+      if (run !== chooserReturnNativeSpaceRestoreRun) return;
+      if (currentMode !== "spaces" && currentMode !== "rooms") return;
+      ensureNativeSpaceContentsAfterChatReturn(selectedLabel, {
+        maxWaitMs: Number(options.maxWaitMs || 2600),
+        reason: "return-from-chat"
+      });
+    }, Number(options.delayMs || 80));
+  }
+
+  async function restoreNativeSpaceContentsAfterChatReturn(label = currentSpaceLabel, options = {}) {
+    return ensureNativeSpaceContentsAfterChatReturn(label, {
+      ...options,
+      reason: options.reason || "restore-space-after-chat"
+    });
+  }
+
+  async function ensureNativeSpaceContentsAfterChatReturn(label = currentSpaceLabel, options = {}) {
+    const clean = normalizeSpaces(label || currentSpaceLabel || "");
+    if (!clean || !isMobileLayoutEnabled()) return false;
+
+    if (/^(startseite|home)$/i.test(clean)) {
+      clearPromotedChatPane();
+      return ensureStartPageSelected({ maxWaitMs: Number(options.maxWaitMs || 2200) });
+    }
+
+    return await withNativeElementParseLayout(async () => {
+      clearPromotedChatPane();
+      clearThreadPanelMarks();
+      forceNativeElementParsePanes({ reason: options.reason || "select-current-space", width: 1280 });
+      await nextAnimationFrame();
+      const selected = await ensureCurrentSpaceSelectedInLeftPanel(clean, options);
+      if (selected && options.minimizeLeftPaneAfterSelect) {
+        minimizeNativeLeftPaneForSpaceOverview(options.reason || "select-current-space");
+        await waitForNativeRightSpaceOverviewAfterLeftMinimize(clean, Number(options.maxWaitMs || 2200));
+      }
+      forceNativeElementParsePanes({ reason: options.reason || "select-current-space", width: 1280 });
+      if (selected && options.minimizeLeftPaneAfterSelect) {
+        minimizeNativeLeftPaneForSpaceOverview(options.reason || "select-current-space");
+      }
+      await nextAnimationFrame();
+      return selected;
+    }, { reason: options.reason || "select-current-space", width: 1280, waitMs: Number(options.waitMs || 520) });
+  }
+
+  async function ensureCurrentSpaceSelectedInLeftPanel(label = currentSpaceLabel, options = {}) {
+    const clean = normalizeSpaces(label || currentSpaceLabel || "");
+    if (!clean) return false;
+
+    const maxWaitMs = Math.max(900, Number(options.maxWaitMs || 3000));
+    const forceOptions = {
+      reason: options.reason || "select-current-space",
+      width: 1280,
+      forceDesktopWidth: options.forceDesktopWidth !== false
+    };
+    const pathSnapshot = Array.isArray(options.pathSnapshot) && options.pathSnapshot.length
+      ? options.pathSnapshot
+      : currentSpacePathSnapshotForLabel(clean);
+    const started = Date.now();
+    let clicked = false;
+
+    while (Date.now() - started < maxWaitMs) {
+      forceNativeElementParsePanes(forceOptions);
+
+      const item = findSpaceItemForCurrentPathOrLabel(clean) || findSpaceItemByLabel(clean);
+      if (item?.element instanceof Element) {
+        const isSelected = isSelectedElement(item.element);
+        const overviewReady = spaceOverviewTitleMatchesLabel(clean) || spaceOverviewMatchesCurrentSpace({ allowContainedRow: false });
+
+        if (isSelected && overviewReady) {
+          rememberCurrentSpace({ ...item, source: item.source || "left-rail" });
+          restoreSpacePathSnapshotIfDegraded(pathSnapshot, clean);
+          return true;
+        }
+
+        const activation = findNativeLeftRailSpaceActivationElement(item.element);
+        if (activation instanceof Element) {
+          clickElement(activation);
+          dispatchKeyboardLike(activation, "keydown", "Enter", "Enter");
+          dispatchKeyboardLike(activation, "keyup", "Enter", "Enter");
+          clicked = true;
+          await delay(340);
+
+          if (!spaceOverviewTitleMatchesLabel(clean) && !spaceOverviewMatchesCurrentSpace({ allowContainedRow: false })) {
+            clickElement(activation);
+            await delay(560);
+          }
+
+          await expandSelectedSpaceSubtree(item.element);
+          rememberCurrentSpace({ ...item, source: item.source || "left-rail" });
+          restoreSpacePathSnapshotIfDegraded(pathSnapshot, clean);
+        }
+      }
+
+      await delay(clicked ? 180 : 260);
+
+      const freshItem = findSpaceItemForCurrentPathOrLabel(clean) || findSpaceItemByLabel(clean);
+      if (freshItem?.element instanceof Element && isSelectedElement(freshItem.element)) {
+        const overviewReady = spaceOverviewTitleMatchesLabel(clean) || spaceOverviewMatchesCurrentSpace({ allowContainedRow: false });
+        if (overviewReady) {
+          rememberCurrentSpace({ ...freshItem, source: freshItem.source || "left-rail" });
+          restoreSpacePathSnapshotIfDegraded(pathSnapshot, clean);
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  function findNativeLeftRailSpaceActivationElement(element) {
+    if (!(element instanceof Element)) return null;
+
+    const button = element.matches?.(".mx_SpaceButton, [class*='SpaceButton'], [role='button']")
+      ? element
+      : element.querySelector?.(".mx_SpaceButton, [class*='SpaceButton'], [role='button']");
+    const control = normalizeClickable(button || element) || button || element;
+
+    // Do not click the three-dot menu or the collapse/expand chevron when the
+    // intention is selecting the space itself. Those controls often share the
+    // same row and would leave the right pane in the previous chat view.
+    if (control instanceof Element) {
+      const bad = control.closest?.("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']");
+      if (!bad) return control;
+    }
+
+    const row = getSpaceTreeRow(element) || element;
+    const candidates = uniqueElements(Array.from(row.querySelectorAll(".mx_SpaceButton, [class*='SpaceButton'], [role='button'], button")))
+      .filter(candidate => candidate instanceof Element)
+      .filter(candidate => !candidate.closest(OWNED_SELECTOR))
+      .filter(candidate => !candidate.matches("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']"))
+      .filter(candidate => !candidate.closest("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']"));
+
+    return candidates[0] || normalizeClickable(element) || element;
+  }
+
+  function findSpaceItemForCurrentPathOrLabel(label) {
+    const clean = normalizeSpaces(label || "").toLowerCase();
+    if (!clean) return null;
+
+    const controls = collectSpaceControls();
+    if (!controls.length) return null;
+
+    const pathLabels = logicalPathWithoutRoot(currentSpacePath)
+      .filter(segment => segment?.type !== "room")
+      .map(segment => normalizeSpaces(segment.label || "").toLowerCase())
+      .filter(Boolean);
+
+    const targetPath = pathLabels.length && pathLabels[pathLabels.length - 1] === clean
+      ? pathLabels
+      : [clean];
+
+    const candidates = controls.filter(item => normalizeSpaces(item.label || "").toLowerCase() === clean);
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    const byPath = candidates.find(item => {
+      const itemPath = buildSpacePathForItem(item, controls)
+        .filter(segment => segment?.type !== "root" && segment?.type !== "room")
+        .map(segment => normalizeSpaces(segment.label || "").toLowerCase())
+        .filter(Boolean);
+      return itemPath.length === targetPath.length && itemPath.every((part, index) => part === targetPath[index]);
+    });
+
+    if (byPath) return byPath;
+
+    if (currentSpaceElement instanceof Element) {
+      const byElement = candidates.find(item => item.element === currentSpaceElement);
+      if (byElement) return byElement;
+    }
+
+    return candidates[0];
+  }
+
+  function scheduleActiveChatScrollToBottom(reason = "chat-view") {
+    for (const ms of [80, 220, 520, 950, 1600, 2600]) {
+      setTimeout(() => {
+        if (currentMode !== "chat") return;
+        scrollActiveChatToBottom(reason);
+      }, ms);
+    }
+  }
+
+  function scrollActiveChatToBottom(reason = "chat-view") {
+    const view = document.querySelector(".mmlc-promoted-chat-pane") || findActiveRoomView();
+    if (!(view instanceof Element)) return false;
+
+    // Scrolling to the latest message must never be interpreted as a user
+    // request to open Element's thread panel. Keep the thread auto-detector
+    // suppressed during the whole stabilization window.
+    suppressThreadAutoUntil = Math.max(suppressThreadAutoUntil, Date.now() + 1800);
+    suppressThreadOpenUntil = Math.max(suppressThreadOpenUntil, Date.now() + 1800);
+
+    stabilizePromotedChatTimelineGeometry(view);
+    const scrollers = findChatTimelineScrollContainers(view);
+    let didScroll = false;
+
+    const scrolledToRenderedLatest = scrollLatestVisibleEventIntoView(view);
+    didScroll = scrolledToRenderedLatest || didScroll;
+
+    if (scrolledToRenderedLatest) {
+      for (const scroller of scrollers.slice(0, 3)) {
+        didScroll = clampTimelineScrollToLatestContent(scroller, view) || didScroll;
+      }
+    } else {
+      for (const scroller of scrollers.slice(0, 4)) {
+        didScroll = scrollTimelineContainerToLatest(scroller, reason) || didScroll;
+      }
+    }
+
+    // Element sometimes exposes a dedicated "jump to bottom" button only after
+    // the first scroll attempt. Click only that very specific control. Earlier
+    // broad matching could accidentally activate thread/unread controls.
+    if (clickJumpToBottomControl(view)) {
+      stabilizePromotedChatTimelineGeometry(view);
+      const latestAfterJump = scrollLatestVisibleEventIntoView(view);
+      didScroll = latestAfterJump || didScroll;
+      for (const scroller of scrollers.slice(0, 3)) {
+        didScroll = clampTimelineScrollToLatestContent(scroller, view) || didScroll;
+      }
+    }
+
+    closeNativeThreadPanel();
+    return didScroll;
+  }
+
+  function timelineUsesReverseScroll(scroller) {
+    if (!(scroller instanceof Element)) return false;
+
+    const candidates = [
+      scroller,
+      scroller.firstElementChild,
+      scroller.querySelector("[data-testid='virtuoso-item-list']"),
+      scroller.querySelector("[class*='Timeline']"),
+      scroller.querySelector("[class*='MessagePanel']")
+    ].filter(Boolean);
+
+    return candidates.some(element => {
+      try {
+        const style = getComputedStyle(element);
+        return /column-reverse|row-reverse/i.test(style.flexDirection || "");
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function scrollTimelineContainerToLatest(scroller, reason = "chat-view") {
+    if (!(scroller instanceof Element)) return false;
+
+    try {
+      const reverse = timelineUsesReverseScroll(scroller);
+      const targetTop = reverse ? 0 : Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+      scroller.style.scrollBehavior = "auto";
+      scroller.scrollTop = targetTop;
+      if (typeof scroller.scrollTo === "function") {
+        scroller.scrollTo({ top: targetTop, left: 0, behavior: "auto" });
+      }
+
+      // The End key helps Element/virtualized timelines settle at the logical
+      // end without touching any thread or unread-message buttons.
+      try {
+        scroller.dispatchEvent(new KeyboardEvent("keydown", { key: "End", code: "End", bubbles: true, cancelable: true }));
+        scroller.dispatchEvent(new KeyboardEvent("keyup", { key: "End", code: "End", bubbles: true, cancelable: true }));
+      } catch {}
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function scrollLatestVisibleEventIntoView(view) {
+    if (!(view instanceof Element)) return false;
+
+    const scroller = findChatTimelineScrollContainers(view)[0];
+    const reverse = timelineUsesReverseScroll(scroller);
+    const latest = findLatestVisibleChatEvent(view, { reverse });
+    if (!(latest instanceof Element)) return false;
+
+    try {
+      latest.scrollIntoView({ block: reverse ? "start" : "end", inline: "nearest", behavior: "auto" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function findLatestVisibleChatEvent(view, options = {}) {
+    if (!(view instanceof Element)) return null;
+
+    const events = uniqueElements(Array.from(view.querySelectorAll([
+      ".mx_EventTile",
+      "[class*='EventTile']",
+      "[data-event-id]",
+      "[data-testid*='event']",
+      "[role='article']",
+      ".mg-thread-merged",
+      ".mg-thread-inline-reply",
+      ".mg-thread-message-row"
+    ].join(", "))).filter(element => {
+      if (!(element instanceof Element) || element.closest(OWNED_SELECTOR)) return false;
+      if (isChatTimelineReadMarker(element)) return false;
+      if (!isRendered(element)) return false;
+      return true;
+    }));
+
+    if (!events.length) return null;
+    return options.reverse ? events[0] : events[events.length - 1];
+  }
+
+  function clampTimelineScrollToLatestContent(scroller, view) {
+    if (!(scroller instanceof Element) || !(view instanceof Element)) return false;
+
+    const reverse = timelineUsesReverseScroll(scroller);
+    const latest = findLatestVisibleChatEvent(view, { reverse });
+    if (!(latest instanceof Element) || !scroller.contains(latest)) return false;
+
+    try {
+      const scrollerRect = scroller.getBoundingClientRect();
+      const latestRect = latest.getBoundingClientRect();
+      const before = scroller.scrollTop;
+      const padding = 12;
+
+      let targetTop = before;
+      if (reverse) {
+        targetTop = before + (latestRect.top - (scrollerRect.top + padding));
+      } else {
+        targetTop = before + (latestRect.bottom - (scrollerRect.bottom - padding));
+      }
+
+      targetTop = Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, targetTop));
+      if (Math.abs(targetTop - before) < 1) return false;
+
+      scroller.style.scrollBehavior = "auto";
+      scroller.scrollTop = targetTop;
+      if (typeof scroller.scrollTo === "function") {
+        scroller.scrollTo({ top: targetTop, left: 0, behavior: "auto" });
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function findChatTimelineScrollContainers(view) {
+    if (!(view instanceof Element)) return [];
+
+    const preferred = uniqueElements([
+      ...view.querySelectorAll([
+        ".mx_ScrollPanel",
+        "[class*='ScrollPanel']",
+        ".mx_MessagePanel",
+        "[class*='MessagePanel']",
+        ".mx_TimelinePanel",
+        "[class*='TimelinePanel']",
+        "[data-virtuoso-scroller='true']",
+        "[data-scrollbar]",
+        "[role='log']"
+      ].join(", ")),
+      view
+    ]);
+
+    const broad = uniqueElements([
+      ...preferred,
+      ...Array.from(view.querySelectorAll("div, main, section"))
+    ]);
+
+    return broad
+      .filter(element => {
+        if (!(element instanceof Element) || element.closest(OWNED_SELECTOR)) return false;
+        const overflow = `${getComputedStyle(element).overflowY} ${getComputedStyle(element).overflow}`;
+        const scrollable = element.scrollHeight > element.clientHeight + 24;
+        return scrollable && (/(auto|scroll|overlay)/i.test(overflow) || element.matches("[data-virtuoso-scroller='true'], [role='log'], [class*='ScrollPanel'], [class*='TimelinePanel'], [class*='MessagePanel']"));
+      })
+      .sort((a, b) => {
+        const aPreferred = Number(a.matches("[data-virtuoso-scroller='true'], [class*='ScrollPanel'], [class*='TimelinePanel'], [class*='MessagePanel']"));
+        const bPreferred = Number(b.matches("[data-virtuoso-scroller='true'], [class*='ScrollPanel'], [class*='TimelinePanel'], [class*='MessagePanel']"));
+        if (aPreferred !== bPreferred) return bPreferred - aPreferred;
+        return (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight);
+      });
+  }
+
+  function clickJumpToBottomControl(view) {
+    if (!(view instanceof Element)) return false;
+
+    const controls = uniqueElements([
+      ...view.querySelectorAll("button, [role='button'], [aria-label], [title]")
+    ]).filter(control => {
+      if (!(control instanceof Element) || control.closest(OWNED_SELECTOR) || !isRendered(control)) return false;
+      const label = `${control.getAttribute("aria-label") || ""} ${control.getAttribute("title") || ""} ${visibleText(control) || ""}`.toLowerCase();
+
+      // Never click thread, reply, menu, notification, attachment, or generic
+      // "new messages" controls while trying to reach the end of the room.
+      if (/thread|threads|antwort|reply|benachrichtigung|notification|option|menu|anhang|attachment|attach|file|datei|unread|ungelesen|mention|erwähn/.test(label)) return false;
+
+      return /jump\s+(?:to\s+)?(?:the\s+)?(?:bottom|end)|scroll\s+(?:to\s+)?(?:the\s+)?(?:bottom|end)|go\s+(?:to\s+)?(?:the\s+)?(?:bottom|end)|bottom\s+of\s+(?:timeline|chat)|end\s+of\s+(?:timeline|chat)|springe\s+(?:zum|ans?)\s+(?:ende|unteren)|zum\s+(?:ende|unteren)\s+springen|nach\s+unten\s+springen|ende\s+der\s+(?:zeitleiste|unterhaltung)/i.test(label);
+    });
+
+    const control = controls[0];
+    if (!(control instanceof Element)) return false;
+
+    suppressThreadAutoUntil = Math.max(suppressThreadAutoUntil, Date.now() + 1800);
+    suppressThreadOpenUntil = Math.max(suppressThreadOpenUntil, Date.now() + 1800);
+    clickElement(control);
+    return true;
   }
 
   function updateToolbarActiveState() {
@@ -3655,21 +5522,25 @@
 
   function promoteChatPane(roomView = null) {
     const existing = document.querySelector(".mmlc-promoted-chat-pane");
+    const target = roomView || findActiveRoomView();
 
-    // Once a native RoomView has been lifted to fullscreen, keep that exact DOM
-    // node pinned as long as it still contains the active timeline/composer.
-    // Element mutates the room view continuously while the composer receives
-    // focus and while the timeline settles. Replacing the promoted node during
-    // those mutations makes the composer disappear and reappear.
+    // Once a complete native RoomView has been lifted to fullscreen, keep that
+    // exact DOM node pinned. Earlier builds accepted a timeline-only child as
+    // "stable". On Firefox Android portrait mode Element can first expose only
+    // the timeline, while the composer/actions are mounted one level higher a
+    // moment later. Keeping the child promoted hides the new-message indicator,
+    // attachment controls, and the text editor. Prefer the larger candidate when
+    // it contains the existing promoted node and adds a real composer.
     if (isStablePromotedChatPane(existing)) {
-      if (!(roomView instanceof Element) || chatPaneCandidatesReferToSamePane(existing, roomView)) {
+      const targetAddsComposer = target instanceof Element && target.contains(existing) && hasChatComposer(target) && !hasChatComposer(existing);
+      if (!targetAddsComposer && (!(roomView instanceof Element) || chatPaneCandidatesReferToSamePane(existing, roomView))) {
+        markChatLayoutParts(existing);
         return true;
       }
     }
 
-    const target = roomView || findActiveRoomView();
-
     if (isStablePromotedChatPane(existing) && (!target || chatPaneCandidatesReferToSamePane(existing, target))) {
+      markChatLayoutParts(existing);
       return true;
     }
 
@@ -3677,13 +5548,212 @@
 
     clearPromotedChatPane();
     target.classList.add("mmlc-promoted-chat-pane");
+    markChatLayoutParts(target);
     return true;
   }
 
   function isStablePromotedChatPane(element) {
     if (!(element instanceof Element) || !element.isConnected || element.closest(OWNED_SELECTOR)) return false;
     if (looksLikeSpaceOverviewPane(element)) return false;
-    return Boolean(element.querySelector(MESSAGE_PART_SELECTOR));
+    return hasChatTimeline(element) && hasChatComposer(element);
+  }
+
+  function hasChatTimeline(element) {
+    if (!(element instanceof Element)) return false;
+    return Boolean(element.querySelector(".mx_TimelinePanel, .mx_MessagePanel, [class*='TimelinePanel'], [class*='MessagePanel'], [role='log'], [data-virtuoso-scroller='true']"));
+  }
+
+  function hasChatComposer(element) {
+    if (!(element instanceof Element)) return false;
+    return Boolean(findChatComposer(element));
+  }
+
+  function findChatComposer(root) {
+    if (!(root instanceof Element)) return null;
+    const candidates = uniqueElements([
+      ...root.querySelectorAll(".mx_MessageComposer, [class*='MessageComposer']")
+    ]).filter(element => {
+      if (!(element instanceof Element) || element.closest(OWNED_SELECTOR) || element.closest(RIGHT_PANEL_SELECTOR)) return false;
+      if (!element.querySelector("[contenteditable='true'], textarea, input, [role='textbox'], .mx_MessageComposer_actions, [class*='MessageComposer_actions']")) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width >= 80 || !isRendered(element);
+    });
+    return candidates.sort((a, b) => scoreChatComposer(b) - scoreChatComposer(a))[0] || null;
+  }
+
+  function scoreChatComposer(element) {
+    if (!(element instanceof Element)) return 0;
+    const rect = element.getBoundingClientRect();
+    const signature = elementSignature(element).toLowerCase();
+    let score = rect.width * Math.max(32, rect.height);
+    if (/mx_messagecomposer|messagecomposer$/.test(signature)) score += 500000;
+    if (element.querySelector("[contenteditable='true'], textarea, input, [role='textbox']")) score += 250000;
+    if (element.querySelector(".mx_MessageComposer_actions, [class*='MessageComposer_actions']")) score += 100000;
+    score += rect.top;
+    return score;
+  }
+
+  function markChatLayoutParts(root) {
+    if (!(root instanceof Element)) return false;
+
+    for (const element of root.querySelectorAll(".mmlc-chat-composer, .mmlc-chat-timeline, .mmlc-chat-scroll")) {
+      element.classList.remove("mmlc-chat-composer", "mmlc-chat-timeline", "mmlc-chat-scroll");
+    }
+
+    const composer = findChatComposer(root);
+    if (composer) composer.classList.add("mmlc-chat-composer");
+
+    const timelines = uniqueElements([
+      ...root.querySelectorAll(".mx_RoomView_timeline, [class*='RoomView_timeline'], .mx_RoomView_messagePanel, [class*='RoomView_messagePanel'], .mx_TimelinePanel, [class*='TimelinePanel'], .mx_MessagePanel, [class*='MessagePanel'], .mx_ScrollPanel, [class*='ScrollPanel']")
+    ]).filter(isChatTimelineContainerCandidate);
+
+    const timeline = timelines.sort((a, b) => scoreTimelineCandidate(b) - scoreTimelineCandidate(a))[0] || null;
+    if (timeline) timeline.classList.add("mmlc-chat-timeline");
+
+    for (const scroller of findChatTimelineScrollContainers(root).slice(0, 3)) {
+      scroller.classList.add("mmlc-chat-scroll");
+    }
+
+    stabilizePromotedChatTimelineGeometry(root);
+    document.documentElement.classList.toggle("mmlc-chat-composer-ready", Boolean(composer));
+    document.documentElement.classList.toggle("mmlc-chat-composer-missing", !composer);
+    return Boolean(composer || timeline);
+  }
+
+  function repairPromotedChatLayout(reason = "chat-layout") {
+    if (currentMode !== "chat" || !isMobileLayoutEnabled()) return false;
+
+    const promoted = document.querySelector(".mmlc-promoted-chat-pane");
+    const target = findActiveRoomView();
+
+    // If the currently promoted node is only a timeline/body fragment and the
+    // complete RoomView has appeared, promote the complete node so Element's own
+    // composer, attachment button, and new-message controls remain in the same
+    // native layout tree.
+    if (promoted instanceof Element && target instanceof Element && target !== promoted && target.contains(promoted) && hasChatComposer(target)) {
+      clearPromotedChatPane();
+      target.classList.add("mmlc-promoted-chat-pane");
+      markChatLayoutParts(target);
+      document.documentElement.classList.add("mmlc-has-promoted-chat-pane");
+      requestElementLayoutRefresh(reason);
+      return true;
+    }
+
+    const root = target instanceof Element && hasChatComposer(target) ? target : promoted;
+    if (root instanceof Element) {
+      markChatLayoutParts(root);
+      requestElementLayoutRefresh(reason);
+      return true;
+    }
+
+    document.documentElement.classList.add("mmlc-chat-composer-missing");
+    document.documentElement.classList.remove("mmlc-chat-composer-ready");
+    requestElementLayoutRefresh(reason);
+    return false;
+  }
+
+  function requestElementLayoutRefresh(reason = "layout") {
+    try { window.dispatchEvent(new Event("resize")); } catch {}
+    try { document.dispatchEvent(new Event("selectionchange")); } catch {}
+  }
+
+  function scoreTimelineCandidate(element) {
+    if (!isChatTimelineContainerCandidate(element)) return -1;
+    const rect = element.getBoundingClientRect();
+    const signature = elementSignature(element).toLowerCase();
+    let score = rect.width * Math.max(64, rect.height);
+    if (/roomview_timeline|roomview-timeline|mx_roomview_timeline/.test(signature)) score += 350000;
+    if (/timelinepanel/.test(signature)) score += 300000;
+    if (/messagepanel/.test(signature)) score += 200000;
+    if (/scrollpanel/.test(signature)) score += 120000;
+    if (element.querySelector(".mx_EventTile, [class*='EventTile'], [data-event-id], [class*='MessageEvent']")) score += 200000;
+    return score;
+  }
+
+  function isChatTimelineContainerCandidate(element) {
+    if (!(element instanceof Element) || element.closest(OWNED_SELECTOR) || element.closest(RIGHT_PANEL_SELECTOR)) return false;
+    if (isChatTimelineReadMarker(element)) return false;
+
+    const signature = elementSignature(element).toLowerCase();
+    if (/eventtile|genericeventlistsummary|timelineseparator|newroomintro/.test(signature)) return false;
+
+    const rect = element.getBoundingClientRect();
+    const hasTimelineContent = Boolean(element.querySelector([
+      ".mx_RoomView_MessageList",
+      "[class*='RoomView_MessageList']",
+      ".mx_EventTile",
+      "[class*='EventTile']",
+      "[data-event-id]",
+      "[role='article']",
+      ".mg-thread-merged",
+      ".mg-thread-inline-reply"
+    ].join(", ")));
+
+    if (isRendered(element) && (rect.width < 160 || rect.height < 80) && !hasTimelineContent) return false;
+    return true;
+  }
+
+  function isChatTimelineReadMarker(element) {
+    if (!(element instanceof Element)) return false;
+    return /readmarker|read-marker|myreadmarker|messagereadmarker/.test(elementSignature(element).toLowerCase());
+  }
+
+  function stabilizePromotedChatTimelineGeometry(root) {
+    if (!(root instanceof Element)) return false;
+
+    let changed = false;
+    const lists = uniqueElements(Array.from(root.querySelectorAll([
+      ".mx_RoomView_MessageList",
+      "[class*='RoomView_MessageList']",
+      "ol[aria-live='polite']"
+    ].join(", "))).filter(element => element instanceof HTMLElement && !element.closest(OWNED_SELECTOR)));
+
+    for (const list of lists) {
+      const inlineHeight = Number.parseFloat(list.style.height || getComputedStyle(list).height || "0");
+      const contentBottom = latestRenderedChatContentBottom(list);
+      const rect = list.getBoundingClientRect();
+      const contentHeight = contentBottom > rect.top ? contentBottom - rect.top : 0;
+      const scrollContainer = list.closest(".mx_ScrollPanel, [class*='ScrollPanel'], .mx_RoomView_messagePanel, [class*='RoomView_messagePanel'], [data-virtuoso-scroller='true'], [role='log']");
+      const scrollport = scrollContainer instanceof Element ? scrollContainer.getBoundingClientRect().height : window.innerHeight || 0;
+      const emptyTail = inlineHeight - contentHeight;
+      const shouldCompact = inlineHeight > 0 && contentHeight > 0 && emptyTail > Math.max(160, scrollport * 0.35);
+
+      if (list.classList.contains("mmlc-chat-message-list-compact") !== shouldCompact) {
+        list.classList.toggle("mmlc-chat-message-list-compact", shouldCompact);
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  function latestRenderedChatContentBottom(list) {
+    if (!(list instanceof Element)) return 0;
+
+    const candidates = uniqueElements(Array.from(list.querySelectorAll([
+      ".mx_EventTile",
+      "[class*='EventTile']",
+      "[data-event-id]",
+      "[role='article']",
+      ".mx_NewRoomIntro",
+      ".mx_GenericEventListSummary",
+      ".mx_TimelineSeparator",
+      ".mg-thread-merged",
+      ".mg-thread-inline-reply",
+      ".mg-thread-message-row",
+      "li"
+    ].join(", "))).filter(element => {
+      if (!(element instanceof Element) || element.closest(OWNED_SELECTOR)) return false;
+      if (isChatTimelineReadMarker(element)) return false;
+      if (!isRendered(element)) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }));
+
+    return candidates.reduce((bottom, element) => {
+      const rect = element.getBoundingClientRect();
+      return Math.max(bottom, rect.bottom);
+    }, 0);
   }
 
   function chatPaneCandidatesReferToSamePane(a, b) {
@@ -3802,6 +5872,7 @@
   function rememberCurrentSpace(item) {
     if (!item) return;
 
+    const pathSnapshot = currentSpacePathSnapshotForLabel(item.label || currentSpaceLabel || "");
     currentSpaceLabel = item.label || currentSpaceLabel;
     currentSpaceElement = item.element instanceof Element ? item.element : null;
     currentSpaceSource = item.source || "";
@@ -3809,7 +5880,7 @@
     currentSpaceTop = Number.isFinite(item.top) ? item.top : currentSpaceElement?.getBoundingClientRect?.().top || 0;
 
     if (Array.isArray(item.path) && item.path.length) {
-      currentSpacePath = pathSegmentsFromSpacePath(item.path);
+      currentSpacePath = chooseStableSpacePathForLabel(pathSegmentsFromSpacePath(item.path), currentSpaceLabel, pathSnapshot);
       const last = currentSpacePath[currentSpacePath.length - 1];
       if (last && item.avatarSrc) last.avatarSrc = item.avatarSrc;
       if (last && item.icon) last.icon = item.icon;
@@ -3818,7 +5889,7 @@
       return;
     }
 
-    currentSpacePath = buildSpacePathForItem(item, collectSpaceControls());
+    currentSpacePath = chooseStableSpacePathForLabel(buildSpacePathForItem(item, collectSpaceControls()), currentSpaceLabel, pathSnapshot);
     updateHierarchyBar();
     persistViewStateSoon();
   }
@@ -4266,6 +6337,9 @@
   }
 
   function preferredMiddlePaneWidth() {
+    if (document.documentElement.classList.contains("mmlc-native-parse-layout")) {
+      return Math.max(320, Math.min(440, Math.round(window.innerWidth * 0.38)));
+    }
     return Math.max(220, Math.min(360, Math.round(window.innerWidth * 0.42)));
   }
 
@@ -4375,7 +6449,7 @@
         area: rect.width * rect.height
       };
 
-      const key = normalizeChatKey(label);
+      const key = chatCollectionKey(item, rect);
       const existing = byLabel.get(key);
       if (!existing || item.area < existing.area) {
         byLabel.set(key, item);
@@ -4448,37 +6522,70 @@
     return cleanRoomLabel(getElementLabel(row) || getElementLabel(candidate));
   }
 
-  async function collectDirectChatsForCurrentSpace() {
-    await ensureCurrentSpaceOverview();
-    await forceLoadSpaceOverviewContent();
-    prefetchHierarchyCacheFromOverview(findSpaceOverviewPane());
+  async function collectDirectChatsForCurrentSpace(options = {}) {
+    return await withNativeElementParseLayout(async () => {
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
+      forceNativeElementParsePanes({ reason: "space-chats", width: 1280 });
+      await ensureCurrentSpaceOverview({
+        forceOpen: Boolean(options.forceOpen),
+        preferLeftRail: Boolean(options.preferLeftRail),
+        minimizeLeftPaneAfterSelect: Boolean(options.minimizeLeftPaneAfterSelect),
+        allowContainedRow: false,
+        actionRun: options.actionRun
+      });
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
+      forceNativeElementParsePanes({ reason: "space-chats", width: 1280 });
+      if (options.minimizeLeftPaneAfterSelect) {
+        minimizeNativeLeftPaneForSpaceOverview("space-chats");
+        await waitForNativeRightSpaceOverviewAfterLeftMinimize(currentSpaceLabel, 1200);
+      }
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
+      await forceLoadSpaceOverviewContent();
+      if (isNativeDomActionCancelled(options.actionRun)) return [];
+      if (!spaceOverviewTitleMatchesLabel(currentSpaceLabel)) return [];
+      prefetchHierarchyCacheFromOverview(findSpaceOverviewPane());
 
-    let overviewChats = collectSpaceOverviewDirectChats();
-    if (!overviewChats.length) {
-      await delay(350);
-      overviewChats = collectSpaceOverviewDirectChats();
-    }
+      let overviewChats = collectSpaceOverviewDirectChats();
+      if (!overviewChats.length) {
+        await delay(520);
+        if (isNativeDomActionCancelled(options.actionRun)) return [];
+        forceNativeElementParsePanes({ reason: "space-chats", width: 1280 });
+        if (options.minimizeLeftPaneAfterSelect) {
+          minimizeNativeLeftPaneForSpaceOverview("space-chats-retry");
+          await waitForNativeRightSpaceOverviewAfterLeftMinimize(currentSpaceLabel, 900);
+        }
+        await forceLoadSpaceOverviewContent();
+        if (isNativeDomActionCancelled(options.actionRun)) return [];
+        if (!spaceOverviewTitleMatchesLabel(currentSpaceLabel)) return [];
+        overviewChats = collectSpaceOverviewDirectChats();
+      }
 
-    if (overviewChats.length) return overviewChats;
+      if (overviewChats.length) return overviewChats;
 
-    // Subspace/chat discovery is intentionally scoped to Element's right-hand
-    // SpaceHierarchy overview. Element's normal room list is flattened and may
-    // include rooms from nested spaces, which makes the companion jump back to
-    // the top-level space.
-    return [];
+      // Subspace/chat discovery is intentionally scoped to Element's right-hand
+      // SpaceHierarchy overview. Element's normal room list is flattened and may
+      // include rooms from nested spaces, which makes the companion jump back to
+      // the top-level space.
+      return [];
+    }, { reason: "space-chats", width: 1280, waitMs: 760 });
   }
 
   async function ensureCurrentSpaceOverview(options = {}) {
+    if (isNativeDomActionCancelled(options.actionRun)) return false;
     await ensureMiddlePaneExpanded();
+    if (isNativeDomActionCancelled(options.actionRun)) return false;
 
     const allowContainedRow = options.allowContainedRow === undefined
       ? currentSpaceSource === "space-overview"
       : Boolean(options.allowContainedRow);
     if (!options.forceOpen && spaceOverviewMatchesCurrentSpace({ allowContainedRow })) return true;
 
-    const labeledParent = options.preferLeftRail || currentSpaceSource !== "space-overview"
-      ? findSpaceItemByLabel(currentSpaceLabel)
+    const leftRailParent = currentSpaceLabel
+      ? (findSpaceItemForCurrentPathOrLabel(currentSpaceLabel) || findSpaceItemByLabel(currentSpaceLabel))
       : null;
+    const labeledParent = leftRailParent || (options.preferLeftRail || currentSpaceSource !== "space-overview"
+      ? findSpaceItemByLabel(currentSpaceLabel)
+      : null);
     const rememberedParent = currentSpaceElement instanceof Element
       ? { element: currentSpaceElement, label: currentSpaceLabel, source: currentSpaceSource }
       : null;
@@ -4490,12 +6597,22 @@
     if (!parent?.element) return Boolean(findSpaceOverviewPane());
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      if (isNativeDomActionCancelled(options.actionRun)) return false;
       if (!options.forceOpen && spaceOverviewMatchesCurrentSpace({ allowContainedRow })) return true;
       const activation = findSpaceOverviewActivationElement(parent.element) || parent.element;
       clickElement(activation);
       await delay(300);
+      if (isNativeDomActionCancelled(options.actionRun)) return false;
       clickElement(activation);
+      if (options.minimizeLeftPaneAfterSelect) {
+        minimizeNativeLeftPaneForSpaceOverview(options.reason || "space-overview");
+      }
       await delay(560);
+      if (isNativeDomActionCancelled(options.actionRun)) return false;
+      if (options.minimizeLeftPaneAfterSelect) {
+        await waitForNativeRightSpaceOverviewAfterLeftMinimize(currentSpaceLabel, 1200);
+      }
+      if (isNativeDomActionCancelled(options.actionRun)) return false;
       if (spaceOverviewMatchesCurrentSpace({ allowContainedRow })) return true;
     }
 
@@ -4519,6 +6636,13 @@
   function collectSpaceOverviewDirectChats() {
     const pane = findSpaceOverviewPane();
     if (!pane) return [];
+
+    // Direct chat parsing must be scoped to the currently selected space overview.
+    // If Element still shows a child/previous overview, returning its direct rows
+    // corrupts the cache for the parent space and makes chats appear under the
+    // wrong hierarchy entry.
+    const label = normalizeSpaces(currentSpaceLabel || getCurrentSpaceLabel());
+    if (label && !/^(startseite|home)$/i.test(label) && !spaceOverviewTitleMatchesCurrentSpace(pane, label.toLowerCase())) return [];
 
     let rows = collectDirectSpaceOverviewRowsForCurrentSpace(pane);
     if (!rows.length) return [];
@@ -5752,6 +7876,20 @@
     return normalizeSpaces(label).toLowerCase();
   }
 
+  function chatCollectionKey(item, rect = null) {
+    const routeKey = roomRouteKey(item?.href || "");
+    if (routeKey) return `route:${routeKey}`;
+
+    const cleanLabel = normalizeChatKey(item?.label || "");
+    if (item?.id) return `id:${item.id}`;
+
+    if (rect && Number.isFinite(rect.top) && Number.isFinite(rect.left)) {
+      return `pos:${cleanLabel}:${Math.round(rect.top)}:${Math.round(rect.left)}:${Math.round(rect.width)}:${Math.round(rect.height)}`;
+    }
+
+    return `label:${cleanLabel}`;
+  }
+
   function collectSubspaces() {
     // Once Element's space overview is visible, never mix in the left rail. The
     // left rail only contains joined/visible spaces and can make it look as if
@@ -5967,6 +8105,9 @@
 
     if (explicitLeft instanceof Element && !explicitLeft.closest(OWNED_SELECTOR) && isRendered(explicitLeft)) {
       const rect = explicitLeft.getBoundingClientRect();
+      if (document.documentElement.classList.contains("mmlc-native-parse-layout")) {
+        if (rect.width >= 120 && rect.height >= 180) return explicitLeft;
+      }
       if (rect.right > spaceRight + 80 && rect.left < roomLeft - 40) {
         return explicitLeft;
       }
@@ -6453,6 +8594,9 @@
       observerFlushTimer = setTimeout(() => {
         observerFlushTimer = null;
         suppressMobileWarnings();
+        if (currentMode === "chat" || currentMode === "thread") {
+          applyChatViewportScrollLock();
+        }
 
         // Avoid re-promoting the chat pane on every composer/timeline mutation.
         // Those mutations are frequent while typing or while Element recalculates
@@ -6491,6 +8635,7 @@
       if (!isMobileLayoutEnabled() || !isThreadViewFeatureEnabled()) return;
       const target = event.target instanceof Element ? event.target : null;
       if (!target || target.closest(OWNED_SELECTOR) || target.closest(RIGHT_PANEL_SELECTOR)) return;
+      if (Date.now() < suppressThreadOpenUntil) return;
       if (!looksLikeThreadOpenTrigger(target)) return;
 
       lastThreadTriggerClickAt = Date.now();
@@ -6813,6 +8958,9 @@
     const target = normalizeClickable(element) || element;
     if (!(target instanceof Element)) return;
 
+    const targetIsTextEntry = isTextEntryElement(target);
+    if (!targetIsTextEntry) blurActiveTextEntry();
+
     try {
       target.scrollIntoView({ block: "nearest", inline: "nearest" });
     } catch {}
@@ -6830,6 +8978,10 @@
       target.click();
     } catch {
       dispatchMouseLike(target, "click", clientX, clientY);
+    }
+
+    if (!targetIsTextEntry) {
+      dismissVirtualKeyboard("synthetic-click");
     }
   }
 
@@ -6872,7 +9024,85 @@
     return Boolean(pane instanceof Element && clean && spaceOverviewTitleMatchesCurrentSpace(pane, clean));
   }
 
+  function chatItemHasConnectedElement(item) {
+    return Boolean(
+      item?.element instanceof Element && item.element.isConnected ||
+      item?.tileElement instanceof Element && item.tileElement.isConnected ||
+      item?.activationElement instanceof Element && item.activationElement.isConnected
+    );
+  }
+
+  function sameChatItem(candidate, target) {
+    if (!candidate || !target) return false;
+
+    const candidateRoute = roomRouteKey(candidate.href || roomHrefForElement(candidate.element) || roomHrefForElement(candidate.activationElement));
+    const targetRoute = roomRouteKey(target.href || roomHrefForElement(target.element) || roomHrefForElement(target.activationElement));
+    if (candidateRoute && targetRoute && candidateRoute === targetRoute) return true;
+
+    const candidateId = String(candidate.id || "");
+    const targetId = String(target.id || "");
+    if (candidateId && targetId && candidateId === targetId) return true;
+
+    const candidateLabel = normalizeSpaces(candidate.label || "").toLowerCase();
+    const targetLabel = normalizeSpaces(target.label || "").toLowerCase();
+    if (!candidateLabel || !targetLabel || candidateLabel !== targetLabel) return false;
+
+    const candidatePath = itemPathSignature(candidate);
+    const targetPath = itemPathSignature(target);
+    return !candidatePath || !targetPath || candidatePath === targetPath;
+  }
+
+  function itemPathSignature(item) {
+    const path = Array.isArray(item?.path) ? item.path : [];
+    return path
+      .filter(segment => segment && segment.type !== "room")
+      .map(segment => normalizeSpaces(segment.label || "").toLowerCase())
+      .filter(Boolean)
+      .join("/");
+  }
+
+  function findMatchingChatItem(items, target) {
+    if (!Array.isArray(items) || !items.length || !target) return null;
+    return items.find(candidate => sameChatItem(candidate, target)) || null;
+  }
+
+  async function refreshLiveChatItemForOpen(item) {
+    if (!item || item.source === "home-center-pane") return null;
+
+    const previousLabel = currentSpaceLabel;
+    const previousPath = currentSpacePath;
+    const itemSpacePath = Array.isArray(item.path) ? item.path.filter(segment => segment && segment.type !== "room") : [];
+    const lastSpace = itemSpacePath[itemSpacePath.length - 1];
+
+    if (lastSpace?.label) {
+      currentSpaceLabel = lastSpace.label;
+      currentSpacePath = pathSegmentsFromSpacePath(itemSpacePath);
+    }
+
+    try {
+      const chatItems = await collectDirectChatsForCurrentSpace({
+        forceOpen: true,
+        preferLeftRail: true,
+        minimizeLeftPaneAfterSelect: true,
+        backgroundRefresh: false
+      });
+
+      if (chatItems.length) {
+        const cacheKey = chatsCacheKey(currentSpacePathForPanel(currentSpaceLabel), currentSpaceLabel);
+        cacheListItems(cacheKey, chatItems);
+      }
+
+      return findMatchingChatItem(chatItems, item);
+    } finally {
+      if (currentPanel !== "chats") {
+        currentSpaceLabel = previousLabel;
+        currentSpacePath = previousPath;
+      }
+    }
+  }
+
   async function openChatItem(item) {
+    cancelPendingNativeDomActions("open-chat");
     const beforeHref = location.href;
     const beforeLabel = activeRoomLabel();
 
@@ -6880,9 +9110,15 @@
       return openHomeCenterPaneChatItem(item, beforeHref, beforeLabel);
     }
 
-    const resolved = resolveCurrentSpaceOverviewItem(item);
-    const rowElement = resolved?.rowElement || item?.element;
-    const tileElement = resolved?.tileElement || item?.tileElement || item?.activationElement || rowElement;
+    let workingItem = item;
+    if (!chatItemHasConnectedElement(workingItem) && workingItem?.joined !== false) {
+      const freshItem = await refreshLiveChatItemForOpen(workingItem);
+      if (freshItem) workingItem = { ...workingItem, ...freshItem, path: Array.isArray(workingItem.path) && workingItem.path.length ? workingItem.path : freshItem.path };
+    }
+
+    const resolved = resolveCurrentSpaceOverviewItem(workingItem);
+    const rowElement = resolved?.rowElement || workingItem?.element;
+    const tileElement = resolved?.tileElement || workingItem?.tileElement || workingItem?.activationElement || rowElement;
 
     if (!(rowElement instanceof Element)) return false;
 
@@ -6918,7 +9154,7 @@
 
       if (openControl instanceof Element) {
         clickElement(openControl);
-        if (await waitForOpenedRoom(item?.label, 5200, beforeHref, beforeLabel)) return true;
+        if (await waitForOpenedRoom(workingItem?.label, 5200, beforeHref, beforeLabel)) return true;
 
         // Some Element builds attach the handler to the surrounding action box
         // rather than to the inner label. Try the nearest direct action wrapper
@@ -6926,7 +9162,7 @@
         const actionWrapper = openControl.closest(".mx_SpaceHierarchy_actions, [class*='SpaceHierarchy_actions']");
         if (actionWrapper instanceof Element && actionWrapper !== openControl) {
           clickElement(actionWrapper);
-          if (await waitForOpenedRoom(item?.label, 3200, beforeHref, beforeLabel)) return true;
+          if (await waitForOpenedRoom(workingItem?.label, 3200, beforeHref, beforeLabel)) return true;
         }
 
         await delay(200);
@@ -6936,22 +9172,22 @@
       break;
     }
 
-    const fallbackControl = item?.activationElement instanceof Element
-      ? item.activationElement
+    const fallbackControl = workingItem?.activationElement instanceof Element
+      ? workingItem.activationElement
       : findRoomActivationElement(tileElement, tileElement);
 
     // Only use the generic room activation for joined rooms. For unjoined rows,
     // the primary action is often "Betreten"/"Join"; clicking it here would join
     // the room instead of merely opening the visible chat pane.
-    if (item?.joined !== false && fallbackControl instanceof Element) {
+    if (workingItem?.joined !== false && fallbackControl instanceof Element) {
       clickElement(fallbackControl);
-      if (await waitForOpenedRoom(item?.label, 2600, beforeHref, beforeLabel)) return true;
+      if (await waitForOpenedRoom(workingItem?.label, 2600, beforeHref, beforeLabel)) return true;
     }
 
-    if (location.href === beforeHref && item?.href && item?.joined !== false) {
+    if (location.href === beforeHref && workingItem?.href && workingItem?.joined !== false) {
       try {
-        location.assign(new URL(item.href, location.href).toString());
-        if (await waitForOpenedRoom(item?.label, 4200, beforeHref, beforeLabel)) return true;
+        location.assign(new URL(workingItem.href, location.href).toString());
+        if (await waitForOpenedRoom(workingItem?.label, 4200, beforeHref, beforeLabel)) return true;
       } catch {}
     }
 
@@ -6980,6 +9216,7 @@
     };
   }
   async function openHomeCenterPaneChatItem(item, beforeHref = location.href, beforeLabel = "") {
+    restoreNativeReturnLeftPaneMinimize();
     // Chats shown on Element's Startseite/Home screen are regular entries in
     // the native Element left/middle pane. They do not expose the SpaceHierarchy
     // row action "View"/"Anzeigen" that space-overview rooms use, so they must
@@ -7235,9 +9472,21 @@
       const view = findActiveRoomView();
       if (view instanceof Element) {
         const activeLabel = normalizeSpaces(activeRoomLabel(view)).toLowerCase();
-        if (normalizedTarget && activeLabel && activeLabel === normalizedTarget) return true;
-        if (location.href !== beforeHref && (!activeLabel || activeLabel !== normalizedBefore)) return true;
-        if (!normalizedTarget && activeLabel) return true;
+        if (normalizedTarget && activeLabel && activeLabel === normalizedTarget) {
+          scrollActiveChatToBottom("room-opened");
+          scheduleActiveChatScrollToBottom("room-opened");
+          return true;
+        }
+        if (location.href !== beforeHref && (!activeLabel || activeLabel !== normalizedBefore)) {
+          scrollActiveChatToBottom("room-opened");
+          scheduleActiveChatScrollToBottom("room-opened");
+          return true;
+        }
+        if (!normalizedTarget && activeLabel) {
+          scrollActiveChatToBottom("room-opened");
+          scheduleActiveChatScrollToBottom("room-opened");
+          return true;
+        }
       }
 
       await delay(120);
@@ -7324,6 +9573,33 @@
     ].join(", "));
 
     return preferred instanceof Element ? preferred : tile;
+  }
+
+  function roomRouteKey(href) {
+    const text = String(href || "");
+    if (!text) return "";
+
+    try {
+      const url = new URL(text, location.href);
+      const combined = `${url.pathname}${url.hash}`;
+      const match = combined.match(/(?:#\/|\/)room\/([^/?#]+)/i);
+      return match ? decodeURIComponent(match[1]).toLowerCase() : "";
+    } catch {
+      const match = text.match(/(?:#\/|\/)room\/([^/?#]+)/i);
+      return match ? decodeURIComponent(match[1]).toLowerCase() : "";
+    }
+  }
+
+  function uniqueValues(values) {
+    const result = [];
+    const seen = new Set();
+    for (const value of values || []) {
+      const clean = String(value || "");
+      if (!clean || seen.has(clean)) continue;
+      seen.add(clean);
+      result.push(clean);
+    }
+    return result;
   }
 
   function roomHrefForElement(element) {
