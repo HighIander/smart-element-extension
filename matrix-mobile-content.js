@@ -198,7 +198,9 @@
   }
 
   function isThreadViewFeatureEnabled() {
-    return isMobileLayoutEnabled() && combinedFeatureConfig.enableThreadView !== false;
+    // This reports the shared thread-rendering feature state. Mobile-specific
+    // handlers still check isMobileLayoutEnabled() before changing layout.
+    return combinedFeatureConfig.enableThreadView !== false;
   }
 
   async function refreshCombinedFeatureConfig() {

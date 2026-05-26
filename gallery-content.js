@@ -353,10 +353,10 @@
   }
 
   function isThreadViewFeatureEnabled() {
-    // Smart Element's thread view is part of the mobile companion. It is no
-    // longer exposed as an independent gallery setting because enabling it
-    // without the mobile layout creates duplicate/ambiguous thread renderings.
-    return combinedFeatureConfig.enableMatrixMobile !== false;
+    // Inline thread rendering is a gallery feature and must not depend on the
+    // Smart Element mobile layout. The mobile layout option only controls the
+    // mobile navigation shell in matrix-mobile-content.js.
+    return combinedFeatureConfig.enableThreadView !== false;
   }
 
   function isEventFromOtherCombinedUi(event) {
@@ -3490,7 +3490,9 @@
     return Boolean(
       root.classList.contains("mmlc-mode-chat") ||
       root.classList.contains("mmlc-mode-thread") ||
-      document.querySelector(".mmlc-promoted-chat-pane")
+      document.querySelector(".mmlc-promoted-chat-pane") ||
+      findMainTimelineScroller() ||
+      document.querySelector(".mx_RoomView, [data-testid='room-view'], [class*='RoomView'], [role='log']")
     );
   }
 
@@ -3650,14 +3652,17 @@
 
   function captureMergedThreadAutoScrollIntent() {
     const root = document.documentElement;
-    const inChatView = root.classList.contains("mmlc-mode-chat") ||
-      Boolean(document.querySelector(".mmlc-promoted-chat-pane"));
+    const scroller = findMainTimelineScroller();
+    const inChatView = Boolean(
+      root.classList.contains("mmlc-mode-chat") ||
+      document.querySelector(".mmlc-promoted-chat-pane") ||
+      scroller
+    );
 
     if (!inChatView) {
       return { inChatView: false, nearEnd: false };
     }
 
-    const scroller = findMainTimelineScroller();
     return {
       inChatView: true,
       nearEnd: isScrollerNearVisualEnd(scroller, 420),

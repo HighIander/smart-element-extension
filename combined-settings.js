@@ -101,11 +101,14 @@
       normalized[key] = raw[key] !== false;
     }
 
-    // Thread view is not an independent feature switch anymore. It follows the
-    // Smart Element mobile layout so the gallery and thread renderers cannot be
-    // configured into a duplicate/half-active state. Keep the field for backward
-    // compatibility with older stored settings.
-    normalized.enableThreadView = normalized.enableMatrixMobile !== false;
+    // Thread rendering is independent from the Smart Element mobile layout.
+    // Older builds mirrored enableThreadView from enableMatrixMobile, which made
+    // inline threads disappear as soon as the mobile layout option was disabled.
+    // Keep the compatibility field enabled by default; the visible inline-thread
+    // switch remains mergeThreadsInMainView in the gallery settings.
+    normalized.enableThreadView = raw.enableThreadView === false && raw.enableMatrixMobile !== false
+      ? false
+      : true;
 
     const refreshRaw = Number(raw.selectorBackgroundRefreshSeconds);
     normalized.selectorBackgroundRefreshSeconds = Number.isFinite(refreshRaw)
@@ -142,7 +145,7 @@
         : inferInitialMatrixMobileDefault();
       const firstRunPatch = {
         enableMatrixMobile,
-        enableThreadView: enableMatrixMobile
+        enableThreadView: true
       };
 
       if (autoDefault.applied !== true) {
