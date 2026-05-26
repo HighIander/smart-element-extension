@@ -1332,3 +1332,206 @@ html.mg-gallery-feature-disabled #mg-global-drop-hint {
 #mg-thread-side-messages {
   background: #f3f4f6 !important;
 }
+
+/* v50: bright gallery dialog theme and icon-only action buttons. */
+:root {
+  --mg-window-bg: #f3f9ff;
+  --mg-window-bg-strong: #eaf6ff;
+  --mg-window-bg-soft: #f8fcff;
+  --mg-border: #bfd7ee;
+  --mg-border-strong: #93bde6;
+  --mg-text: #0f172a;
+  --mg-text-muted: #475569;
+  --mg-primary: #2563eb;
+  --mg-primary-hover: #1d4ed8;
+  --mg-danger: #ef4444;
+  --mg-danger-hover: #dc2626;
+}
+
+#mg-panel {
+  background: var(--mg-window-bg) !important;
+  color: var(--mg-text) !important;
+  border: 1px solid var(--mg-border) !important;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.22) !important;
+}
+
+#mg-panel h3,
+#mg-panel label,
+#mg-panel .mg-dropzone-title,
+#mg-panel .mg-dropzone-subtitle,
+#mg-status,
+#mg-preview:empty::before,
+#mg-thread-target,
+#mg-thread-target span,
+#mg-thread-target strong {
+  color: var(--mg-text) !important;
+}
+
+#mg-panel label,
+#mg-panel .mg-dropzone-subtitle,
+#mg-status,
+#mg-preview:empty::before {
+  opacity: 1 !important;
+  color: var(--mg-text-muted) !important;
+}
+
+#mg-panel input,
+#mg-panel textarea,
+#mg-thread-side-text {
+  background: #ffffff !important;
+  color: var(--mg-text) !important;
+  border: 1px solid var(--mg-border-strong) !important;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.06) !important;
+}
+
+#mg-panel input::placeholder,
+#mg-panel textarea::placeholder,
+#mg-thread-side-text::placeholder {
+  color: #64748b !important;
+}
+
+#mg-settings {
+  background: var(--mg-window-bg-soft) !important;
+  border-color: var(--mg-border) !important;
+  color: var(--mg-text) !important;
+}
+
+#mg-top-actions button,
+#mg-settings-toggle,
+#mg-language-toggle,
+#mg-settings-save,
+#mg-close,
+#mg-clear-thread-target {
+  background: #dbeafe !important;
+  color: #1e3a8a !important;
+  border: 1px solid #bfdbfe !important;
+}
+
+#mg-top-actions button:hover,
+#mg-settings-toggle:hover,
+#mg-language-toggle:hover,
+#mg-settings-save:hover,
+#mg-close:hover,
+#mg-clear-thread-target:hover {
+  background: #bfdbfe !important;
+}
+
+#mg-thread-target {
+  background: #e0f2fe !important;
+  border-color: #7dd3fc !important;
+}
+
+#mg-upload-pane {
+  background: var(--mg-window-bg-soft) !important;
+  border-color: var(--mg-border) !important;
+}
+
+#mg-dropzone {
+  background: #eaf6ff !important;
+  color: var(--mg-text) !important;
+  border-bottom: 1px dashed var(--mg-border-strong) !important;
+}
+
+#mg-dropzone:hover,
+#mg-dropzone.mg-dragover,
+body.mg-global-dragover #mg-dropzone {
+  background: #dbeafe !important;
+  color: var(--mg-text) !important;
+  border-color: #60a5fa !important;
+}
+
+#mg-preview {
+  background: #f8fcff !important;
+}
+
+.mg-preview-item {
+  background: #e2e8f0 !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+#mg-upload-actions {
+  background: #eaf6ff !important;
+  border-top: 1px solid var(--mg-border) !important;
+  align-items: center !important;
+}
+
+#mg-clear,
+#mg-send,
+#mg-thread-side-send {
+  width: 42px !important;
+  min-width: 42px !important;
+  height: 38px !important;
+  padding: 0 !important;
+  margin-top: 0 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 999px !important;
+  border: none !important;
+  font-size: 0 !important;
+  line-height: 1 !important;
+  overflow: hidden !important;
+}
+
+#mg-clear {
+  background: var(--mg-danger) !important;
+  color: #ffffff !important;
+  margin-right: 0 !important;
+}
+
+#mg-clear:hover {
+  background: var(--mg-danger-hover) !important;
+}
+
+#mg-clear::before {
+  content: "🗑";
+  font-size: 20px !important;
+  line-height: 1 !important;
+}
+
+#mg-send,
+#mg-thread-side-send {
+  background: var(--mg-primary) !important;
+  color: #ffffff !important;
+}
+
+#mg-send:hover,
+#mg-thread-side-send:hover {
+  background: var(--mg-primary-hover) !important;
+}
+
+#mg-send::before,
+#mg-thread-side-send::before {
+  content: "➤";
+  font-size: 22px !important;
+  line-height: 1 !important;
+  transform: translateX(1px) !important;
+}
+
+#mg-clear[disabled],
+#mg-send[disabled],
+#mg-thread-side-send[disabled] {
+  opacity: 0.55 !important;
+  cursor: not-allowed !important;
+}
+
+#mg-thread-side-panel {
+  background: #f3f4f6 !important;
+  color: var(--mg-text) !important;
+}
+
+#mg-thread-side-composer,
+.mg-thread-side-composer {
+  background: #f3f9ff !important;
+  color: var(--mg-text) !important;
+}
+
+/* Smart Element v53 mobile lightbox gestures. Keep keyboard controls intact,
+   but let the lightbox own touch gestures for swipe and pinch zoom. */
+.mg-lightbox,
+.mg-lightbox-image-wrap,
+#mg-lightbox-image {
+  touch-action: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+}

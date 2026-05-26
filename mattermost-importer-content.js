@@ -653,6 +653,16 @@
     return visibleSpaceOverviews.length === 0;
   }
 
+  function isSmartElementMobileChatOrThreadMode() {
+    const root = document.documentElement;
+    return Boolean(root?.classList?.contains("mmlc-enabled") && (
+      root.classList.contains("mmlc-mode-chat") ||
+      root.classList.contains("mmlc-mode-thread") ||
+      root.classList.contains("mmlc-has-promoted-chat-pane") ||
+      root.classList.contains("mmlc-has-promoted-thread-pane")
+    ));
+  }
+
   function refreshFloatingButtonForCurrentView() {
     const shouldShow = isMattermostToolsEnabled() && isElementChatViewActive();
     const button = document.getElementById(BUTTON_ID);
@@ -748,9 +758,11 @@
       dragging = false;
       button.releasePointerCapture(event.pointerId);
 
-      state.config.buttonRight = parseFloat(button.style.right) || DEFAULT_CONFIG.buttonRight;
-      state.config.buttonBottom = parseFloat(button.style.bottom) || DEFAULT_CONFIG.buttonBottom;
-      await saveConfig();
+      if (moved) {
+        state.config.buttonRight = parseFloat(button.style.right) || DEFAULT_CONFIG.buttonRight;
+        state.config.buttonBottom = parseFloat(button.style.bottom) || DEFAULT_CONFIG.buttonBottom;
+        await saveConfig();
+      }
       positionFloatingLogPopover(button);
 
       if (!moved) {
@@ -759,6 +771,12 @@
     });
 
     window.addEventListener("resize", () => {
+      // Avoid visual drift in Smart Element mobile chat/thread mode. Keyboard and
+      // visualViewport resize events must not rewrite the floating button geometry.
+      if (isSmartElementMobileChatOrThreadMode()) {
+        positionFloatingLogPopover(button);
+        return;
+      }
       const rect = button.getBoundingClientRect();
       const right = Math.max(4, window.innerWidth - rect.right);
       const bottom = Math.max(4, window.innerHeight - rect.bottom);

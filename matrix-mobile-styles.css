@@ -1,3 +1,9 @@
+:root {
+  --mmlc-visual-loading-counter-scale: 1;
+  --mmlc-visual-loading-device-width: 100vw;
+  --mmlc-visual-loading-device-height: 100vh;
+}
+
 #mmlc-toolbar {
   position: fixed;
   top: calc(8px + env(safe-area-inset-top, 0px));
@@ -403,6 +409,104 @@ html.mmlc-mode-thread #mmlc-toolbar-hamburger {
   100% {
     transform: translateX(240%);
   }
+}
+
+
+.mmlc-visual-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(248, 250, 252, 0.94);
+  color: #0f172a;
+  pointer-events: all;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.mmlc-visual-loading-card {
+  width: min(310px, calc(var(--mmlc-visual-loading-device-width, 100vw) - 48px));
+  min-height: 172px;
+  transform: scale(var(--mmlc-visual-loading-counter-scale, 1));
+  transform-origin: center center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 22px 20px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.20);
+  text-align: center;
+}
+
+.mmlc-visual-loading-spinner {
+  width: 44px;
+  height: 44px;
+  border: 4px solid #dbeafe;
+  border-top-color: #2563eb;
+  border-radius: 999px;
+  animation: mmlc-visual-loading-spin 0.8s linear infinite;
+}
+
+#mmlc-visual-loading-title {
+  color: #0f172a;
+  font: 900 16px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#mmlc-visual-loading-detail {
+  color: #475569;
+  font: 700 13px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+@keyframes mmlc-visual-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#mmlc-chat-opening-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483646;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(248, 250, 252, 0.92);
+  color: #0f172a;
+  pointer-events: all;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+#mmlc-chat-opening-overlay .mmlc-chat-opening-card {
+  width: min(360px, calc(var(--mmlc-visual-loading-device-width, 100vw) - 48px));
+}
+
+#mmlc-chat-opening-overlay .mmlc-chat-opening-title {
+  color: #0f172a;
+  font: 900 18px/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#mmlc-chat-opening-overlay .mmlc-chat-opening-detail {
+  color: #475569;
+  font: 700 14px/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#mmlc-chat-opening-overlay.mmlc-soft-ready {
+  background: rgba(248, 250, 252, 0.38);
+  pointer-events: none;
+}
+
+#mmlc-chat-opening-overlay.mmlc-soft-ready .mmlc-chat-opening-card {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 20px 54px rgba(15, 23, 42, 0.20);
 }
 
 .mmlc-current-space {
@@ -959,6 +1063,55 @@ html.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane [
   .mmlc-list-item {
     min-height: 136px;
     padding: 12px 9px;
+  }
+
+  .mmlc-visual-loading {
+    padding: max(18px, env(safe-area-inset-top, 0px)) 18px max(18px, env(safe-area-inset-bottom, 0px));
+  }
+
+  .mmlc-visual-loading-card {
+    width: min(460px, calc(var(--mmlc-visual-loading-device-width, 100vw) - 24px));
+    min-height: min(300px, calc(var(--mmlc-visual-loading-device-height, 100vh) - 96px));
+    gap: 20px;
+    padding: 34px 26px;
+    border-radius: 30px;
+  }
+
+  .mmlc-visual-loading-spinner {
+    width: 88px;
+    height: 88px;
+    border-width: 8px;
+  }
+
+  #mmlc-visual-loading-title {
+    font-size: clamp(25px, 7.2vw, 34px);
+    line-height: 1.08;
+  }
+
+  #mmlc-visual-loading-detail {
+    max-width: 29ch;
+    font-size: clamp(17px, 4.8vw, 21px);
+    line-height: 1.32;
+  }
+
+  #mmlc-chat-opening-overlay {
+    padding: max(18px, env(safe-area-inset-top, 0px)) 18px max(18px, env(safe-area-inset-bottom, 0px));
+  }
+
+  #mmlc-chat-opening-overlay .mmlc-chat-opening-card {
+    width: min(460px, calc(var(--mmlc-visual-loading-device-width, 100vw) - 24px));
+    min-height: min(300px, calc(var(--mmlc-visual-loading-device-height, 100vh) - 96px));
+  }
+
+  #mmlc-chat-opening-overlay .mmlc-chat-opening-title {
+    font-size: clamp(25px, 7.2vw, 34px);
+    line-height: 1.08;
+  }
+
+  #mmlc-chat-opening-overlay .mmlc-chat-opening-detail {
+    max-width: 29ch;
+    font-size: clamp(17px, 4.8vw, 21px);
+    line-height: 1.32;
   }
 }
 
@@ -1973,4 +2126,80 @@ html.mmlc-enabled.mmlc-mode-thread:not(.mmlc-native-parse-layout) #left-panel [c
   max-width: 100% !important;
   min-width: 0 !important;
   box-sizing: border-box !important;
+}
+
+/* v51: keep Element's native side panes geometrically bounded while Smart
+   Element is in mobile chat/thread mode. This is deliberately width-only: it
+   does not remove timeline/media DOM nodes, so Element's image loading pipeline
+   remains intact while the promoted chat/thread view stabilizes. */
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-chat:not(.mmlc-native-parse-layout) .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-thread:not(.mmlc-native-parse-layout) .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-chat:not(.mmlc-native-parse-layout) nav[aria-label="Spaces"],
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-thread:not(.mmlc-native-parse-layout) nav[aria-label="Spaces"] {
+  flex: 0 0 48px !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  flex-basis: 48px !important;
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-chat:not(.mmlc-native-parse-layout):not(.mmlc-has-promoted-chat-pane) #left-panel,
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-thread:not(.mmlc-native-parse-layout):not(.mmlc-has-promoted-thread-pane) #left-panel,
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-chat:not(.mmlc-native-parse-layout):not(.mmlc-has-promoted-chat-pane) [data-testid="left-panel"],
+html.mmlc-enabled.mmlc-native-chat-panes-constrained.mmlc-mode-thread:not(.mmlc-native-parse-layout):not(.mmlc-has-promoted-thread-pane) [data-testid="left-panel"],
+body[data-mmlc-mode="chat"] #left-panel[data-mmlc-mobile-chat-pane-constrained],
+body[data-mmlc-mode="thread"] #left-panel[data-mmlc-mobile-chat-pane-constrained] {
+  flex: 0 1 min(38vw, 420px) !important;
+  flex-grow: 0 !important;
+  flex-shrink: 1 !important;
+  flex-basis: min(38vw, 420px) !important;
+  width: min(38vw, 420px) !important;
+  min-width: 0 !important;
+  max-width: 38vw !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+html.mmlc-enabled.mmlc-native-chat-panes-constrained #left-panel[data-mmlc-mobile-chat-pane-constrained] .mx_LeftPanel_panel,
+html.mmlc-enabled.mmlc-native-chat-panes-constrained #left-panel[data-mmlc-mobile-chat-pane-constrained] .mx_LeftPanel_outerWrapper,
+html.mmlc-enabled.mmlc-native-chat-panes-constrained #left-panel[data-mmlc-mobile-chat-pane-constrained] .mx_LeftPanel_wrapper,
+html.mmlc-enabled.mmlc-native-chat-panes-constrained #left-panel[data-mmlc-mobile-chat-pane-constrained] .mx_RoomListPanel {
+  max-width: 100% !important;
+  overflow-x: hidden !important;
+}
+
+html.mmlc-enabled.mmlc-mode-chat.mmlc-has-promoted-chat-pane .mmlc-promoted-chat-pane,
+html.mmlc-enabled.mmlc-mode-thread.mmlc-has-promoted-thread-pane .mmlc-promoted-thread-pane {
+  width: var(--mmlc-chat-viewport-width, 100vw) !important;
+  max-width: var(--mmlc-chat-viewport-width, 100vw) !important;
+}
+
+/* Smart Element v52 thread overlay stability.
+   Returning from thread view should only hide the overlay, not click Element's
+   native Back controls. Keeping the native thread DOM hidden avoids switching
+   back into the space selector while preserving the promoted chat underneath. */
+html.mmlc-enabled .mmlc-thread-overlay-hidden,
+html.mmlc-enabled [data-mmlc-thread-overlay-hidden] {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+/* Smart Element v54 touch-sort stabilization. Keep normal taps/clicks alive;
+   only suppress selection/context menus and switch to full gesture ownership
+   after a long-press drag has actually started. */
+.mmlc-list-item-draggable {
+  -webkit-touch-callout: none !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
+  touch-action: manipulation !important;
+}
+
+.mmlc-list-item-dragging {
+  touch-action: none !important;
+  pointer-events: auto !important;
 }

@@ -5,7 +5,9 @@
     return;
   }
 
-  const STORAGE_KEY = "matrix_gallery_sender_config";
+  const LEGACY_STORAGE_KEY = "matrix_gallery_sender_config";
+  const STORAGE_KEY = "smart_element_combined_feature_settings_v1";
+  const AUTO_DEVICE_DEFAULT_KEY = "smart_element_auto_device_default_v1";
   const FEATURE_KEYS = [
     "enableGallery",
     "enableMattermostTools",
@@ -59,6 +61,38 @@
     });
   }
 
+  function hasOwnSetting(object, key) {
+    return Boolean(object && typeof object === "object" && Object.prototype.hasOwnProperty.call(object, key));
+  }
+
+  function inferInitialMatrixMobileDefault() {
+    const ua = String(navigator.userAgent || "");
+    const uaMobile = Boolean(navigator.userAgentData?.mobile) || /\b(Android|iPhone|iPad|iPod|Mobile|Windows Phone)\b/i.test(ua);
+    const coarsePointer = (() => {
+      try {
+        return Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+      } catch {
+        return false;
+      }
+    })();
+    const noHover = (() => {
+      try {
+        return Boolean(window.matchMedia?.("(hover: none)")?.matches);
+      } catch {
+        return false;
+      }
+    })();
+    const viewportWidth = Math.min(
+      Number(window.innerWidth) || Infinity,
+      Number(document.documentElement?.clientWidth) || Infinity,
+      Number(screen?.width) || Infinity,
+      Number(screen?.availWidth) || Infinity
+    );
+    const narrowViewport = Number.isFinite(viewportWidth) && viewportWidth <= 900;
+
+    return uaMobile || (coarsePointer && noHover && narrowViewport);
+  }
+
   function normalizeConfig(value) {
     const raw = value && typeof value === "object" ? value : {};
     const normalized = { ...raw };
@@ -82,14 +116,94 @@
   }
 
   async function getConfig() {
-    const result = await chromeStorageGet({ [STORAGE_KEY]: {} });
-    return normalizeConfig(result[STORAGE_KEY] || {});
+    const result = await chromeStorageGet({
+      [LEGACY_STORAGE_KEY]: {},
+      [STORAGE_KEY]: {},
+      [AUTO_DEVICE_DEFAULT_KEY]: {}
+    });
+
+    const legacy = result[LEGACY_STORAGE_KEY] && typeof result[LEGACY_STORAGE_KEY] === "object"
+      ? result[LEGACY_STORAGE_KEY]
+      : {};
+    const stored = result[STORAGE_KEY] && typeof result[STORAGE_KEY] === "object"
+      ? result[STORAGE_KEY]
+      : {};
+    const autoDefault = result[AUTO_DEVICE_DEFAULT_KEY] && typeof result[AUTO_DEVICE_DEFAULT_KEY] === "object"
+      ? result[AUTO_DEVICE_DEFAULT_KEY]
+      : {};
+
+    // On a fresh profile, choose the Matrix mobile layout from the actual
+    // device class exactly once. After that, the user's setting is authoritative
+    // and will not be overwritten by reloads or later browser-window changes.
+    const hasExplicitMobileSetting = hasOwnSetting(stored, "enableMatrixMobile") || hasOwnSetting(legacy, "enableMatrixMobile");
+    if (!hasExplicitMobileSetting) {
+      const enableMatrixMobile = autoDefault.applied === true && typeof autoDefault.detectedMobile === "boolean"
+        ? autoDefault.detectedMobile
+        : inferInitialMatrixMobileDefault();
+      const firstRunPatch = {
+        enableMatrixMobile,
+        enableThreadView: enableMatrixMobile
+      };
+
+      if (autoDefault.applied !== true) {
+        const nextStored = { ...stored, ...firstRunPatch };
+        const nextLegacy = { ...legacy, ...firstRunPatch };
+        await chromeStorageSet({
+          [STORAGE_KEY]: nextStored,
+          [LEGACY_STORAGE_KEY]: nextLegacy,
+          [AUTO_DEVICE_DEFAULT_KEY]: {
+            applied: true,
+            detectedMobile: enableMatrixMobile,
+            appliedAt: Date.now()
+          }
+        });
+      }
+
+      return normalizeConfig({ ...legacy, ...stored, ...firstRunPatch });
+    }
+
+    // Older versions stored both connection data and feature switches in the
+    // gallery configuration object. Keep reading these legacy values, but let
+    // the dedicated settings object take precedence so later gallery saves
+    // cannot accidentally reset feature switches or the refresh interval.
+    return normalizeConfig({
+      ...legacy,
+      ...stored
+    });
   }
 
   async function setConfigPatch(patch) {
-    const current = await getConfig();
+    const result = await chromeStorageGet({
+      [LEGACY_STORAGE_KEY]: {},
+      [STORAGE_KEY]: {}
+    });
+    const current = normalizeConfig({
+      ...(result[LEGACY_STORAGE_KEY] || {}),
+      ...(result[STORAGE_KEY] || {})
+    });
     const next = normalizeConfig({ ...current, ...(patch || {}) });
-    await chromeStorageSet({ [STORAGE_KEY]: next });
+
+    const legacy = result[LEGACY_STORAGE_KEY] && typeof result[LEGACY_STORAGE_KEY] === "object"
+      ? { ...result[LEGACY_STORAGE_KEY] }
+      : {};
+
+    const featureOnly = {
+      enableGallery: next.enableGallery !== false,
+      enableMattermostTools: next.enableMattermostTools !== false,
+      enableMatrixMobile: next.enableMatrixMobile !== false,
+      enableThreadView: next.enableThreadView !== false,
+      selectorBackgroundRefreshSeconds: next.selectorBackgroundRefreshSeconds
+    };
+
+    // Mirror the small feature subset into the legacy object for compatibility
+    // with older code paths, but keep the authoritative copy under STORAGE_KEY.
+    await chromeStorageSet({
+      [STORAGE_KEY]: featureOnly,
+      [LEGACY_STORAGE_KEY]: {
+        ...legacy,
+        ...featureOnly
+      }
+    });
     maybeAlertIfAllDisabled(next);
     return next;
   }
@@ -119,9 +233,16 @@
       return () => {};
     }
 
-    const listener = (changes, areaName) => {
-      if (areaName !== "local" || !changes[STORAGE_KEY]) return;
-      callback(normalizeConfig(changes[STORAGE_KEY].newValue || {}));
+    const listener = async (changes, areaName) => {
+      if (areaName !== "local") return;
+      if (!changes[STORAGE_KEY] && !changes[LEGACY_STORAGE_KEY]) return;
+
+      try {
+        callback(await getConfig());
+      } catch (error) {
+        const stored = changes[STORAGE_KEY]?.newValue || changes[LEGACY_STORAGE_KEY]?.newValue || {};
+        callback(normalizeConfig(stored));
+      }
     };
 
     chrome.storage.onChanged.addListener(listener);
@@ -509,6 +630,8 @@
 
   window.MatrixCombinedSettings = {
     STORAGE_KEY,
+    LEGACY_STORAGE_KEY,
+    AUTO_DEVICE_DEFAULT_KEY,
     FEATURE_KEYS: [...FEATURE_KEYS],
     FEATURE_LABELS: { ...FEATURE_LABELS },
     DEFAULT_FEATURES: { ...DEFAULT_FEATURES },

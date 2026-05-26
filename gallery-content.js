@@ -277,6 +277,9 @@
 
   let selectedFiles = [];
   let previewUrls = [];
+  let gallerySendCleanupRun = 0;
+  let suppressGalleryFocusUntil = 0;
+  let galleryFocusAfterPasteFrame = 0;
   let currentLightboxImages = [];
   let currentLightboxIndex = 0;
   let globalDragDepth = 0;
@@ -308,6 +311,11 @@
   let nextGalleryScopeId = 1;
   let mergedThreadViewEnabled = false;
   let threadViewRebuildTimer = null;
+  let threadViewRebuildInFlight = false;
+  let threadViewRebuildQueued = false;
+  let threadAutoRefreshIntervalId = null;
+  let lastMergedThreadLatestEventId = "";
+  let lastMergedThreadLatestTs = 0;
   let currentThreadReplyTarget = null;
   let currentThreadPanelTarget = null;
   let closedThreadPanelRootEventId = "";
@@ -454,6 +462,7 @@
     loadGalleryHistory();
     installTimelineScrollActivityTracker();
     installGalleryObserver();
+    installThreadAutoRefreshLoop();
     installRoomChangeWatcher();
     requestPageSession();
     installHardOverlayCleanup();
@@ -1012,11 +1021,50 @@
     renderPreview();
 
     setNativeTextValue(document.getElementById("mg-text"), "");
-    document.getElementById("mg-status").textContent = "";
+    const status = document.getElementById("mg-status");
+    if (status) status.textContent = "";
     clearThreadReplyTarget();
 
     const fileInput = document.getElementById("mg-files");
     if (fileInput) fileInput.value = "";
+  }
+
+  function cancelPendingGalleryFocusAfterPaste() {
+    suppressGalleryFocusUntil = Date.now() + 1800;
+    if (galleryFocusAfterPasteFrame) {
+      cancelAnimationFrame(galleryFocusAfterPasteFrame);
+      galleryFocusAfterPasteFrame = 0;
+    }
+  }
+
+  function finishSuccessfulGallerySend() {
+    gallerySendCleanupRun += 1;
+    const run = gallerySendCleanupRun;
+
+    cancelPendingGalleryFocusAfterPaste();
+    clearOriginalComposerText();
+    clearDraft();
+    hideGalleryPanel();
+    forceDropOverlayClosed();
+    hideDropOverlay();
+
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.closest?.("#mg-panel")) {
+      try { active.blur(); } catch {}
+    }
+
+    // Firefox/Element may still deliver focus, paste, or gallery rebuild callbacks
+    // immediately after a successful send. Repeat the final cleanup briefly so the
+    // queue and dialog cannot reappear with the just-sent files.
+    for (const delayMs of [0, 80, 250, 700, 1400]) {
+      setTimeout(() => {
+        if (run !== gallerySendCleanupRun) return;
+        clearDraft();
+        hideGalleryPanel();
+        forceDropOverlayClosed();
+        hideDropOverlay();
+      }, delayMs);
+    }
   }
 
   async function autofillSessionData(forceFreshToken = false) {
@@ -1517,11 +1565,17 @@
   }
 
   function focusGalleryPanelAfterPaste() {
+    if (Date.now() < suppressGalleryFocusUntil) return;
+
     const panel = document.getElementById("mg-panel");
     if (!panel || panel.classList.contains("mg-hidden")) return;
 
     const target = document.getElementById("mg-text") || document.getElementById("mg-dropzone") || panel;
-    requestAnimationFrame(() => {
+    if (galleryFocusAfterPasteFrame) cancelAnimationFrame(galleryFocusAfterPasteFrame);
+    galleryFocusAfterPasteFrame = requestAnimationFrame(() => {
+      galleryFocusAfterPasteFrame = 0;
+      if (Date.now() < suppressGalleryFocusUntil) return;
+      if (!panel.isConnected || panel.classList.contains("mg-hidden")) return;
       try { target.focus({ preventScroll: true }); } catch { target.focus?.(); }
       panel.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: "auto" });
     });
@@ -2318,12 +2372,21 @@
     document.getElementById("mg-token").value = value.token || "";
     document.getElementById("mg-room").value = value.room || "";
     document.getElementById("mg-thread-main-view").checked = mergeThreadsInMainView;
+
+    const settings = combinedSettings();
+    const storedFeatureConfig = settings
+      ? settings.normalizeConfig(await settings.getConfig())
+      : {
+          ...combinedFeatureConfig,
+          enableGallery: value.enableGallery !== false,
+          enableMattermostTools: value.enableMattermostTools !== false,
+          enableMatrixMobile: value.enableMatrixMobile !== false,
+          enableThreadView: value.enableThreadView !== false
+        };
+
     combinedFeatureConfig = {
       ...combinedFeatureConfig,
-      enableGallery: value.enableGallery !== false,
-      enableMattermostTools: value.enableMattermostTools !== false,
-      enableMatrixMobile: value.enableMatrixMobile !== false,
-      enableThreadView: value.enableThreadView !== false
+      ...storedFeatureConfig
     };
     syncCombinedSettingsCheckboxes();
     setMergedThreadViewEnabled(mergeThreadsInMainView && isThreadViewFeatureEnabled());
@@ -2333,16 +2396,27 @@
   }
 
   async function saveConfig(homeserver, token, room) {
+    const current = await chrome.storage.local.get(STORAGE_KEY);
+    const previous = current[STORAGE_KEY] && typeof current[STORAGE_KEY] === "object"
+      ? current[STORAGE_KEY]
+      : {};
+    const settings = combinedSettings();
+    const storedFeatureConfig = settings
+      ? settings.normalizeConfig(await settings.getConfig())
+      : previous;
+
     await chrome.storage.local.set({
       [STORAGE_KEY]: {
+        ...previous,
         homeserver,
         token,
         room,
         mergeThreadsInMainView: Boolean(document.getElementById("mg-thread-main-view")?.checked),
-        enableGallery: document.getElementById("mg-enable-gallery")?.checked !== false,
-        enableMattermostTools: document.getElementById("mg-enable-mattermost-tools")?.checked !== false,
-        enableMatrixMobile: document.getElementById("mg-enable-matrix-mobile")?.checked !== false,
-        enableThreadView: document.getElementById("mg-enable-thread-view")?.checked !== false,
+        enableGallery: storedFeatureConfig.enableGallery !== false,
+        enableMattermostTools: storedFeatureConfig.enableMattermostTools !== false,
+        enableMatrixMobile: storedFeatureConfig.enableMatrixMobile !== false,
+        enableThreadView: storedFeatureConfig.enableThreadView !== false,
+        selectorBackgroundRefreshSeconds: storedFeatureConfig.selectorBackgroundRefreshSeconds,
         language: uiLanguage
       }
     });
@@ -2651,9 +2725,7 @@
         await rememberGallery(lastSentGallery);
       }
 
-      clearOriginalComposerText();
-      clearDraft();
-      hideGalleryPanel();
+      finishSuccessfulGallerySend();
 
       setTimeout(rebuildInlineGalleries, 500);
       setTimeout(rebuildInlineGalleries, 1500);
@@ -2715,9 +2787,7 @@
         await rememberGallery(lastSentGallery);
       }
 
-      clearOriginalComposerText();
-      clearDraft();
-      hideGalleryPanel();
+      finishSuccessfulGallerySend();
 
       setTimeout(rebuildInlineGalleries, 500);
       setTimeout(rebuildInlineGalleries, 1500);
@@ -3377,14 +3447,51 @@
     }
   }
 
-  function scheduleThreadViewRebuild() {
+  function scheduleThreadViewRebuild(options = {}) {
     if (!mergedThreadViewEnabled) return;
 
     if (threadViewRebuildTimer) {
       clearTimeout(threadViewRebuildTimer);
     }
 
-    threadViewRebuildTimer = setTimeout(rebuildMergedThreadView, 650);
+    const delayMs = Math.max(80, Number(options.delayMs ?? 650));
+    threadViewRebuildTimer = setTimeout(() => rebuildMergedThreadView(options), delayMs);
+  }
+
+  function installThreadAutoRefreshLoop() {
+    if (threadAutoRefreshIntervalId) return;
+
+    threadAutoRefreshIntervalId = window.setInterval(() => {
+      if (!shouldAutoRefreshMergedThreadView()) return;
+      scheduleThreadViewRebuild({
+        reason: "thread-auto-refresh",
+        delayMs: 120,
+        allowAutoScroll: true
+      });
+    }, 2600);
+
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible" && shouldAutoRefreshMergedThreadView()) {
+        scheduleThreadViewRebuild({
+          reason: "thread-visibility-refresh",
+          delayMs: 120,
+          allowAutoScroll: true
+        });
+      }
+    }, true);
+  }
+
+  function shouldAutoRefreshMergedThreadView() {
+    if (!mergedThreadViewEnabled || !isThreadViewFeatureEnabled()) return false;
+    if (document.visibilityState === "hidden") return false;
+    if (!extractRoomFromUrl()) return false;
+
+    const root = document.documentElement;
+    return Boolean(
+      root.classList.contains("mmlc-mode-chat") ||
+      root.classList.contains("mmlc-mode-thread") ||
+      document.querySelector(".mmlc-promoted-chat-pane")
+    );
   }
 
   async function refreshThreadMetadataFromElementTimeline() {
@@ -3464,39 +3571,249 @@
     return item.relationType === "m.thread" || item.isThreadRelation === true || item.threadRootId === root;
   }
 
-  async function rebuildMergedThreadView() {
+  async function rebuildMergedThreadView(options = {}) {
     threadViewRebuildTimer = null;
 
-    if (!mergedThreadViewEnabled) {
-      teardownMergedThreadView();
+    if (threadViewRebuildInFlight) {
+      threadViewRebuildQueued = true;
       return;
     }
 
-    if (recentlyObservedTimelineScroll(280)) {
-      scheduleThreadViewRebuild();
-      return;
+    threadViewRebuildInFlight = true;
+
+    try {
+      if (!mergedThreadViewEnabled) {
+        teardownMergedThreadView();
+        return;
+      }
+
+      if (recentlyObservedTimelineScroll(280)) {
+        scheduleThreadViewRebuild(options);
+        return;
+      }
+
+      const autoScrollIntent = captureMergedThreadAutoScrollIntent();
+      const previousLatestEventId = lastMergedThreadLatestEventId;
+      const previousLatestTs = lastMergedThreadLatestTs;
+      const refreshed = await refreshThreadMetadataFromElementTimeline();
+
+      if (!mergedThreadViewEnabled) return;
+
+      const eventElements = collectMainTimelineEventElements();
+      const renderSignature = makeMergedThreadRenderSignature(eventElements);
+      const hasRenderedThreadDom = Boolean(document.querySelector(".mg-thread-merged, .mg-thread-inline-reply"));
+      const latestThreadMessage = latestThreadMessageSummary(eventElements);
+
+      if (!refreshed && hasRenderedThreadDom) {
+        rememberLatestThreadMessage(latestThreadMessage);
+        return;
+      }
+
+      if (renderSignature && renderSignature === lastMergedThreadRenderSignature && hasRenderedThreadDom) {
+        rememberLatestThreadMessage(latestThreadMessage);
+        return;
+      }
+
+      resetMergedThreadDom();
+      buildMergedThreadBlocks(eventElements);
+      lastMergedThreadRenderSignature = renderSignature;
+      scheduleGalleryRebuild();
+
+      const shouldScroll = shouldAutoScrollAfterThreadRebuild({
+        options,
+        autoScrollIntent,
+        previousLatestEventId,
+        previousLatestTs,
+        latestThreadMessage,
+        eventElements,
+        hadRenderedThreadDom: hasRenderedThreadDom
+      });
+
+      rememberLatestThreadMessage(latestThreadMessage);
+
+      if (shouldScroll) {
+        dispatchMergedThreadViewUpdated(latestThreadMessage, autoScrollIntent);
+      }
+    } finally {
+      threadViewRebuildInFlight = false;
+
+      if (threadViewRebuildQueued) {
+        threadViewRebuildQueued = false;
+        scheduleThreadViewRebuild({
+          ...options,
+          reason: options.reason || "thread-rebuild-queued",
+          delayMs: 180
+        });
+      }
+    }
+  }
+
+  function captureMergedThreadAutoScrollIntent() {
+    const root = document.documentElement;
+    const inChatView = root.classList.contains("mmlc-mode-chat") ||
+      Boolean(document.querySelector(".mmlc-promoted-chat-pane"));
+
+    if (!inChatView) {
+      return { inChatView: false, nearEnd: false };
     }
 
-    const refreshed = await refreshThreadMetadataFromElementTimeline();
+    const scroller = findMainTimelineScroller();
+    return {
+      inChatView: true,
+      nearEnd: isScrollerNearVisualEnd(scroller, 420),
+      bottomDistance: scroller ? scrollerBottomDistance(scroller) : Number.POSITIVE_INFINITY,
+      capturedAt: Date.now()
+    };
+  }
 
-    if (!mergedThreadViewEnabled) return;
+  function findMainTimelineScroller() {
+    const roots = [
+      document.querySelector(".mmlc-promoted-chat-pane"),
+      document.querySelector(".mx_RoomView, [data-testid='room-view'], [class*='RoomView']"),
+      document.body
+    ].filter(element => element instanceof Element);
 
-    const eventElements = collectMainTimelineEventElements();
-    const renderSignature = makeMergedThreadRenderSignature(eventElements);
-    const hasRenderedThreadDom = Boolean(document.querySelector(".mg-thread-merged, .mg-thread-inline-reply"));
-
-    if (!refreshed && hasRenderedThreadDom) {
-      return;
+    const candidates = [];
+    for (const root of roots) {
+      candidates.push(...root.querySelectorAll([
+        ".mx_ScrollPanel",
+        "[class*='ScrollPanel']",
+        ".mx_MessagePanel",
+        "[class*='MessagePanel']",
+        ".mx_TimelinePanel",
+        "[class*='TimelinePanel']",
+        "[data-virtuoso-scroller='true']",
+        "[role='log']"
+      ].join(", ")));
     }
 
-    if (renderSignature && renderSignature === lastMergedThreadRenderSignature && hasRenderedThreadDom) {
-      return;
+    return uniqueElements(candidates)
+      .filter(element => {
+        if (!(element instanceof Element) || isExtensionOwnedElement(element)) return false;
+        if (isOutsideMainMessageTimeline(element)) return false;
+        const scrollable = element.scrollHeight > element.clientHeight + 24;
+        if (!scrollable) return false;
+        const overflow = `${getComputedStyle(element).overflowY} ${getComputedStyle(element).overflow}`;
+        return /(auto|scroll|overlay)/i.test(overflow) || element.matches("[data-virtuoso-scroller='true'], [role='log'], [class*='ScrollPanel'], [class*='TimelinePanel'], [class*='MessagePanel']");
+      })
+      .sort((a, b) => (b.scrollHeight - b.clientHeight) - (a.scrollHeight - a.clientHeight))[0] || null;
+  }
+
+  function isScrollerNearVisualEnd(scroller, thresholdPx = 420) {
+    if (!(scroller instanceof Element)) return false;
+    return scrollerBottomDistance(scroller) <= thresholdPx;
+  }
+
+  function scrollerBottomDistance(scroller) {
+    if (!(scroller instanceof Element)) return Number.POSITIVE_INFINITY;
+
+    try {
+      const reverse = scrollerUsesReverseFlow(scroller);
+      if (reverse) return Math.abs(scroller.scrollTop);
+      return Math.max(0, scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop);
+    } catch {
+      return Number.POSITIVE_INFINITY;
+    }
+  }
+
+  function scrollerUsesReverseFlow(scroller) {
+    if (!(scroller instanceof Element)) return false;
+
+    const candidates = [
+      scroller,
+      scroller.firstElementChild,
+      scroller.querySelector("[data-testid='virtuoso-item-list']"),
+      scroller.querySelector("[class*='Timeline']"),
+      scroller.querySelector("[class*='MessagePanel']")
+    ].filter(Boolean);
+
+    return candidates.some(element => {
+      try {
+        return /column-reverse|row-reverse/i.test(getComputedStyle(element).flexDirection || "");
+      } catch {
+        return false;
+      }
+    });
+  }
+
+  function latestThreadMessageSummary(eventElements) {
+    const replies = [];
+
+    for (const group of threadGroupsByRootEventId.values()) {
+      for (const item of group.events || []) {
+        if (!item?.eventId || item.redacted) continue;
+        replies.push(item);
+      }
     }
 
-    resetMergedThreadDom();
-    buildMergedThreadBlocks(eventElements);
-    lastMergedThreadRenderSignature = renderSignature;
-    scheduleGalleryRebuild();
+    const latest = replies
+      .filter(item => item?.eventId)
+      .sort((a, b) => compareThreadItemsByTimeThenDom(a, b, eventElements || new Map()))
+      .at(-1);
+
+    if (!latest) return { eventId: "", ts: 0 };
+
+    return {
+      eventId: latest.eventId || "",
+      rootEventId: latest.threadRootId || "",
+      ts: numericTimestampForThreadItem(latest, eventElements || new Map()) || Number(latest.ts || 0) || 0
+    };
+  }
+
+  function rememberLatestThreadMessage(summary) {
+    lastMergedThreadLatestEventId = summary?.eventId || "";
+    lastMergedThreadLatestTs = Number(summary?.ts || 0) || 0;
+  }
+
+  function shouldAutoScrollAfterThreadRebuild({
+    options,
+    autoScrollIntent,
+    previousLatestEventId,
+    previousLatestTs,
+    latestThreadMessage,
+    eventElements,
+    hadRenderedThreadDom
+  }) {
+    if (!options?.allowAutoScroll) return false;
+    if (!hadRenderedThreadDom || !autoScrollIntent?.inChatView || !autoScrollIntent.nearEnd) return false;
+    if (!latestThreadMessage?.eventId) return false;
+    if (latestThreadMessage.eventId === previousLatestEventId) return false;
+
+    const latestTs = Number(latestThreadMessage.ts || 0);
+    const previousTs = Number(previousLatestTs || 0);
+    if (latestTs && previousTs && latestTs < previousTs) return false;
+
+    const latestTimeline = latestMainTimelineMessageSummary(eventElements);
+    if (latestTimeline.ts && latestTs && latestTs + 1200 < latestTimeline.ts) return false;
+
+    return true;
+  }
+
+  function latestMainTimelineMessageSummary(eventElements) {
+    const latest = collectTimelineEntriesByTime(eventElements || new Map())
+      .filter(entry => entry?.eventId && !threadMetadataByEventId.get(entry.eventId)?.threadRootId)
+      .at(-1);
+
+    return {
+      eventId: latest?.eventId || "",
+      ts: Number(latest?.ts || 0) || 0
+    };
+  }
+
+  function dispatchMergedThreadViewUpdated(latestThreadMessage, autoScrollIntent) {
+    try {
+      document.dispatchEvent(new CustomEvent("smart-element-thread-view-updated", {
+        detail: {
+          reason: "thread-auto-refresh",
+          scrollToLatest: true,
+          nearEndBefore: Boolean(autoScrollIntent?.nearEnd),
+          bottomDistanceBefore: Number(autoScrollIntent?.bottomDistance || 0),
+          latestEventId: latestThreadMessage?.eventId || "",
+          latestThreadRootId: latestThreadMessage?.rootEventId || "",
+          latestTs: Number(latestThreadMessage?.ts || 0) || 0
+        }
+      }));
+    } catch {}
   }
 
   function makeMergedThreadRenderSignature(eventElements) {
@@ -3720,12 +4037,10 @@
     const rootIsImage = isThreadImageItem(rootMeta) || Boolean(sourceImage);
     if (!rootIsImage) return false;
 
-    if (rootMeta?.gallery?.id || rootMeta?.media?.galleryId) return true;
-
-    return Boolean(
-      extractGalleryIdFromElement(rootElement) ||
-      (sourceImage && extractGalleryIdFromImage(sourceImage))
-    );
+    // When an image starts a thread, Smart Element renders that root image inside
+    // the thread block/gallery. Keeping the native root image visible as well
+    // creates the duplicated "original + thread gallery" view reported on mobile.
+    return false;
   }
 
   function hideAttachedGallerySourceMessages(item, eventElements) {
@@ -4962,8 +5277,9 @@
   }
 
   function scheduleThreadViewRebuildAfterAction() {
-    setTimeout(scheduleThreadViewRebuild, 500);
-    setTimeout(scheduleThreadViewRebuild, 1500);
+    setTimeout(() => scheduleThreadViewRebuild({ delayMs: 120, allowAutoScroll: true, reason: "thread-send-refresh-early" }), 350);
+    setTimeout(() => scheduleThreadViewRebuild({ delayMs: 120, allowAutoScroll: true, reason: "thread-send-refresh" }), 1200);
+    setTimeout(() => scheduleThreadViewRebuild({ delayMs: 120, allowAutoScroll: true, reason: "thread-send-refresh-late" }), 3000);
     setTimeout(scheduleThreadViewRebuild, 3500);
   }
 
@@ -7477,23 +7793,14 @@
     if (event.key === "ArrowRight") {
       event.preventDefault();
       event.stopPropagation();
-      currentLightboxIndex =
-        (currentLightboxIndex + 1) % currentLightboxImages.length;
-      resetLightboxTransform();
-      updateLightbox();
-      scrollSourceImageIntoView();
+      showNextLightboxImage();
       return;
     }
 
     if (event.key === "ArrowLeft") {
       event.preventDefault();
       event.stopPropagation();
-      currentLightboxIndex =
-        (currentLightboxIndex - 1 + currentLightboxImages.length) %
-        currentLightboxImages.length;
-      resetLightboxTransform();
-      updateLightbox();
-      scrollSourceImageIntoView();
+      showPreviousLightboxImage();
       return;
     }
 
@@ -7516,6 +7823,47 @@
       event.stopPropagation();
       downloadCurrentLightboxImage();
     }
+  }
+
+  function showNextLightboxImage() {
+    if (!currentLightboxImages.length) return;
+    currentLightboxIndex = (currentLightboxIndex + 1) % currentLightboxImages.length;
+    resetLightboxTransform();
+    updateLightbox();
+    scrollSourceImageIntoView();
+  }
+
+  function showPreviousLightboxImage() {
+    if (!currentLightboxImages.length) return;
+    currentLightboxIndex = (currentLightboxIndex - 1 + currentLightboxImages.length) % currentLightboxImages.length;
+    resetLightboxTransform();
+    updateLightbox();
+    scrollSourceImageIntoView();
+  }
+
+  function touchDistance(touches) {
+    if (!touches || touches.length < 2) return 0;
+    const dx = touches[0].clientX - touches[1].clientX;
+    const dy = touches[0].clientY - touches[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function touchCenter(touches) {
+    if (!touches || touches.length < 2) return { x: 0, y: 0 };
+    return {
+      x: (touches[0].clientX + touches[1].clientX) / 2,
+      y: (touches[0].clientY + touches[1].clientY) / 2
+    };
+  }
+
+  function setLightboxZoomPreservingPan(value) {
+    currentLightboxZoom = Math.max(0.1, Math.min(12, value));
+    if (currentLightboxZoom <= 1) {
+      currentLightboxPanX = 0;
+      currentLightboxPanY = 0;
+    }
+    clampLightboxPan();
+    applyLightboxZoom();
   }
 
   function installLightboxPanHandlers(imageWrap) {
@@ -7563,6 +7911,93 @@
 
     imageWrap.addEventListener("pointerup", stop);
     imageWrap.addEventListener("pointercancel", stop);
+
+    let touchMode = "";
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchLastX = 0;
+    let touchLastY = 0;
+    let touchStartPanX = 0;
+    let touchStartPanY = 0;
+    let pinchStartDistance = 0;
+    let pinchStartZoom = 1;
+    let pinchStartCenter = { x: 0, y: 0 };
+    let pinchStartPanX = 0;
+    let pinchStartPanY = 0;
+
+    imageWrap.addEventListener("touchstart", event => {
+      if (!document.getElementById("mg-lightbox")) return;
+      if (event.touches.length === 2) {
+        touchMode = "pinch";
+        pinchStartDistance = Math.max(1, touchDistance(event.touches));
+        pinchStartZoom = currentLightboxZoom;
+        pinchStartCenter = touchCenter(event.touches);
+        pinchStartPanX = currentLightboxPanX;
+        pinchStartPanY = currentLightboxPanY;
+        currentLightboxPanning = false;
+      } else if (event.touches.length === 1) {
+        touchMode = currentLightboxZoom > 1 ? "pan" : "swipe";
+        touchStartX = touchLastX = event.touches[0].clientX;
+        touchStartY = touchLastY = event.touches[0].clientY;
+        touchStartPanX = currentLightboxPanX;
+        touchStartPanY = currentLightboxPanY;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+    }, { passive: false });
+
+    imageWrap.addEventListener("touchmove", event => {
+      if (!touchMode) return;
+
+      if (touchMode === "pinch" && event.touches.length >= 2) {
+        const distance = Math.max(1, touchDistance(event.touches));
+        const center = touchCenter(event.touches);
+        const factor = distance / Math.max(1, pinchStartDistance);
+        currentLightboxPanX = pinchStartPanX + (center.x - pinchStartCenter.x);
+        currentLightboxPanY = pinchStartPanY + (center.y - pinchStartCenter.y);
+        setLightboxZoomPreservingPan(pinchStartZoom * factor);
+      } else if ((touchMode === "pan" || (touchMode === "swipe" && currentLightboxZoom > 1)) && event.touches.length === 1) {
+        touchMode = "pan";
+        currentLightboxPanX = touchStartPanX + (event.touches[0].clientX - touchStartX);
+        currentLightboxPanY = touchStartPanY + (event.touches[0].clientY - touchStartY);
+        clampLightboxPan();
+        applyLightboxZoom();
+      }
+
+      if (event.touches.length === 1) {
+        touchLastX = event.touches[0].clientX;
+        touchLastY = event.touches[0].clientY;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    }, { passive: false });
+
+    imageWrap.addEventListener("touchend", event => {
+      if (!touchMode) return;
+
+      if (touchMode === "swipe") {
+        const dx = touchLastX - touchStartX;
+        const dy = touchLastY - touchStartY;
+        if (Math.abs(dx) >= 56 && Math.abs(dx) > Math.abs(dy) * 1.25) {
+          if (dx < 0) showNextLightboxImage();
+          else showPreviousLightboxImage();
+        }
+      }
+
+      if (event.touches.length === 0) {
+        touchMode = "";
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+    }, { passive: false });
+
+    imageWrap.addEventListener("touchcancel", event => {
+      touchMode = "";
+      event.preventDefault();
+      event.stopPropagation();
+    }, { passive: false });
 
     imageWrap.addEventListener("wheel", event => {
       event.preventDefault();
@@ -8018,6 +8453,7 @@
 
       if (!moved) {
         element.dataset.dragMoved = "0";
+        return;
       }
 
       clampToggleButtonToViewport(element);
@@ -8065,9 +8501,24 @@
     requestAnimationFrame(() => clampToggleButtonToViewport(button));
   }
 
+  function isSmartElementMobileChatOrThreadMode() {
+    const root = document.documentElement;
+    return Boolean(root?.classList?.contains("mmlc-enabled") && (
+      root.classList.contains("mmlc-mode-chat") ||
+      root.classList.contains("mmlc-mode-thread") ||
+      root.classList.contains("mmlc-has-promoted-chat-pane") ||
+      root.classList.contains("mmlc-has-promoted-thread-pane")
+    ));
+  }
+
   function installButtonResizeGuard(button) {
     window.addEventListener("resize", () => {
       if (document.documentElement.classList.contains("mmlc-native-parse-layout") || button.hidden) return;
+      // In Smart Element mobile chat/thread mode, visualViewport and keyboard
+      // changes fire repeated resize events. Re-saving the current screen rect on
+      // those events made the floating button creep upward over time. Only user
+      // drag operations persist a new position while chat/thread mode is active.
+      if (isSmartElementMobileChatOrThreadMode()) return;
       clampToggleButtonToViewport(button);
       saveCurrentButtonPosition(button);
     }, { passive: true });
@@ -8075,6 +8526,7 @@
     window.addEventListener("orientationchange", () => {
       setTimeout(() => {
         if (document.documentElement.classList.contains("mmlc-native-parse-layout") || button.hidden) return;
+        if (isSmartElementMobileChatOrThreadMode()) return;
         clampToggleButtonToViewport(button);
         saveCurrentButtonPosition(button);
       }, 150);
