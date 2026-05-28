@@ -180,6 +180,7 @@
   let desktopEyePlacementTimer = null;
   let desktopUnreadSyncObserver = null;
   let desktopUnreadSyncTimer = null;
+  let desktopUnreadPeriodicTimer = null;
   let desktopOpenRoomRestoreTimer = null;
   let desktopOpenRoomRestoreUntil = 0;
   let desktopReloadSelectionSynced = false;
@@ -817,17 +818,22 @@
         STORAGE_UNREAD_CACHE_KEY,
         STORAGE_SORT_MODE_KEY,
         STORAGE_USER_ORDER_KEY,
+        STORAGE_VIEW_STATE_KEY,
         STORAGE_DESKTOP_HIERARCHY_MODE_KEY,
         STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY
       ]);
       mergePersistentHierarchyPayload(data?.[STORAGE_HIERARCHY_CACHE_KEY]);
       mergePersistentUnreadPayload(data?.[STORAGE_UNREAD_CACHE_KEY]);
       mergeExtensionSortSettings(data);
+      if (shouldRestoreViewState(data?.[STORAGE_VIEW_STATE_KEY])) {
+        applyPersistentViewState(data[STORAGE_VIEW_STATE_KEY], { persist: false });
+      }
       desktopHierarchyModeActive = data?.[STORAGE_DESKTOP_HIERARCHY_MODE_KEY]?.active === true;
       const desktopSettings = data?.[STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY] || {};
       desktopHierarchyIndentSubspaces = desktopSettings.indentSubspaces !== false;
       desktopSpaceLabelsExpanded = desktopSettings.labelsExpanded === true;
       desktopSpaceDisplayMode = desktopSettings.spaceDisplayMode === "current" ? "current" : "full";
+      restoreDesktopSelectionFromLoadedState({ allowCachedRoomMatch: false });
     } catch {}
   }
 
@@ -1112,6 +1118,7 @@
     updateDesktopStartSelectedClass();
     installDesktopHierarchyObserver();
     installDesktopUnreadSyncObserver();
+    startDesktopUnreadPeriodicSync();
     desktopReloadSelectionSynced = false;
     scheduleDesktopOpenRoomSelectionRestore(80);
     scheduleDesktopUnreadDomSync(120);
@@ -1148,6 +1155,10 @@
       clearTimeout(desktopUnreadSyncTimer);
       desktopUnreadSyncTimer = null;
     }
+    if (desktopUnreadPeriodicTimer) {
+      clearInterval(desktopUnreadPeriodicTimer);
+      desktopUnreadPeriodicTimer = null;
+    }
     if (desktopOpenRoomRestoreTimer) {
       clearTimeout(desktopOpenRoomRestoreTimer);
       desktopOpenRoomRestoreTimer = null;
@@ -1170,7 +1181,11 @@
     desktopHierarchyRenderTimer = setTimeout(() => {
       desktopHierarchyRenderTimer = null;
       if (!isDesktopHierarchyNativeModeUsable()) return;
-      if (!desktopReloadSelectionSynced) syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true });
+      if (!desktopReloadSelectionSynced) {
+        syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true }) || restoreDesktopSelectionFromLoadedState({ allowCachedRoomMatch: true });
+      } else if (!desktopSelectedSpacePath.length) {
+        restoreDesktopSelectionFromLoadedState({ allowCachedRoomMatch: true });
+      }
       syncDesktopUnreadCachesFromElementDom();
       createDesktopHierarchyEyeButton();
       renderDesktopSpaceRailNativeUi();
@@ -1195,6 +1210,14 @@
     });
   }
 
+  function startDesktopUnreadPeriodicSync() {
+    if (desktopUnreadPeriodicTimer) return;
+    desktopUnreadPeriodicTimer = setInterval(() => {
+      if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+      scheduleDesktopUnreadDomSync(0, { render: false });
+    }, 2500);
+  }
+
   function desktopUnreadMutationLooksRelevant(mutation) {
     const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
     if (!(target instanceof Element) || target.closest(OWNED_SELECTOR)) return false;
@@ -1210,7 +1233,7 @@
       Boolean(target.closest?.("[data-testid='room-list'], .mx_RoomListPanel, .mx_SpacePanel"));
   }
 
-  function scheduleDesktopUnreadDomSync(delayMs = 90) {
+  function scheduleDesktopUnreadDomSync(delayMs = 90, options = {}) {
     if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
     if (desktopUnreadSyncTimer) clearTimeout(desktopUnreadSyncTimer);
     desktopUnreadSyncTimer = setTimeout(() => {
@@ -1219,9 +1242,16 @@
       if (changed) {
         persistHierarchyCacheSoon();
         persistUnreadCacheSoon();
-        updateHierarchyBar();
-        renderDesktopHierarchyNativeUiSoon(0);
       }
+
+      const domChanged = updateDesktopUnreadBadgesInPlace();
+      if (changed || domChanged) updateHierarchyBar();
+
+      // Badge refreshes must not rebuild the custom desktop UI. Rebuilding the
+      // list during Element's own unread updates can steal focus, reset scroll
+      // positions, or briefly detach click handlers. A full rebuild is kept as
+      // an opt-in path for callers that explicitly need structure changes.
+      if (options.render === true && changed) renderDesktopHierarchyNativeUiSoon(0);
     }, Math.max(0, delayMs));
   }
 
@@ -1349,11 +1379,20 @@
     desktopOpenRoomRestoreTimer = setTimeout(() => {
       desktopOpenRoomRestoreTimer = null;
       if (!desktopHierarchyModeActive || isMobileLayoutEnabled() || desktopReloadSelectionSynced) return;
-      const restored = syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true });
-      if (restored || Date.now() > desktopOpenRoomRestoreUntil) {
+      const restored = syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true }) || restoreDesktopSelectionFromLoadedState({ allowCachedRoomMatch: true });
+      if (restored) {
         desktopReloadSelectionSynced = true;
         desktopOpenRoomRestoreUntil = 0;
         renderDesktopHierarchyNativeUiSoon(0);
+        return;
+      }
+      if (Date.now() > desktopOpenRoomRestoreUntil) {
+        // Do not mark the reload selection as synced when we failed to identify
+        // the active room. Element can hydrate the room header/timeline after our
+        // first timeout; keeping the retry path alive prevents an empty custom
+        // chat list until the user clicks the space manually.
+        desktopOpenRoomRestoreUntil = Date.now() + 12000;
+        scheduleDesktopOpenRoomSelectionRestore(1200);
         return;
       }
       scheduleDesktopOpenRoomSelectionRestore(420);
@@ -1377,6 +1416,37 @@
     desktopSelectedSpacePath = cloneSpacePathSegments(currentSpacePath);
     updateDesktopStartSelectedClass();
     return true;
+  }
+
+  function restoreDesktopSelectionFromLoadedState(options = {}) {
+    if (desktopSelectedSpacePath.length) return true;
+
+    if (options.allowCachedRoomMatch !== false) {
+      try {
+        if (syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true })) return true;
+      } catch {}
+    }
+
+    const storedPath = cloneSpacePathSegments(currentSpacePath || [])
+      .filter(segment => segment && segment.type !== "room" && normalizeSpaces(segment.label || ""));
+    const storedLast = lastSelectableSpacePathSegment(storedPath);
+    if (storedLast?.label && !/^(current space)$/i.test(normalizeSpaces(storedLast.label || ""))) {
+      desktopSelectedSpacePath = pathSegmentsFromSpacePath(logicalPathWithoutRoot(storedPath));
+      currentSpaceLabel = normalizeSpaces(storedLast.label || currentSpaceLabel || "");
+      currentSpacePath = cloneSpacePathSegments(desktopSelectedSpacePath);
+      updateDesktopStartSelectedClass();
+      return true;
+    }
+
+    const currentLabel = normalizeSpaces(currentSpaceLabel || "");
+    if (currentLabel && !/^(startseite|home|direct messages|direktnachrichten|current space)$/i.test(currentLabel)) {
+      desktopSelectedSpacePath = currentSpacePathForPanel(currentLabel);
+      currentSpacePath = cloneSpacePathSegments(desktopSelectedSpacePath);
+      updateDesktopStartSelectedClass();
+      return true;
+    }
+
+    return false;
   }
 
   function findCachedDesktopChatForCurrentOpenRoom() {
@@ -1505,6 +1575,7 @@
     button.classList.toggle("mmlc-desktop-space-muted", item.joined === false);
     button.classList.toggle("mmlc-desktop-space-selected", desktopSpaceNodeIsSelected(item));
     button.dataset.mmlcDesktopLevel = String(Math.max(0, Number(item.level || 0)));
+    button.dataset.mmlcDesktopSpaceKey = desktopUnreadKeyForSpaceItem(item);
     button.title = displayLabelForItem(item);
     button.setAttribute("aria-label", displayLabelForItem(item));
     button.style.setProperty("--mmlc-desktop-level", String(Math.max(0, Number(item.level || 0))));
@@ -1673,6 +1744,8 @@
     button.type = "button";
     button.className = "mmlc-desktop-chat-button";
     button.classList.toggle("mmlc-desktop-chat-muted", item.joined === false);
+    button.dataset.mmlcDesktopChatLabel = normalizeSpaces(item.label || "");
+    button.dataset.mmlcDesktopChatKey = roomUnreadCacheKey(item) || normalizeChatKey(item.label || "");
     button.title = displayLabelForItem(item);
 
     const avatar = makeDesktopChatAvatar(item);
@@ -5986,6 +6059,69 @@
       });
       list.appendChild(row);
     }
+  }
+
+
+  function desktopUnreadKeyForSpaceItem(item) {
+    if (!item || item.type === "start") return "start";
+    const label = normalizeSpaces(item.label || "");
+    if (!label) return "";
+    const path = Array.isArray(item.path) && item.path.length
+      ? pathSegmentsFromSpacePath(item.path)
+      : fallbackSpacePath(label);
+    return hierarchyCachePathKey(path, label);
+  }
+
+  function updateDesktopUnreadBadgesInPlace() {
+    let changed = false;
+    const visibleSpaceNodes = new Map();
+    for (const node of desktopSpaceTreeNodesForCurrentMode()) {
+      const key = desktopUnreadKeyForSpaceItem(node);
+      if (key) visibleSpaceNodes.set(key, node);
+    }
+
+    const dmButton = document.querySelector("#mmlc-desktop-space-list-host .mmlc-desktop-space-button[data-mmlc-desktop-space-key='start']");
+    if (dmButton instanceof Element) {
+      changed = updateUnreadBadgeElement(dmButton, startPageUnreadState(), "mmlc-desktop-unread-badge") || changed;
+    }
+
+    for (const button of document.querySelectorAll("#mmlc-desktop-space-list-host .mmlc-desktop-space-button[data-mmlc-desktop-space-key]")) {
+      if (!(button instanceof Element) || button.dataset.mmlcDesktopSpaceKey === "start") continue;
+      const node = visibleSpaceNodes.get(button.dataset.mmlcDesktopSpaceKey || "");
+      if (!node) continue;
+      changed = updateUnreadBadgeElement(button, desktopVisibleUnreadForSpaceItem(node), "mmlc-desktop-unread-badge") || changed;
+    }
+
+    for (const button of document.querySelectorAll("#mmlc-desktop-chat-list-host .mmlc-desktop-chat-button[data-mmlc-desktop-chat-label]")) {
+      if (!(button instanceof Element)) continue;
+      const label = normalizeSpaces(button.dataset.mmlcDesktopChatLabel || "");
+      const key = button.dataset.mmlcDesktopChatKey || "";
+      const unread = unreadForChatLabelInCurrentSpace(label) || (key ? unreadRoomCache.get(key) : null);
+      changed = updateUnreadBadgeElement(button, unread, "mmlc-desktop-unread-badge") || changed;
+    }
+
+    return changed;
+  }
+
+  function updateUnreadBadgeElement(container, value, extraClassName = "") {
+    if (!(container instanceof Element)) return false;
+    const oldBadge = Array.from(container.children).find(child =>
+      child instanceof Element &&
+      child.classList.contains("mmlc-unread-badge") &&
+      (!extraClassName || child.classList.contains(extraClassName))
+    );
+    const nextBadge = makeUnreadBadge(value, extraClassName);
+    const oldSignature = oldBadge instanceof Element
+      ? normalizeSpaces(`${oldBadge.textContent || ""}|${oldBadge.className || ""}|${oldBadge.getAttribute("aria-label") || ""}`)
+      : "";
+    const nextSignature = nextBadge instanceof Element
+      ? normalizeSpaces(`${nextBadge.textContent || ""}|${nextBadge.className || ""}|${nextBadge.getAttribute("aria-label") || ""}`)
+      : "";
+
+    if (oldSignature === nextSignature) return false;
+    oldBadge?.remove();
+    if (nextBadge) container.appendChild(nextBadge);
+    return true;
   }
 
 
