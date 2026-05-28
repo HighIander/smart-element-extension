@@ -3357,7 +3357,11 @@
       }
 
       if (externalMutations.some(shouldMutationTriggerGalleryRebuild)) {
-        scheduleGalleryRebuild();
+        const nativeThreadTouched = externalMutations.some(mutationTouchesNativeThreadPanel);
+        scheduleGalleryRebuild(nativeThreadTouched ? 40 : undefined, {
+          reason: nativeThreadTouched ? "native-thread-panel-mutation" : "timeline-mutation",
+          force: nativeThreadTouched
+        });
       }
 
       if (externalMutations.some(shouldMutationTriggerThreadViewRebuild)) {
@@ -3377,6 +3381,8 @@
   }
 
   function shouldMutationTriggerGalleryRebuild(mutation) {
+    if (mutationTouchesNativeThreadPanel(mutation)) return true;
+
     if (mutation.type === "attributes") {
       return ["data-event-id", "class", "style", "src", "srcset", "href", "data-testid", "aria-label", "title"].includes(mutation.attributeName);
     }
@@ -3398,6 +3404,21 @@
     if (isTransientElementChromeMutation(mutation)) return false;
 
     return mutationTouchesPotentialMessageContent(mutation);
+  }
+
+  function mutationTouchesNativeThreadPanel(mutation) {
+    const target = mutation.target instanceof Element ? mutation.target : mutation.target?.parentElement;
+    if (target?.closest?.(NATIVE_THREAD_PANEL_SELECTOR)) return true;
+
+    const changedNodes = [
+      ...Array.from(mutation.addedNodes || []),
+      ...Array.from(mutation.removedNodes || [])
+    ];
+
+    return changedNodes.some(node => {
+      if (node.nodeType !== Node.ELEMENT_NODE) return false;
+      return Boolean(node.matches?.(NATIVE_THREAD_PANEL_SELECTOR) || node.querySelector?.(NATIVE_THREAD_PANEL_SELECTOR));
+    });
   }
 
   function mutationTouchesPotentialMessageContent(mutation) {
@@ -7378,6 +7399,11 @@
       gallery.remove();
     }
 
+    for (const source of document.querySelectorAll(".mg-native-thread-source-hidden")) {
+      source.classList.remove("mg-native-thread-source-hidden");
+      delete source.dataset.mgNativeThreadHiddenFor;
+    }
+
     for (const panel of collectNativeThreadPanels()) {
       const eventElements = collectNativeThreadPanelEventElements(panel);
       const entries = Array.from(eventElements.entries())
@@ -7393,23 +7419,16 @@
           return galleryId ? { eventId, message, item, isImage, galleryId } : null;
         })
         .filter(Boolean);
-      const handledGalleryIds = new Set();
-      const orderedEntries = [
-        ...entries.filter(entry => !entry.isImage),
-        ...entries.filter(entry => entry.isImage)
-      ];
 
-      for (const entry of orderedEntries) {
+      const handledGalleryIds = new Set();
+      const textEntries = entries.filter(entry => !entry.isImage);
+      const imageEntries = entries.filter(entry => entry.isImage);
+
+      for (const entry of textEntries) {
         if (handledGalleryIds.has(entry.galleryId)) continue;
 
-        const attachedItems = entry.isImage
-          ? (findMainImage(entry.message) ? [] : [entry.item])
-          : attachedGalleryItemsForThreadItem(entry.item, eventElements)
-            .filter(item => !nativeThreadImageAlreadyRendered(item, eventElements));
-        if (attachedItems.length === 0) {
-          if (entry.isImage) handledGalleryIds.add(entry.galleryId);
-          continue;
-        }
+        const attachedItems = attachedGalleryItemsForThreadItem(entry.item, eventElements);
+        if (attachedItems.length === 0) continue;
 
         const attachment = createThreadGalleryMessage(attachedItems, entry.galleryId, eventElements);
         if (!attachment?.matches?.(".mg-inline-gallery")) continue;
@@ -7424,7 +7443,51 @@
         } else {
           entry.message.appendChild(attachment);
         }
+
+        hideNativeThreadSourceMessages(attachedItems, eventElements, entry.galleryId);
       }
+
+      const imageEntriesByGallery = new Map();
+      for (const entry of imageEntries) {
+        if (handledGalleryIds.has(entry.galleryId)) continue;
+        if (!imageEntriesByGallery.has(entry.galleryId)) imageEntriesByGallery.set(entry.galleryId, []);
+        imageEntriesByGallery.get(entry.galleryId).push(entry);
+      }
+
+      for (const [galleryId, groupedEntries] of imageEntriesByGallery.entries()) {
+        if (handledGalleryIds.has(galleryId)) continue;
+        if (groupedEntries.length <= 1 && findMainImage(groupedEntries[0]?.message)) continue;
+
+        const attachedItems = sortThreadGalleryItems(groupedEntries.map(entry => entry.item), eventElements);
+        if (attachedItems.length === 0) continue;
+
+        const attachment = createThreadGalleryMessage(attachedItems, galleryId, eventElements);
+        if (!attachment?.matches?.(".mg-inline-gallery")) continue;
+
+        handledGalleryIds.add(galleryId);
+        attachment.classList.add("mg-native-thread-gallery", "mg-native-thread-attached-gallery");
+        attachment.dataset.mgNativeThreadAttachmentFor = groupedEntries[0]?.eventId || "";
+
+        const firstMessage = groupedEntries[0]?.message;
+        const target = firstMessage ? findNativeThreadAttachmentTarget(firstMessage) : null;
+        if (target?.parentElement) {
+          target.parentElement.insertBefore(attachment, target.nextSibling);
+        } else if (firstMessage) {
+          firstMessage.appendChild(attachment);
+        }
+
+        hideNativeThreadSourceMessages(attachedItems, eventElements, galleryId);
+      }
+    }
+  }
+
+  function hideNativeThreadSourceMessages(items, eventElements, galleryId = "") {
+    for (const item of items || []) {
+      const source = item?.eventId ? eventElements?.get?.(item.eventId) : null;
+      if (!(source instanceof Element)) continue;
+      if (!source.closest(NATIVE_THREAD_PANEL_SELECTOR)) continue;
+      source.classList.add("mg-native-thread-source-hidden");
+      if (galleryId) source.dataset.mgNativeThreadHiddenFor = galleryId;
     }
   }
 

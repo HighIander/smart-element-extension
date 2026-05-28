@@ -176,6 +176,8 @@
   let desktopSpaceLabelsExpanded = false;
   let desktopSpaceDisplayMode = "full";
   let desktopHierarchyObserver = null;
+  let desktopEyePlacementObserver = null;
+  let desktopEyePlacementTimer = null;
   let desktopUnreadSyncObserver = null;
   let desktopUnreadSyncTimer = null;
   let desktopOpenRoomRestoreTimer = null;
@@ -223,6 +225,31 @@
 
   function isMobileLayoutEnabled() {
     return combinedFeatureConfig.enableMatrixMobile !== false;
+  }
+
+  function isDesktopViewportForNativeEyeButton() {
+    const width = Number(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0);
+    const ua = String(navigator.userAgent || "");
+    const uaMobile = Boolean(navigator.userAgentData?.mobile) || /\b(Android|iPhone|iPad|iPod|Mobile|Windows Phone)\b/i.test(ua);
+    const coarsePointer = Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+    const noHover = Boolean(window.matchMedia?.("(hover: none)")?.matches);
+    return width >= 800 && !(uaMobile && coarsePointer && noHover);
+  }
+
+  function isDesktopEyeButtonAllowed() {
+    // The button belongs to the native/non-mobile-view UI. Do not additionally
+    // gate it on viewport width or pointer heuristics: Element can be used in a
+    // narrow desktop window, and the user still expects the hierarchy refresh
+    // control as long as Smart Element's mobile view is disabled.
+    return Boolean(document.body && !isMobileLayoutEnabled());
+  }
+
+  function isDesktopHierarchyNativeModeAllowed() {
+    return !isMobileLayoutEnabled();
+  }
+
+  function isDesktopHierarchyNativeModeUsable() {
+    return desktopHierarchyModeActive && isDesktopHierarchyNativeModeAllowed();
   }
 
   function isThreadViewFeatureEnabled() {
@@ -687,7 +714,7 @@
   }
 
   function updateNativeStartPageHeadingLabel() {
-    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+    if (!isDesktopHierarchyNativeModeUsable()) return;
     const label = directMessagesLabel();
     const headers = Array.from(document.querySelectorAll("#left-panel h1, [data-testid='room-list-header'] h1, .mx_RoomListPanel h1"));
     for (const heading of headers) {
@@ -804,11 +831,17 @@
     } catch {}
   }
 
-  function initializeDesktopHierarchyRuntime() {
-    if (!document.body || isMobileLayoutEnabled()) return;
+  function initializeDesktopHierarchyRuntime(options = {}) {
+    if (!document.body || !isDesktopEyeButtonAllowed()) return;
     hydrateSharedPersistentStateForDesktop().finally(() => {
-      if (isMobileLayoutEnabled()) return;
+      if (!isDesktopEyeButtonAllowed()) return;
       createDesktopHierarchyEyeButton();
+      installDesktopEyeButtonPlacementObserver();
+      scheduleDesktopHierarchyEyeButtonPlacementRetries();
+      if (options.buttonOnly || !isDesktopHierarchyNativeModeAllowed()) {
+        updateDesktopHierarchyEyeButton();
+        return;
+      }
       if (desktopHierarchyModeActive) {
         enableDesktopHierarchyNativeMode();
         scheduleDesktopHierarchyInitialAutoRefresh();
@@ -820,7 +853,7 @@
 
   function scheduleDesktopHierarchyInitialAutoRefresh() {
     if (desktopInitialAutoRefreshStarted) return;
-    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+    if (!isDesktopHierarchyNativeModeUsable()) return;
     desktopInitialAutoRefreshStarted = true;
 
     window.setTimeout(() => {
@@ -834,7 +867,7 @@
   }
 
   async function runDesktopHierarchyInitialAutoRefresh() {
-    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+    if (!isDesktopHierarchyNativeModeUsable()) return;
     if (desktopHierarchyRefreshInProgress) return;
 
     desktopHierarchyRefreshInProgress = true;
@@ -858,8 +891,46 @@
     }
   }
 
+  function scheduleDesktopHierarchyEyeButtonPlacementRetries() {
+    for (const delayMs of [0, 120, 350, 800, 1600, 3200, 6500, 12000]) {
+      window.setTimeout(() => {
+        if (!isDesktopEyeButtonAllowed()) return;
+        const button = desktopEyeButton || document.getElementById("mmlc-desktop-refresh-eye") || createDesktopHierarchyEyeButton();
+        placeDesktopHierarchyEyeButton(button);
+        updateDesktopHierarchyEyeButton();
+      }, delayMs);
+    }
+  }
+
+  function installDesktopEyeButtonPlacementObserver() {
+    if (desktopEyePlacementObserver || !document.documentElement) return;
+
+    desktopEyePlacementObserver = new MutationObserver(() => {
+      if (desktopEyePlacementTimer) return;
+      desktopEyePlacementTimer = window.setTimeout(() => {
+        desktopEyePlacementTimer = null;
+
+        if (!isDesktopEyeButtonAllowed()) {
+          updateDesktopHierarchyEyeButton();
+          return;
+        }
+
+        const button = desktopEyeButton || document.getElementById("mmlc-desktop-refresh-eye") || createDesktopHierarchyEyeButton();
+        placeDesktopHierarchyEyeButton(button);
+        updateDesktopHierarchyEyeButton();
+      }, 180);
+    });
+
+    desktopEyePlacementObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "aria-hidden"]
+    });
+  }
+
   function createDesktopHierarchyEyeButton() {
-    if (!document.body || isMobileLayoutEnabled()) return null;
+    if (!isDesktopEyeButtonAllowed()) return null;
 
     const existing = document.getElementById("mmlc-desktop-refresh-eye");
     if (existing instanceof HTMLElement) {
@@ -894,7 +965,7 @@
   }
 
   function placeDesktopHierarchyEyeButton(button = desktopEyeButton || document.getElementById("mmlc-desktop-refresh-eye")) {
-    if (!(button instanceof HTMLElement) || isMobileLayoutEnabled()) return false;
+    if (!(button instanceof HTMLElement) || !isDesktopEyeButtonAllowed()) return false;
 
     const roomPanel = document.querySelector("nav.mx_RoomListPanel, nav[aria-label='Chatliste'], nav[aria-label='Room list'], .mx_RoomListPanel");
     if (!(roomPanel instanceof HTMLElement) || roomPanel.closest(OWNED_SELECTOR)) {
@@ -940,7 +1011,7 @@
   async function handleDesktopEyeButtonClick() {
     if (desktopHierarchyRefreshInProgress) return;
 
-    if (desktopHierarchyModeActive) {
+    if (desktopHierarchyModeActive && isDesktopHierarchyNativeModeAllowed()) {
       desktopHierarchyModeActive = false;
       await persistDesktopHierarchyMode();
       disableDesktopHierarchyNativeMode({ keepButton: true });
@@ -970,7 +1041,7 @@
   function updateDesktopHierarchyEyeButton() {
     const button = desktopEyeButton || document.getElementById("mmlc-desktop-refresh-eye");
     if (!(button instanceof HTMLElement)) return;
-    button.hidden = isMobileLayoutEnabled();
+    button.hidden = !isDesktopEyeButtonAllowed();
     button.classList.toggle("mmlc-desktop-eye-active", desktopHierarchyModeActive);
     button.classList.toggle("mmlc-desktop-eye-loading", desktopHierarchyRefreshInProgress);
     button.setAttribute("aria-pressed", desktopHierarchyModeActive ? "true" : "false");
@@ -1033,7 +1104,7 @@
   }
 
   function enableDesktopHierarchyNativeMode() {
-    if (isMobileLayoutEnabled()) return;
+    if (!isDesktopHierarchyNativeModeAllowed()) return;
     document.documentElement.classList.add("mmlc-desktop-hierarchy-mode");
     document.documentElement.classList.toggle("mmlc-desktop-indent-subspaces", desktopHierarchyIndentSubspaces !== false);
     document.documentElement.classList.toggle("mmlc-desktop-space-labels-expanded", desktopSpaceLabelsExpanded === true);
@@ -1098,7 +1169,7 @@
     if (desktopHierarchyRenderTimer) clearTimeout(desktopHierarchyRenderTimer);
     desktopHierarchyRenderTimer = setTimeout(() => {
       desktopHierarchyRenderTimer = null;
-      if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+      if (!isDesktopHierarchyNativeModeUsable()) return;
       if (!desktopReloadSelectionSynced) syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true });
       syncDesktopUnreadCachesFromElementDom();
       createDesktopHierarchyEyeButton();
@@ -1111,7 +1182,7 @@
   function installDesktopUnreadSyncObserver() {
     if (desktopUnreadSyncObserver || !document.documentElement) return;
     desktopUnreadSyncObserver = new MutationObserver(mutations => {
-      if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+      if (!isDesktopHierarchyNativeModeUsable()) return;
       if (!mutations.some(mutation => desktopUnreadMutationLooksRelevant(mutation))) return;
       scheduleDesktopUnreadDomSync(90);
     });

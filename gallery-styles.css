@@ -1535,3 +1535,11 @@ body.mg-global-dragover #mg-dropzone {
   -webkit-user-select: none !important;
   user-select: none !important;
 }
+
+
+/* Hide native Element image messages only inside the native thread side pane when Smart Element attaches the corresponding gallery to the thread text message. */
+.mx_RightPanel .mg-native-thread-source-hidden,
+.mx_ThreadPanel .mg-native-thread-source-hidden,
+.mx_ThreadView .mg-native-thread-source-hidden {
+  display: none !important;
+}
