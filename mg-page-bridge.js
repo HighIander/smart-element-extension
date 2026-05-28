@@ -956,7 +956,13 @@
   }
 
   function getRoomByIdOrAlias(client, roomIdOrAlias) {
-    if (!client || !roomIdOrAlias) return null;
+    if (!client) return null;
+
+    if (!roomIdOrAlias) {
+      const inferred = inferActiveRoomFromDom(client);
+      if (inferred) return inferred;
+      return null;
+    }
 
     let room = null;
 
@@ -976,6 +982,107 @@
     } catch {}
 
     return room || null;
+  }
+
+  function inferActiveRoomFromDom(client) {
+    if (!client) return null;
+
+    const fromHash = activeRoomIdFromLocationHash();
+    if (fromHash) {
+      try {
+        const byHash = client.getRoom?.(fromHash);
+        if (byHash) return byHash;
+      } catch {}
+    }
+
+    const visibleEventIds = visibleTimelineEventIds();
+
+    try {
+      const rooms = client.getRooms?.() || [];
+      if (visibleEventIds.size) {
+        for (const room of rooms) {
+          const events = collectRoomEventObjects(room);
+          for (const event of events) {
+            const eventId = event.getId?.() || event.event?.event_id || event.event_id || "";
+            if (eventId && visibleEventIds.has(eventId)) return room;
+          }
+        }
+      }
+
+      const title = activeRoomTitleFromDom();
+      if (title) {
+        const cleanTitle = normalizeRoomTitle(title);
+        const match = rooms.find(room => normalizeRoomTitle(roomDisplayName(room)) === cleanTitle);
+        if (match) return match;
+      }
+    } catch {}
+
+    return null;
+  }
+
+  function roomDisplayName(room) {
+    try {
+      return room?.name || room?.getDefaultRoomName?.() || room?.getCanonicalAlias?.() || room?.roomId || "";
+    } catch {
+      return room?.name || room?.roomId || "";
+    }
+  }
+
+  function normalizeRoomTitle(value) {
+    return String(value || "")
+      .replace(/\s+/g, " ")
+      .replace(/^(?:Chat|Room|Direktnachricht|Direct message)[:\s]+/i, "")
+      .trim()
+      .toLowerCase();
+  }
+
+  function activeRoomTitleFromDom() {
+    const selectors = [
+      "[data-testid='room-header'] h1",
+      "[data-testid='room-header'] [title]",
+      ".mx_RoomHeader h1",
+      ".mx_RoomHeader_name",
+      "[class*='RoomHeader'] h1",
+      "[class*='RoomHeader'] [title]"
+    ];
+
+    for (const selector of selectors) {
+      const element = document.querySelector(selector);
+      const text = element?.getAttribute?.("title") || element?.textContent || "";
+      const clean = text.replace(/\s+/g, " ").trim();
+      if (clean && !/^(threads|chatliste|room list)$/i.test(clean)) return clean;
+    }
+
+    return "";
+  }
+
+  function activeRoomIdFromLocationHash() {
+    try {
+      const hash = decodeURIComponent(window.location.hash || "");
+      const match = hash.match(/\/room\/([^/?#]+)/);
+      return match ? match[1] : "";
+    } catch {
+      return "";
+    }
+  }
+
+  function visibleTimelineEventIds() {
+    const ids = new Set();
+    try {
+      const roots = [
+        document.querySelector(".mx_RoomView, [data-testid='room-view'], [class*='RoomView']"),
+        document.querySelector("[role='log']"),
+        document.body
+      ].filter(Boolean);
+
+      for (const root of roots) {
+        for (const element of root.querySelectorAll("[data-event-id], [id^='$']")) {
+          const id = element.getAttribute("data-event-id") || element.id || "";
+          if (/^\$/.test(id)) ids.add(id);
+        }
+      }
+    } catch {}
+    return ids;
   }
 
   function collectGalleryEvents(roomIdOrAlias) {

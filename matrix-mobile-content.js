@@ -19,6 +19,9 @@
   const AVATAR_IMAGE_CACHE_MAX_BYTES = 300 * 1024;
   const AVATAR_IMAGE_CACHE_MAX_ENTRIES = 240;
   const MOBILE_GUIDE_COOKIE = "element_mobile_redirect_to_guide=false;path=/;max-age=31536000;SameSite=Lax";
+  const STORAGE_DESKTOP_EYE_POSITION_KEY = "mmlc_desktop_eye_position_v1";
+  const STORAGE_DESKTOP_HIERARCHY_MODE_KEY = "mmlc_desktop_hierarchy_mode_v1";
+  const STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY = "mmlc_desktop_hierarchy_settings_v1";
 
   // Prevent Element's mobile-guide redirect as early as possible. This is
   // intentionally independent of Smart Element's own mobile-layout option so
@@ -45,7 +48,12 @@
     "#mmlc-panel",
     "#mcs-settings-host",
     "#mcs-settings-overlay",
-    ".mmlc"
+    "#mmlc-desktop-refresh-eye",
+    "#mmlc-desktop-space-list-host",
+    "#mmlc-desktop-chat-list-host",
+    "#mmlc-desktop-space-settings-popover",
+    ".mmlc",
+    ".mmlc-desktop-native"
   ].join(", ");
   const LEFT_PANEL_SELECTOR = [
     "#left-panel",
@@ -122,6 +130,7 @@
   let panelVisualLoadingHideTimer = null;
   let chatOpeningOverlayVisibleSince = 0;
   let chatOpeningOverlayHideTimer = null;
+  let chatOpeningOverlaySafetyTimer = null;
   let chatOpenFinalizeRun = 0;
   let panelProgressIconLoadRun = 0;
   let middlePaneExpandTimer = null;
@@ -158,6 +167,25 @@
   let mobileWarningSuppressionObserver = null;
   let mobileWarningSuppressionTimer = null;
   let mobileWarningSuppressionIntervalId = null;
+  let desktopEyeButton = null;
+  let desktopHierarchyModeActive = false;
+  let desktopHierarchyRefreshInProgress = false;
+  let desktopShowUnjoinedSpaces = false;
+  let desktopShowUnjoinedChats = false;
+  let desktopHierarchyIndentSubspaces = true;
+  let desktopSpaceLabelsExpanded = false;
+  let desktopSpaceDisplayMode = "full";
+  let desktopHierarchyObserver = null;
+  let desktopUnreadSyncObserver = null;
+  let desktopUnreadSyncTimer = null;
+  let desktopOpenRoomRestoreTimer = null;
+  let desktopOpenRoomRestoreUntil = 0;
+  let desktopReloadSelectionSynced = false;
+  let desktopHierarchyRenderTimer = null;
+  let desktopHierarchyHydrated = false;
+  let desktopHierarchyManualRefreshRun = 0;
+  let desktopInitialAutoRefreshStarted = false;
+  let desktopSelectedSpacePath = [];
   const chatAutoScrollUserGuarded = new WeakSet();
   let mobileMaintenanceIntervalId = null;
   let originalViewportMetaContent = undefined;
@@ -227,10 +255,12 @@
       installPermanentMobileWarningSuppression();
       applyCombinedFeatureVisibility();
       if (isMobileLayoutEnabled()) {
+        disableDesktopHierarchyNativeMode({ keepButton: false });
         initializeMobileRuntime();
         scheduleSelectorPeriodicBackgroundRefresh("settings-changed");
       } else {
         teardownMobileRuntime();
+        initializeDesktopHierarchyRuntime();
       }
     });
   }
@@ -247,8 +277,11 @@
 
     if (!mobileEnabled) {
       teardownMobileRuntime();
+      initializeDesktopHierarchyRuntime();
       return;
     }
+
+    disableDesktopHierarchyNativeMode({ keepButton: false });
 
     if (!isThreadViewFeatureEnabled()) {
       if (currentMode === "thread") setMode("chat", { closeThread: false, allowChooserExit: true });
@@ -398,11 +431,14 @@
     installCombinedFeatureSettingsListener();
     await refreshCombinedFeatureConfig();
     installPermanentMobileWarningSuppression();
+    await hydrateSharedPersistentStateForDesktop();
 
     if (isMobileLayoutEnabled()) {
+      disableDesktopHierarchyNativeMode({ keepButton: false });
       initializeMobileRuntime();
     } else {
       teardownMobileRuntime();
+      initializeDesktopHierarchyRuntime();
     }
   }
 
@@ -513,6 +549,10 @@
       clearTimeout(chatOpeningOverlayHideTimer);
       chatOpeningOverlayHideTimer = null;
     }
+    if (chatOpeningOverlaySafetyTimer) {
+      clearTimeout(chatOpeningOverlaySafetyTimer);
+      chatOpeningOverlaySafetyTimer = null;
+    }
     if (middlePaneExpandTimer) {
       clearTimeout(middlePaneExpandTimer);
       middlePaneExpandTimer = null;
@@ -576,6 +616,1732 @@
   function directMessagesLabel() {
     const lang = String(document.documentElement.lang || navigator.language || "").toLowerCase();
     return lang.startsWith("en") ? "Direct messages" : "Direktnachrichten";
+  }
+
+  function joinPromptTextForItem(item) {
+    const label = normalizeSpaces(item?.label || "");
+    const lang = String(document.documentElement.lang || navigator.language || "").toLowerCase();
+    if (lang.startsWith("en")) return `Join ${label || "this room/space"}?`;
+    return `${label || "Diesen Chat/Space"} beitreten?`;
+  }
+
+  function firstTwoLettersForLabel(label) {
+    const chars = Array.from(String(label || "").trim())
+      .filter(ch => /[\p{L}\p{N}]/u.test(ch))
+      .slice(0, 2)
+      .join("")
+      .toUpperCase();
+    return chars || "CH";
+  }
+
+  function makeFixedTextAvatar(text, className) {
+    const avatar = document.createElement("span");
+    avatar.className = className;
+    avatar.classList.add("mmlc-inline-avatar-fallback");
+    avatar.textContent = String(text || "").slice(0, 3) || "•";
+    return avatar;
+  }
+
+  function makeDesktopChatAvatar(item) {
+    const avatarSrc = item?.avatarSrc || item?.avatarDataUrl || item?.item?.avatarSrc || item?.item?.avatarDataUrl || "";
+    if (avatarSrc) {
+      const avatar = document.createElement("span");
+      avatar.className = "mmlc-desktop-chat-avatar";
+      const image = document.createElement("img");
+      image.alt = "";
+      setAvatarImageSource(image, avatarSrc, item?.label || "");
+      avatar.appendChild(image);
+      return avatar;
+    }
+    return makeFixedTextAvatar(firstTwoLettersForLabel(item?.label || item?.icon || "Chat"), "mmlc-desktop-chat-avatar");
+  }
+
+  function findNativeRoomListElement(root = document) {
+    if (!(root instanceof Element || root instanceof Document)) return null;
+    return root.querySelector?.("[data-testid='room-list'], .mx_RoomList, [class*='roomList_'], [data-virtuoso-scroller='true'][aria-label='Chatliste'], [data-virtuoso-scroller='true'][aria-label='Room list']") || null;
+  }
+
+  function directChildOfAncestor(element, ancestor) {
+    if (!(element instanceof Node) || !(ancestor instanceof Element)) return null;
+    let current = element;
+    while (current && current.parentElement && current.parentElement !== ancestor) {
+      current = current.parentElement;
+    }
+    return current?.parentElement === ancestor ? current : null;
+  }
+
+  async function waitForDesktopHierarchyChatListRendered(timeoutMs = 1400) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const host = document.getElementById("mmlc-desktop-chat-list-host");
+      const visible = host instanceof HTMLElement && isRendered(host);
+      const isStart = document.documentElement.classList.contains("mmlc-desktop-start-selected");
+      if (visible || isStart) {
+        await nextAnimationFrame();
+        await delay(80);
+        return true;
+      }
+      await delay(80);
+    }
+    return false;
+  }
+
+  function updateNativeStartPageHeadingLabel() {
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+    const label = directMessagesLabel();
+    const headers = Array.from(document.querySelectorAll("#left-panel h1, [data-testid='room-list-header'] h1, .mx_RoomListPanel h1"));
+    for (const heading of headers) {
+      if (!(heading instanceof HTMLElement) || heading.closest(OWNED_SELECTOR)) continue;
+      const text = normalizeSpaces(heading.textContent || heading.getAttribute("title") || "").toLowerCase();
+      if (/^(startseite|home|direct messages|direktnachrichten)$/.test(text) || document.documentElement.classList.contains("mmlc-desktop-start-selected")) {
+        heading.textContent = label;
+        heading.setAttribute("title", label);
+        heading.dataset.mmlcStartHeadingRenamed = "true";
+      }
+    }
+  }
+
+  async function joinDesktopUnjoinedItem(item) {
+    if (!item) return false;
+    if (!confirm(joinPromptTextForItem(item))) return false;
+
+    showChatOpeningOverlay(true, {
+      title: "Joining.",
+      detail: normalizeSpaces(item.label || "Joining selected entry...")
+    });
+    try {
+      const joined = await clickNativeJoinForDesktopItem(item);
+      if (joined) {
+        await delay(700);
+        await manualRefreshAllSpacesForDesktopHierarchy();
+        renderDesktopHierarchyNativeUiSoon(0);
+      }
+      return joined;
+    } finally {
+      showChatOpeningOverlay(false, { minVisibleMs: 520 });
+    }
+  }
+
+  async function clickNativeJoinForDesktopItem(item) {
+    const label = normalizeSpaces(item?.label || "");
+    if (!label) return false;
+    const itemPath = Array.isArray(item.path) ? item.path.filter(segment => segment && segment.type !== "room") : [];
+    const lastSpace = lastSelectableSpacePathSegment(itemPath);
+    if (lastSpace?.label) {
+      currentSpaceLabel = lastSpace.label;
+      currentSpacePath = pathSegmentsFromSpacePath(logicalPathWithoutRoot(itemPath));
+      desktopSelectedSpacePath = pathSegmentsFromSpacePath(logicalPathWithoutRoot(itemPath));
+    }
+
+    const wasCollapsed = nativeSpacePanelIsCollapsed();
+    return await withDesktopHierarchyNativeAction(async () => {
+      if (lastSpace?.label) {
+        await ensureCurrentSpaceSelectedInLeftPanel(lastSpace.label, {
+          forceDesktopWidth: true,
+          reason: "desktop-hierarchy-join-select-space",
+          pathSnapshot: itemPath,
+          maxWaitMs: 4200,
+          avoidSubtreeExpansion: true
+        });
+        await ensureCurrentSpaceOverview({
+          forceOpen: true,
+          preferLeftRail: true,
+          allowContainedRow: false,
+          pathSnapshot: itemPath,
+          reason: "desktop-hierarchy-join-select-space"
+        });
+        await forceLoadSpaceOverviewContent();
+      }
+      const resolved = resolveCurrentSpaceOverviewItem(item);
+      const row = resolved?.rowElement || item.element;
+      const tile = resolved?.tileElement || item.tileElement || row;
+      for (const element of [row, tile]) {
+        if (element instanceof Element) {
+          try { element.scrollIntoView({ block: "center", inline: "nearest" }); } catch {}
+          hoverElement(element);
+        }
+      }
+      await delay(180);
+      const joinControl = findSpaceOverviewJoinButton(row) || findSpaceOverviewJoinButton(tile);
+      if (joinControl instanceof Element) {
+        clickElement(joinControl);
+        return true;
+      }
+      return false;
+    }, { restoreCollapsed: wasCollapsed, reason: "desktop-hierarchy-join" });
+  }
+
+  function findSpaceOverviewJoinButton(anchor = null) {
+    return findSpaceOverviewActionButton(anchor, /^(betreten|beitreten|join)$/i, /\b(betreten|beitreten|join|join room|join chat)\b/i);
+  }
+
+
+  async function hydrateSharedPersistentStateForDesktop() {
+    if (desktopHierarchyHydrated) return;
+    desktopHierarchyHydrated = true;
+
+    try { loadPersistentHierarchyCache(); } catch {}
+    try { loadPersistentUnreadCache(); } catch {}
+    try { loadPersistentSortSettings(); } catch {}
+
+    try {
+      const data = await chrome.storage.local.get([
+        STORAGE_HIERARCHY_CACHE_KEY,
+        STORAGE_UNREAD_CACHE_KEY,
+        STORAGE_SORT_MODE_KEY,
+        STORAGE_USER_ORDER_KEY,
+        STORAGE_DESKTOP_HIERARCHY_MODE_KEY,
+        STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY
+      ]);
+      mergePersistentHierarchyPayload(data?.[STORAGE_HIERARCHY_CACHE_KEY]);
+      mergePersistentUnreadPayload(data?.[STORAGE_UNREAD_CACHE_KEY]);
+      mergeExtensionSortSettings(data);
+      desktopHierarchyModeActive = data?.[STORAGE_DESKTOP_HIERARCHY_MODE_KEY]?.active === true;
+      const desktopSettings = data?.[STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY] || {};
+      desktopHierarchyIndentSubspaces = desktopSettings.indentSubspaces !== false;
+      desktopSpaceLabelsExpanded = desktopSettings.labelsExpanded === true;
+      desktopSpaceDisplayMode = desktopSettings.spaceDisplayMode === "current" ? "current" : "full";
+    } catch {}
+  }
+
+  function initializeDesktopHierarchyRuntime() {
+    if (!document.body || isMobileLayoutEnabled()) return;
+    hydrateSharedPersistentStateForDesktop().finally(() => {
+      if (isMobileLayoutEnabled()) return;
+      createDesktopHierarchyEyeButton();
+      if (desktopHierarchyModeActive) {
+        enableDesktopHierarchyNativeMode();
+        scheduleDesktopHierarchyInitialAutoRefresh();
+      } else {
+        disableDesktopHierarchyNativeMode({ keepButton: true });
+      }
+    });
+  }
+
+  function scheduleDesktopHierarchyInitialAutoRefresh() {
+    if (desktopInitialAutoRefreshStarted) return;
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+    desktopInitialAutoRefreshStarted = true;
+
+    window.setTimeout(() => {
+      runDesktopHierarchyInitialAutoRefresh().catch(error => {
+        console.warn("Smart Element initial desktop hierarchy refresh failed.", error);
+        desktopHierarchyRefreshInProgress = false;
+        updateDesktopHierarchyEyeButton();
+        showChatOpeningOverlay(false, { minVisibleMs: 420 });
+      });
+    }, 450);
+  }
+
+  async function runDesktopHierarchyInitialAutoRefresh() {
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+    if (desktopHierarchyRefreshInProgress) return;
+
+    desktopHierarchyRefreshInProgress = true;
+    updateDesktopHierarchyEyeButton();
+    showChatOpeningOverlay(true, {
+      title: "Updating hierarchy.",
+      detail: "Refreshing cached spaces and chats..."
+    });
+
+    try {
+      await manualRefreshAllSpacesForDesktopHierarchy();
+      enableDesktopHierarchyNativeMode();
+      desktopReloadSelectionSynced = false;
+      scheduleDesktopOpenRoomSelectionRestore(80);
+      renderDesktopHierarchyNativeUiSoon(0);
+      await waitForDesktopHierarchyChatListRendered(1600);
+    } finally {
+      desktopHierarchyRefreshInProgress = false;
+      updateDesktopHierarchyEyeButton();
+      showChatOpeningOverlay(false, { minVisibleMs: 520 });
+    }
+  }
+
+  function createDesktopHierarchyEyeButton() {
+    if (!document.body || isMobileLayoutEnabled()) return null;
+
+    const existing = document.getElementById("mmlc-desktop-refresh-eye");
+    if (existing instanceof HTMLElement) {
+      desktopEyeButton = existing;
+      placeDesktopHierarchyEyeButton(existing);
+      updateDesktopHierarchyEyeButton();
+      return existing;
+    }
+
+    const button = document.createElement("button");
+    button.id = "mmlc-desktop-refresh-eye";
+    button.className = "mmlc-desktop-native mmlc-desktop-eye";
+    button.type = "button";
+    button.setAttribute("aria-label", "Smart Element hierarchy refresh");
+    button.title = "Refresh and enable native hierarchy mode";
+    button.innerHTML = desktopEyeIconSvg();
+
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      handleDesktopEyeButtonClick().catch(error => {
+        console.warn("Smart Element desktop hierarchy refresh failed.", error);
+        desktopHierarchyRefreshInProgress = false;
+        updateDesktopHierarchyEyeButton();
+      });
+    });
+
+    desktopEyeButton = button;
+    placeDesktopHierarchyEyeButton(button);
+    updateDesktopHierarchyEyeButton();
+    return button;
+  }
+
+  function placeDesktopHierarchyEyeButton(button = desktopEyeButton || document.getElementById("mmlc-desktop-refresh-eye")) {
+    if (!(button instanceof HTMLElement) || isMobileLayoutEnabled()) return false;
+
+    const roomPanel = document.querySelector("nav.mx_RoomListPanel, nav[aria-label='Chatliste'], nav[aria-label='Room list'], .mx_RoomListPanel");
+    if (!(roomPanel instanceof HTMLElement) || roomPanel.closest(OWNED_SELECTOR)) {
+      button.hidden = true;
+      if (!button.isConnected) document.body?.appendChild(button);
+      return false;
+    }
+
+    let host = document.getElementById("mmlc-desktop-eye-host");
+    if (!(host instanceof HTMLElement) || host.parentElement !== roomPanel) {
+      host?.remove();
+      host = document.createElement("div");
+      host.id = "mmlc-desktop-eye-host";
+      host.className = "mmlc-desktop-native mmlc-desktop-eye-host";
+
+      const filters = roomPanel.querySelector("[data-testid='primary-filters'], [class*='roomListPrimaryFilters']");
+      const filtersAnchor = directChildOfAncestor(filters, roomPanel) || filters;
+      if (filtersAnchor instanceof Node && filtersAnchor.parentElement === roomPanel) {
+        roomPanel.insertBefore(host, filtersAnchor.nextSibling);
+      } else {
+        const header = roomPanel.querySelector("[data-testid='room-list-header'], header[aria-label], .mx_RoomListPanel header, [class*='header']");
+        const headerAnchor = directChildOfAncestor(header, roomPanel) || header;
+        if (headerAnchor instanceof Node && headerAnchor.parentElement === roomPanel) {
+          roomPanel.insertBefore(host, headerAnchor.nextSibling);
+        } else {
+          const nativeRoomList = findNativeRoomListElement(roomPanel);
+          const listAnchor = directChildOfAncestor(nativeRoomList, roomPanel) || nativeRoomList;
+          if (listAnchor instanceof Node && listAnchor.parentElement === roomPanel) roomPanel.insertBefore(host, listAnchor);
+          else roomPanel.appendChild(host);
+        }
+      }
+    }
+
+    if (button.parentElement !== host) host.appendChild(button);
+    button.hidden = false;
+    return true;
+  }
+
+  function desktopEyeIconSvg() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 5c5.1 0 8.7 4.3 10 7-1.3 2.7-4.9 7-10 7S3.3 14.7 2 12c1.3-2.7 4.9-7 10-7Zm0 2C8.5 7 5.8 9.5 4.3 12 5.8 14.5 8.5 17 12 17s6.2-2.5 7.7-5C18.2 9.5 15.5 7 12 7Zm0 2.2A2.8 2.8 0 1 1 12 14.8 2.8 2.8 0 0 1 12 9.2Z"/></svg>`;
+  }
+
+  async function handleDesktopEyeButtonClick() {
+    if (desktopHierarchyRefreshInProgress) return;
+
+    if (desktopHierarchyModeActive) {
+      desktopHierarchyModeActive = false;
+      await persistDesktopHierarchyMode();
+      disableDesktopHierarchyNativeMode({ keepButton: true });
+      updateDesktopHierarchyEyeButton();
+      return;
+    }
+
+    desktopHierarchyRefreshInProgress = true;
+    updateDesktopHierarchyEyeButton();
+    showChatOpeningOverlay(true, {
+      title: "Updating hierarchy.",
+      detail: "Reading top-level spaces and caching chats..."
+    });
+    try {
+      await manualRefreshAllSpacesForDesktopHierarchy();
+      desktopHierarchyModeActive = true;
+      await persistDesktopHierarchyMode();
+      enableDesktopHierarchyNativeMode();
+      await waitForDesktopHierarchyChatListRendered(1600);
+    } finally {
+      desktopHierarchyRefreshInProgress = false;
+      updateDesktopHierarchyEyeButton();
+      showChatOpeningOverlay(false, { minVisibleMs: 520 });
+    }
+  }
+
+  function updateDesktopHierarchyEyeButton() {
+    const button = desktopEyeButton || document.getElementById("mmlc-desktop-refresh-eye");
+    if (!(button instanceof HTMLElement)) return;
+    button.hidden = isMobileLayoutEnabled();
+    button.classList.toggle("mmlc-desktop-eye-active", desktopHierarchyModeActive);
+    button.classList.toggle("mmlc-desktop-eye-loading", desktopHierarchyRefreshInProgress);
+    button.setAttribute("aria-pressed", desktopHierarchyModeActive ? "true" : "false");
+    button.title = desktopHierarchyRefreshInProgress
+      ? "Refreshing all spaces..."
+      : desktopHierarchyModeActive
+        ? "Disable native hierarchy mode"
+        : "Refresh all spaces and enable native hierarchy mode";
+  }
+
+
+  function protectDesktopNativeButton(button) {
+    if (!(button instanceof HTMLElement) || button.dataset.mmlcDesktopEventsProtected === "true") return;
+    button.dataset.mmlcDesktopEventsProtected = "true";
+
+    const stopNativePaneDelegation = event => {
+      // The injected controls live inside Element's native panes. Stop pointer
+      // events before Element's delegated handlers see them; otherwise Element can
+      // open row/space option menus under our synthetic controls.
+      event.stopPropagation();
+    };
+
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "dblclick", "contextmenu"]) {
+      button.addEventListener(type, stopNativePaneDelegation, true);
+      button.addEventListener(type, stopNativePaneDelegation, false);
+    }
+  }
+
+  async function withDesktopHierarchyNativeAction(callback, options = {}) {
+    const html = document.documentElement;
+    const shouldRestoreCollapsed = options.restoreCollapsed === true;
+    html.classList.add("mmlc-desktop-native-action");
+    try {
+      await nextAnimationFrame();
+      return await callback();
+    } finally {
+      if (shouldRestoreCollapsed) {
+        await collapseNativeSpacePanelBeforeDirectChatOpen(options.reason || "desktop-hierarchy-native-action");
+      }
+      html.classList.remove("mmlc-desktop-native-action");
+      renderDesktopHierarchyNativeUiSoon(0);
+    }
+  }
+
+  async function persistDesktopHierarchyMode() {
+    const payload = { active: desktopHierarchyModeActive === true, savedAt: Date.now() };
+    try { localStorage.setItem(STORAGE_DESKTOP_HIERARCHY_MODE_KEY, JSON.stringify(payload)); } catch {}
+    try { await chrome.storage.local.set({ [STORAGE_DESKTOP_HIERARCHY_MODE_KEY]: payload }); } catch {}
+  }
+
+  async function persistDesktopHierarchySettings() {
+    const payload = {
+      indentSubspaces: desktopHierarchyIndentSubspaces !== false,
+      labelsExpanded: desktopSpaceLabelsExpanded === true,
+      spaceDisplayMode: desktopSpaceDisplayMode === "current" ? "current" : "full",
+      savedAt: Date.now()
+    };
+    try { localStorage.setItem(STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY, JSON.stringify(payload)); } catch {}
+    try { await chrome.storage.local.set({ [STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY]: payload }); } catch {}
+  }
+
+  function enableDesktopHierarchyNativeMode() {
+    if (isMobileLayoutEnabled()) return;
+    document.documentElement.classList.add("mmlc-desktop-hierarchy-mode");
+    document.documentElement.classList.toggle("mmlc-desktop-indent-subspaces", desktopHierarchyIndentSubspaces !== false);
+    document.documentElement.classList.toggle("mmlc-desktop-space-labels-expanded", desktopSpaceLabelsExpanded === true);
+    document.documentElement.classList.toggle("mmlc-desktop-space-mode-current", desktopSpaceDisplayMode === "current");
+    updateDesktopStartSelectedClass();
+    installDesktopHierarchyObserver();
+    installDesktopUnreadSyncObserver();
+    desktopReloadSelectionSynced = false;
+    scheduleDesktopOpenRoomSelectionRestore(80);
+    scheduleDesktopUnreadDomSync(120);
+    renderDesktopHierarchyNativeUiSoon(0);
+  }
+
+  function disableDesktopHierarchyNativeMode(options = {}) {
+    desktopHierarchyModeActive = false;
+    document.documentElement.classList.remove(
+      "mmlc-desktop-hierarchy-mode",
+      "mmlc-desktop-indent-subspaces",
+      "mmlc-desktop-space-labels-expanded",
+      "mmlc-desktop-native-action",
+      "mmlc-desktop-space-panel-expanded",
+      "mmlc-desktop-space-mode-current",
+      "mmlc-desktop-start-selected"
+    );
+    document.getElementById("mmlc-desktop-space-list-host")?.remove();
+    document.getElementById("mmlc-desktop-chat-list-host")?.remove();
+    document.getElementById("mmlc-desktop-space-settings-popover")?.remove();
+    if (!options.keepButton) {
+      document.getElementById("mmlc-desktop-refresh-eye")?.remove();
+      desktopEyeButton = null;
+    }
+    if (desktopHierarchyObserver) {
+      desktopHierarchyObserver.disconnect();
+      desktopHierarchyObserver = null;
+    }
+    if (desktopUnreadSyncObserver) {
+      desktopUnreadSyncObserver.disconnect();
+      desktopUnreadSyncObserver = null;
+    }
+    if (desktopUnreadSyncTimer) {
+      clearTimeout(desktopUnreadSyncTimer);
+      desktopUnreadSyncTimer = null;
+    }
+    if (desktopOpenRoomRestoreTimer) {
+      clearTimeout(desktopOpenRoomRestoreTimer);
+      desktopOpenRoomRestoreTimer = null;
+    }
+  }
+
+  function installDesktopHierarchyObserver() {
+    if (desktopHierarchyObserver || !document.documentElement) return;
+    desktopHierarchyObserver = new MutationObserver(() => renderDesktopHierarchyNativeUiSoon(120));
+    desktopHierarchyObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "aria-selected", "aria-expanded", "style"]
+    });
+  }
+
+  function renderDesktopHierarchyNativeUiSoon(delayMs = 80) {
+    if (desktopHierarchyRenderTimer) clearTimeout(desktopHierarchyRenderTimer);
+    desktopHierarchyRenderTimer = setTimeout(() => {
+      desktopHierarchyRenderTimer = null;
+      if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+      if (!desktopReloadSelectionSynced) syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true });
+      syncDesktopUnreadCachesFromElementDom();
+      createDesktopHierarchyEyeButton();
+      renderDesktopSpaceRailNativeUi();
+      renderDesktopMiddleChatNativeUi();
+      updateNativeStartPageHeadingLabel();
+    }, Math.max(0, delayMs));
+  }
+
+  function installDesktopUnreadSyncObserver() {
+    if (desktopUnreadSyncObserver || !document.documentElement) return;
+    desktopUnreadSyncObserver = new MutationObserver(mutations => {
+      if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+      if (!mutations.some(mutation => desktopUnreadMutationLooksRelevant(mutation))) return;
+      scheduleDesktopUnreadDomSync(90);
+    });
+    desktopUnreadSyncObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["aria-label", "title", "data-indicator", "data-count", "class", "style"]
+    });
+  }
+
+  function desktopUnreadMutationLooksRelevant(mutation) {
+    const target = mutation?.target instanceof Element ? mutation.target : mutation?.target?.parentElement;
+    if (!(target instanceof Element) || target.closest(OWNED_SELECTOR)) return false;
+    const signature = normalizeSpaces([
+      target.getAttribute?.("aria-label"),
+      target.getAttribute?.("title"),
+      target.getAttribute?.("data-indicator"),
+      target.getAttribute?.("data-count"),
+      target.className,
+      target.textContent
+    ].filter(Boolean).join(" ")).toLowerCase();
+    return /unread|ungelesen|notification|benachrichtig|badge|counter|count|mention|erwähn|erwaehn|mx_notificationbadge|unread-counter|roomlistitem|spacebutton/.test(signature) ||
+      Boolean(target.closest?.("[data-testid='room-list'], .mx_RoomListPanel, .mx_SpacePanel"));
+  }
+
+  function scheduleDesktopUnreadDomSync(delayMs = 90) {
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
+    if (desktopUnreadSyncTimer) clearTimeout(desktopUnreadSyncTimer);
+    desktopUnreadSyncTimer = setTimeout(() => {
+      desktopUnreadSyncTimer = null;
+      const changed = syncDesktopUnreadCachesFromElementDom();
+      if (changed) {
+        persistHierarchyCacheSoon();
+        persistUnreadCacheSoon();
+        updateHierarchyBar();
+        renderDesktopHierarchyNativeUiSoon(0);
+      }
+    }, Math.max(0, delayMs));
+  }
+
+  function syncDesktopUnreadCachesFromElementDom() {
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return false;
+    let changed = false;
+    changed = syncNativeRoomListUnreadIntoCurrentDesktopCache() || changed;
+    changed = syncNativeSpaceRailUnreadIntoCache() || changed;
+    return changed;
+  }
+
+  function syncNativeRoomListUnreadIntoCurrentDesktopCache() {
+    const selected = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(desktopSelectedSpacePath.length ? desktopSelectedSpacePath : currentSpacePath);
+    const label = normalizeSpaces(selected?.label || currentSpaceLabel || "");
+    if (!label || /^(startseite|home|direct messages|direktnachrichten)$/i.test(label)) return false;
+
+    const path = Array.isArray(selected?.path) && selected.path.length
+      ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(selected.path))
+      : currentSpacePathForPanel(label);
+    const listKey = chatsCacheKey(path, label);
+    const cached = hierarchyListCache.get(listKey);
+    if (!Array.isArray(cached) || !cached.length) return false;
+
+    const liveUnread = collectNativeRoomListUnreadMap();
+    if (!liveUnread.size) return false;
+
+    let changed = false;
+    const updated = cached.map(item => {
+      if (!item || item.type !== "room") return item;
+      const key = normalizeChatKey(item.label || "");
+      if (!key || !liveUnread.has(key)) return item;
+      const unread = cloneUnreadState(liveUnread.get(key));
+      if (unreadStateSignature(item.unread) === unreadStateSignature(unread)) return item;
+      changed = true;
+      return { ...item, unread };
+    });
+
+    if (!changed) return false;
+    hierarchyListCache.set(listKey, updated);
+    updateUnreadCachesFromList(listKey, updated);
+    return true;
+  }
+
+  function collectNativeRoomListUnreadMap() {
+    const result = new Map();
+    const roomList = findNativeRoomListElement(document);
+    if (!(roomList instanceof Element) || roomList.closest(OWNED_SELECTOR)) return result;
+
+    const rows = uniqueElements(Array.from(roomList.querySelectorAll([
+      "button.mx_RoomListItemView",
+      "button[class*='RoomListItem']",
+      "button[role='option']",
+      ".mx_RoomListItemView",
+      "[class*='RoomListItem'][role='option']"
+    ].join(",")))).filter(row => row instanceof Element && !row.closest(OWNED_SELECTOR));
+
+    for (const row of rows) {
+      const label = nativeRoomListRowLabel(row);
+      const key = normalizeChatKey(label);
+      if (!key || isGenericNavigationLabel(label) || looksLikeRoomListUtilityControl(row, label)) continue;
+      const unread = extractUnreadStateForRoomRow(row, row, label);
+      result.set(key, mergeSameUnreadStates(result.get(key), unread));
+    }
+
+    return result;
+  }
+
+  function nativeRoomListRowLabel(row) {
+    if (!(row instanceof Element)) return "";
+    const nameNode = row.querySelector("[data-testid='room-name'], [class*='roomName'], [class*='RoomName']");
+    const preferred = normalizeSpaces(nameNode?.getAttribute?.("title") || nameNode?.textContent || "");
+    if (preferred && !isUnreadOnlyNavigationLabel(preferred) && !isAvatarOnlyLabel(preferred)) return cleanRoomLabel(preferred);
+
+    let label = cleanRoomLabel(getElementLabel(row) || visibleText(row));
+    label = label
+      .replace(/^(?:öffne|oeffne|open)\s+(?:den\s+)?chat\s+/i, "")
+      .replace(/\s+mit\s+\d{1,4}\+?\s+(?:ungelesenen?\s+)?nachrichten?.*$/i, "")
+      .replace(/\s+with\s+\d{1,4}\+?\s+unread\s+messages?.*$/i, "")
+      .replace(/\s+\d{1,4}\+?\s+(?:unread|ungelesen).*$/i, "")
+      .trim();
+    return label;
+  }
+
+  function syncNativeSpaceRailUnreadIntoCache() {
+    const controls = collectSpaceControls({ subspacesOnly: false });
+    if (!controls.length) return false;
+
+    const liveByLabel = new Map();
+    for (const item of controls) {
+      const label = normalizeSpaces(item?.label || "");
+      if (!label || /^(startseite|home)$/i.test(label)) continue;
+      const unread = extractUnreadStateFromElement(item.element, { rowLabel: label });
+      liveByLabel.set(label.toLowerCase(), mergeSameUnreadStates(liveByLabel.get(label.toLowerCase()), unread));
+    }
+
+    if (!liveByLabel.size) return false;
+
+    let changed = false;
+    for (const [listKey, items] of Array.from(hierarchyListCache.entries())) {
+      if (!Array.isArray(items) || !(listKey === spaceCacheKey() || String(listKey).startsWith("space-detail:"))) continue;
+      let listChanged = false;
+      const updated = items.map(item => {
+        if (!item || !/space|subspace/i.test(String(item.type || ""))) return item;
+        const key = normalizeSpaces(item.label || "").toLowerCase();
+        if (!key || !liveByLabel.has(key)) return item;
+        const unread = cloneUnreadState(liveByLabel.get(key));
+        if (unreadStateSignature(item.unread) === unreadStateSignature(unread)) return item;
+        listChanged = true;
+        return { ...item, unread };
+      });
+
+      if (listChanged) {
+        hierarchyListCache.set(listKey, updated);
+        changed = true;
+      }
+    }
+
+    return changed;
+  }
+
+  function scheduleDesktopOpenRoomSelectionRestore(delayMs = 120) {
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled() || desktopReloadSelectionSynced) return;
+    if (!desktopOpenRoomRestoreUntil) desktopOpenRoomRestoreUntil = Date.now() + 7000;
+    if (desktopOpenRoomRestoreTimer) clearTimeout(desktopOpenRoomRestoreTimer);
+    desktopOpenRoomRestoreTimer = setTimeout(() => {
+      desktopOpenRoomRestoreTimer = null;
+      if (!desktopHierarchyModeActive || isMobileLayoutEnabled() || desktopReloadSelectionSynced) return;
+      const restored = syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true });
+      if (restored || Date.now() > desktopOpenRoomRestoreUntil) {
+        desktopReloadSelectionSynced = true;
+        desktopOpenRoomRestoreUntil = 0;
+        renderDesktopHierarchyNativeUiSoon(0);
+        return;
+      }
+      scheduleDesktopOpenRoomSelectionRestore(420);
+    }, Math.max(0, delayMs));
+  }
+
+  function syncDesktopSelectedSpaceFromOpenRoom(options = {}) {
+    const match = findCachedDesktopChatForCurrentOpenRoom();
+    if (!match?.item) return false;
+
+    const path = Array.isArray(match.item.path)
+      ? match.item.path.filter(segment => segment && segment.type !== "room")
+      : [];
+    const last = lastSelectableSpacePathSegment(path);
+    if (!last?.label) return false;
+
+    currentChatLabel = normalizeSpaces(match.item.label || currentChatLabel || "");
+    currentChatHref = location.href || currentChatHref || "";
+    currentSpaceLabel = last.label;
+    currentSpacePath = pathSegmentsFromSpacePath(logicalPathWithoutRoot(path));
+    desktopSelectedSpacePath = cloneSpacePathSegments(currentSpacePath);
+    updateDesktopStartSelectedClass();
+    return true;
+  }
+
+  function findCachedDesktopChatForCurrentOpenRoom() {
+    const currentRoute = roomRouteKey(location.href);
+    const activeLabel = normalizeChatKey(activeRoomLabel() || currentChatLabel || "");
+    let fallback = null;
+
+    for (const [listKey, items] of hierarchyListCache.entries()) {
+      if (!String(listKey).startsWith("chats:") || !Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item || item.type !== "room") continue;
+        const route = roomRouteKey(item.href || "");
+        if (currentRoute && route && route === currentRoute) return { item, listKey };
+        if (!fallback && activeLabel && normalizeChatKey(item.label || "") === activeLabel) fallback = { item, listKey };
+      }
+    }
+
+    return fallback;
+  }
+
+  function updateDesktopStartSelectedClass() {
+    const selected = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(desktopSelectedSpacePath.length ? desktopSelectedSpacePath : currentSpacePath);
+    const label = normalizeSpaces(selected?.label || currentSpaceLabel || "");
+    const isStart = selected?.type === "start" || /^(startseite|home)$/i.test(label);
+    document.documentElement.classList.toggle("mmlc-desktop-start-selected", Boolean(isStart));
+    return Boolean(isStart);
+  }
+
+
+  function renderDesktopSpaceRailNativeUi() {
+    const panel = document.querySelector(SPACE_PANEL_SELECTOR);
+    if (!(panel instanceof HTMLElement) || panel.closest(OWNED_SELECTOR)) return;
+    const showLabels = desktopSpaceLabelsExpanded === true || !nativeSpacePanelIsCollapsed(panel);
+    document.documentElement.classList.toggle("mmlc-desktop-space-panel-expanded", showLabels);
+    document.documentElement.classList.toggle("mmlc-desktop-space-labels-expanded", desktopSpaceLabelsExpanded === true);
+    document.documentElement.classList.toggle("mmlc-desktop-space-mode-current", desktopSpaceDisplayMode === "current");
+    updateDesktopStartSelectedClass();
+
+    let host = document.getElementById("mmlc-desktop-space-list-host");
+    if (!(host instanceof HTMLElement) || host.parentElement !== panel) {
+      host?.remove();
+      host = document.createElement("div");
+      host.id = "mmlc-desktop-space-list-host";
+      host.className = "mmlc-desktop-native mmlc-desktop-space-list-host";
+      const userMenu = panel.querySelector(".mx_UserMenu, [class*='UserMenu']");
+      if (userMenu?.nextSibling) panel.insertBefore(host, userMenu.nextSibling);
+      else panel.insertBefore(host, panel.firstChild || null);
+    }
+
+    host.replaceChildren();
+
+    const list = document.createElement("div");
+    list.className = "mmlc-desktop-space-list";
+    host.appendChild(list);
+
+    const expandToggle = document.createElement("button");
+    expandToggle.type = "button";
+    expandToggle.className = "mmlc-desktop-space-button mmlc-desktop-space-expand-toggle";
+    expandToggle.title = desktopSpaceLabelsExpanded ? "Space labels ausblenden" : "Space labels ausklappen";
+    expandToggle.setAttribute("aria-label", expandToggle.title);
+    expandToggle.setAttribute("aria-pressed", desktopSpaceLabelsExpanded ? "true" : "false");
+    expandToggle.textContent = desktopSpaceLabelsExpanded ? "⇤" : "⇥";
+    protectDesktopNativeButton(expandToggle);
+    expandToggle.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      desktopSpaceLabelsExpanded = !desktopSpaceLabelsExpanded;
+      document.documentElement.classList.toggle("mmlc-desktop-space-labels-expanded", desktopSpaceLabelsExpanded === true);
+      document.documentElement.classList.toggle("mmlc-desktop-space-panel-expanded", desktopSpaceLabelsExpanded === true || !nativeSpacePanelIsCollapsed(panel));
+      persistDesktopHierarchySettings();
+      renderDesktopHierarchyNativeUiSoon(0);
+    });
+    list.appendChild(expandToggle);
+
+    list.appendChild(makeDesktopSpaceButton({
+      id: "desktop-dm",
+      type: "start",
+      label: "Startseite",
+      displayLabel: directMessagesLabel(),
+      icon: "DM",
+      level: 0,
+      joined: true,
+      path: [{ label: "Spaces", type: "root" }, { label: "Startseite", type: "start" }]
+    }));
+
+    for (const node of desktopSpaceTreeNodesForCurrentMode()) {
+      if (!desktopShowUnjoinedSpaces && node.joined === false) continue;
+      list.appendChild(makeDesktopSpaceButton(node));
+    }
+
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "mmlc-desktop-space-button mmlc-desktop-space-more";
+    more.title = desktopShowUnjoinedSpaces ? "Hide not joined spaces" : "Show not joined spaces";
+    more.textContent = desktopShowUnjoinedSpaces ? "←" : "…";
+    protectDesktopNativeButton(more);
+    more.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      desktopShowUnjoinedSpaces = !desktopShowUnjoinedSpaces;
+      renderDesktopHierarchyNativeUiSoon(0);
+    });
+    list.appendChild(more);
+
+    const settingsButton = document.createElement("button");
+    settingsButton.type = "button";
+    settingsButton.className = "mmlc-desktop-space-button mmlc-desktop-space-settings";
+    settingsButton.title = "Smart Element desktop hierarchy settings";
+    settingsButton.textContent = "⚙";
+    protectDesktopNativeButton(settingsButton);
+    settingsButton.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      toggleDesktopSpaceSettingsPopover(settingsButton);
+    });
+    host.appendChild(settingsButton);
+  }
+
+  function makeDesktopSpaceButton(item) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mmlc-desktop-space-button";
+    button.classList.toggle("mmlc-desktop-space-muted", item.joined === false);
+    button.classList.toggle("mmlc-desktop-space-selected", desktopSpaceNodeIsSelected(item));
+    button.dataset.mmlcDesktopLevel = String(Math.max(0, Number(item.level || 0)));
+    button.title = displayLabelForItem(item);
+    button.setAttribute("aria-label", displayLabelForItem(item));
+    button.style.setProperty("--mmlc-desktop-level", String(Math.max(0, Number(item.level || 0))));
+
+    const avatar = item.type === "start"
+      ? makeFixedTextAvatar("DM", "mmlc-desktop-space-avatar")
+      : (makeInlineSpaceAvatar(item, "mmlc-desktop-space-avatar") || makeFixedTextAvatar(item.icon || initialsForLabel(displayLabelForItem(item)), "mmlc-desktop-space-avatar"));
+    button.appendChild(avatar);
+
+    const text = document.createElement("span");
+    text.className = "mmlc-desktop-space-label";
+    text.textContent = displayLabelForItem(item);
+    button.appendChild(text);
+
+    const badge = makeUnreadBadge(desktopVisibleUnreadForSpaceItem(item), "mmlc-desktop-unread-badge");
+    if (badge) button.appendChild(badge);
+
+    protectDesktopNativeButton(button);
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (item.joined === false) {
+        joinDesktopUnjoinedItem(item).catch(error => console.warn("Could not join desktop hierarchy space.", error));
+      } else {
+        selectDesktopSpaceNode(item).catch(error => console.warn("Could not select desktop hierarchy space.", error));
+      }
+    });
+
+    return button;
+  }
+
+  function toggleDesktopSpaceSettingsPopover(anchor) {
+    const existing = document.getElementById("mmlc-desktop-space-settings-popover");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const popover = document.createElement("div");
+    popover.id = "mmlc-desktop-space-settings-popover";
+    popover.className = "mmlc-desktop-native";
+    popover.innerHTML = `
+      <label class="mmlc-desktop-setting-row">
+        <input type="checkbox" data-setting="indent" ${desktopHierarchyIndentSubspaces !== false ? "checked" : ""}>
+        <span>Subspaces einrücken</span>
+      </label>
+      <div class="mmlc-desktop-setting-group">
+        <div class="mmlc-desktop-setting-title">Space-Anzeige</div>
+        <label class="mmlc-desktop-setting-row">
+          <input type="radio" name="mmlc-desktop-space-display" value="full" ${desktopSpaceDisplayMode !== "current" ? "checked" : ""}>
+          <span>Alle Spaces und Subspaces</span>
+        </label>
+        <label class="mmlc-desktop-setting-row">
+          <input type="radio" name="mmlc-desktop-space-display" value="current" ${desktopSpaceDisplayMode === "current" ? "checked" : ""}>
+          <span>Top-Level + aktuelle Subspace-Tiefe</span>
+        </label>
+      </div>`;
+
+    const rect = anchor.getBoundingClientRect();
+    popover.style.left = `${Math.max(8, rect.right + 8)}px`;
+    popover.style.bottom = `${Math.max(8, window.innerHeight - rect.bottom)}px`;
+
+    const checkbox = popover.querySelector("input[data-setting='indent']");
+    checkbox?.addEventListener("change", () => {
+      desktopHierarchyIndentSubspaces = checkbox.checked;
+      document.documentElement.classList.toggle("mmlc-desktop-indent-subspaces", desktopHierarchyIndentSubspaces !== false);
+      persistDesktopHierarchySettings();
+      renderDesktopHierarchyNativeUiSoon(0);
+    });
+
+    for (const radio of popover.querySelectorAll("input[name='mmlc-desktop-space-display']")) {
+      radio.addEventListener("change", () => {
+        const selected = popover.querySelector("input[name='mmlc-desktop-space-display']:checked")?.value || "full";
+        desktopSpaceDisplayMode = selected === "current" ? "current" : "full";
+        document.documentElement.classList.toggle("mmlc-desktop-space-mode-current", desktopSpaceDisplayMode === "current");
+        persistDesktopHierarchySettings();
+        renderDesktopHierarchyNativeUiSoon(0);
+      });
+    }
+
+    document.body.appendChild(popover);
+  }
+
+  function renderDesktopMiddleChatNativeUi() {
+    const roomPanel = document.querySelector("nav.mx_RoomListPanel, nav[aria-label='Chatliste'], nav[aria-label='Room list'], .mx_RoomListPanel");
+    if (!(roomPanel instanceof HTMLElement) || roomPanel.closest(OWNED_SELECTOR)) return;
+
+    let host = document.getElementById("mmlc-desktop-chat-list-host");
+    if (!(host instanceof HTMLElement) || host.parentElement !== roomPanel) {
+      host?.remove();
+      host = document.createElement("div");
+      host.id = "mmlc-desktop-chat-list-host";
+      host.className = "mmlc-desktop-native mmlc-desktop-chat-list-host";
+      const nativeRoomList = findNativeRoomListElement(roomPanel);
+      const insertionAnchor = directChildOfAncestor(nativeRoomList, roomPanel) || nativeRoomList;
+      if (insertionAnchor instanceof Node && insertionAnchor.parentElement === roomPanel) {
+        roomPanel.insertBefore(host, insertionAnchor);
+      } else {
+        roomPanel.appendChild(host);
+      }
+    }
+
+    const selected = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(currentSpacePath) || { label: currentSpaceLabel, path: currentSpacePathForPanel(currentSpaceLabel) };
+    const label = normalizeSpaces(selected.label || currentSpaceLabel || "");
+    const isStart = selected.type === "start" || /^(startseite|home)$/i.test(label);
+    const path = isStart
+      ? [{ label: "Spaces", type: "root" }, { label: "Startseite", type: "start" }]
+      : Array.isArray(selected.path) && selected.path.length
+        ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(selected.path))
+        : currentSpacePathForPanel(label);
+    updateDesktopStartSelectedClass();
+
+    if (isStart) {
+      host.replaceChildren();
+      host.remove();
+      return;
+    }
+
+    syncDesktopUnreadCachesFromElementDom();
+    const rawChats = cachedListItemsWithFallback(chatsCacheKey(path, label), label);
+    const chats = rawChats
+      .filter(item => item?.type === "room")
+      .filter(item => desktopShowUnjoinedChats || item.joined !== false)
+      .map(item => ({ ...item, path: Array.isArray(item.path) && item.path.length ? item.path : dedupePathSegments([...path, { label: item.label, type: "room" }]) }));
+
+    host.replaceChildren();
+
+    const list = document.createElement("div");
+    list.className = "mmlc-desktop-chat-list";
+    host.appendChild(list);
+
+    if (!chats.length) {
+      const empty = document.createElement("div");
+      empty.className = "mmlc-desktop-empty";
+      empty.textContent = "No direct chats cached for this space.";
+      list.appendChild(empty);
+    } else {
+      for (const chat of chats) {
+        list.appendChild(makeDesktopChatButton(chat));
+      }
+    }
+
+    const footer = document.createElement("div");
+    footer.className = "mmlc-desktop-chat-footer";
+    const more = document.createElement("button");
+    more.type = "button";
+    more.className = "mmlc-desktop-chat-more";
+    more.textContent = desktopShowUnjoinedChats ? "←" : "…";
+    more.title = desktopShowUnjoinedChats ? "Hide not joined chats" : "Show not joined chats";
+    protectDesktopNativeButton(more);
+    more.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      desktopShowUnjoinedChats = !desktopShowUnjoinedChats;
+      renderDesktopMiddleChatNativeUi();
+    });
+    footer.appendChild(more);
+    list.appendChild(footer);
+    dispatchDesktopRoomContentRefresh("desktop-chat-list-rendered");
+  }
+
+  function makeDesktopChatButton(item) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mmlc-desktop-chat-button";
+    button.classList.toggle("mmlc-desktop-chat-muted", item.joined === false);
+    button.title = displayLabelForItem(item);
+
+    const avatar = makeDesktopChatAvatar(item);
+    const label = document.createElement("span");
+    label.className = "mmlc-desktop-chat-label";
+    label.textContent = item.label || "Chat";
+    button.append(avatar, label);
+    const badge = makeUnreadBadge(item.unread || cachedUnreadForRoomItem(item), "mmlc-desktop-unread-badge");
+    if (badge) button.appendChild(badge);
+
+    protectDesktopNativeButton(button);
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      if (item.joined === false) {
+        joinDesktopUnjoinedItem(item).catch(error => console.warn("Could not join desktop hierarchy chat.", error));
+      } else {
+        openDesktopCachedChat(item).catch(error => console.warn("Could not open cached chat.", error));
+      }
+    });
+    return button;
+  }
+
+  function desktopChatItemMatchesCurrentOpenRoom(item) {
+    if (!item) return false;
+
+    const targetLabel = normalizeSpaces(item.label || "").toLowerCase();
+    const realActiveLabel = normalizeSpaces(activeRoomLabel() || "").toLowerCase();
+
+    // Do not fall back to currentChatLabel here. openDesktopCachedChat() records
+    // the requested chat before it starts opening it, so using currentChatLabel
+    // would make every clicked cached chat look like it was already open. That
+    // was the reason v76 sometimes did nothing when a custom chat row was clicked.
+    if (targetLabel && realActiveLabel && targetLabel === realActiveLabel) return true;
+
+    if (item.href) {
+      try {
+        const target = new URL(item.href, location.href);
+        const current = new URL(location.href);
+        if (target.href === current.href) return true;
+        if (target.origin === current.origin && target.pathname === current.pathname && target.hash && target.hash === current.hash) return true;
+      } catch {}
+    }
+
+    return false;
+  }
+
+  function rememberDesktopCachedChatAsCurrent(item) {
+    if (!item) return;
+    desktopReloadSelectionSynced = true;
+    const label = normalizeSpaces(item.label || "");
+    if (label) currentChatLabel = label;
+    currentChatHref = location.href || currentChatHref || "";
+    const path = Array.isArray(item.path) ? item.path.filter(segment => segment && segment.type !== "room") : desktopSelectedSpacePath;
+    const last = lastSelectableSpacePathSegment(path);
+    if (last?.label) {
+      currentSpaceLabel = last.label;
+      currentSpacePath = pathSegmentsFromSpacePath(logicalPathWithoutRoot(path));
+      desktopSelectedSpacePath = pathSegmentsFromSpacePath(logicalPathWithoutRoot(path));
+      updateDesktopStartSelectedClass();
+    }
+  }
+
+  async function selectDesktopSpaceNode(item) {
+    if (!item) return;
+    desktopReloadSelectionSynced = true;
+
+    if (item.type === "start") {
+      desktopSelectedSpacePath = [{ label: "Spaces", type: "root" }, { label: "Startseite", type: "start" }];
+      currentSpaceLabel = "Startseite";
+      currentSpacePath = cloneSpacePathSegments(desktopSelectedSpacePath);
+      currentSpaceElement = findNativeStartPageSpaceButton() || null;
+      currentSpaceSource = "start";
+      updateDesktopStartSelectedClass();
+      showChatOpeningOverlay(true, {
+        title: "Opening direct messages.",
+        detail: "Switching to Element's native start page..."
+      });
+      try {
+        await selectNativeStartPageForDesktopHierarchy();
+      } finally {
+        showChatOpeningOverlay(false, { minVisibleMs: 360 });
+      }
+      renderDesktopHierarchyNativeUiSoon(0);
+      return;
+    }
+
+    const path = Array.isArray(item.path) && item.path.length ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(item.path)) : fallbackSpacePath(item.label);
+    desktopSelectedSpacePath = cloneSpacePathSegments(path);
+    currentSpaceLabel = item.label;
+    currentSpacePath = cloneSpacePathSegments(path);
+    const pathSnapshot = cloneSpacePathSegments(path);
+    const selectableDepth = selectableSpacePathFromSnapshot(pathSnapshot, item.label).length;
+
+    // For nested spaces the cached top-level SpaceHierarchy already contains the
+    // full subtree. Do not click/expand native nested rail entries just to update
+    // the middle list; that is what caused Element to expand the SpacePanel and
+    // sometimes open option menus.
+    showChatOpeningOverlay(true, {
+      title: "Opening space.",
+      detail: `Rendering chats for ${normalizeSpaces(item.label || "space")}...`
+    });
+    try {
+      if (selectableDepth > 1) {
+        renderDesktopHierarchyNativeUiSoon(0);
+        await waitForDesktopHierarchyChatListRendered(1200);
+        return;
+      }
+
+      const wasCollapsed = nativeSpacePanelIsCollapsed();
+      await withDesktopHierarchyNativeAction(async () => {
+        await ensureCurrentSpaceSelectedInLeftPanel(item.label, {
+          forceDesktopWidth: true,
+          reason: "desktop-hierarchy-select-space",
+          pathSnapshot,
+          maxWaitMs: 4200,
+          avoidSubtreeExpansion: true
+        });
+        await ensureCurrentSpaceOverview({
+          forceOpen: true,
+          preferLeftRail: true,
+          allowContainedRow: false,
+          pathSnapshot,
+          reason: "desktop-hierarchy-select-space"
+        });
+        await ensureMiddlePaneExpanded({ allowStyleFallback: true });
+      }, { restoreCollapsed: wasCollapsed, reason: "desktop-hierarchy-select-space" });
+
+      renderDesktopHierarchyNativeUiSoon(0);
+      await waitForDesktopHierarchyChatListRendered(1200);
+    } finally {
+      showChatOpeningOverlay(false, { minVisibleMs: 360 });
+    }
+  }
+
+  function dispatchDesktopRoomContentRefresh(reason, item = null) {
+    try {
+      document.dispatchEvent(new CustomEvent("smart-element-room-content-shown", {
+        detail: {
+          reason: reason || "desktop-room-content",
+          label: normalizeSpaces(item?.label || currentChatLabel || ""),
+          href: item?.href || location.href || ""
+        }
+      }));
+    } catch {}
+  }
+
+  function dispatchDesktopRoomContentWillShow(reason, item = null) {
+    try {
+      document.dispatchEvent(new CustomEvent("smart-element-room-content-will-show", {
+        detail: {
+          reason: reason || "desktop-room-content-will-show",
+          label: normalizeSpaces(item?.label || currentChatLabel || ""),
+          href: item?.href || location.href || ""
+        }
+      }));
+    } catch {}
+  }
+
+  function requestImmediateSmartElementRoomRender(reason = "desktop-render-ready", item = null) {
+    const detail = {
+      reason,
+      label: normalizeSpaces(item?.label || currentChatLabel || activeRoomLabel() || ""),
+      href: item?.href || location.href || "",
+      requestedAt: Date.now()
+    };
+
+    try {
+      document.dispatchEvent(new CustomEvent("smart-element-room-content-render-now", { detail }));
+    } catch {}
+    try {
+      window.dispatchEvent(new CustomEvent("smart-element-room-content-render-now", { detail }));
+    } catch {}
+    try {
+      if (typeof window.__smartElementForceRoomContentRender === "function") {
+        window.__smartElementForceRoomContentRender(reason, detail);
+      }
+    } catch (error) {
+      console.warn("Could not invoke direct Smart Element room renderer.", error);
+    }
+  }
+
+  function schedulePassiveSmartElementRenderBurst(reason = "desktop-render-burst", item = null) {
+    const delays = [0, 80, 220, 520, 900, 1500, 2400, 3800, 5600];
+    delays.forEach((delayMs, index) => {
+      window.setTimeout(() => {
+        requestImmediateSmartElementRoomRender(`${reason}-${index}`, item);
+      }, delayMs);
+    });
+  }
+
+  function smartElementRenderTimestamp(kind) {
+    const key = kind === "thread" ? "mgLastThreadRenderComplete" : "mgLastGalleryRenderComplete";
+    return Number(document.documentElement.dataset[key] || 0) || 0;
+  }
+
+  function smartElementGalleryReadySince(startedAt) {
+    if (document.documentElement.classList.contains("mg-gallery-feature-disabled")) return true;
+    return smartElementRenderTimestamp("gallery") >= startedAt;
+  }
+
+  function smartElementThreadReadySince(startedAt) {
+    if (document.documentElement.classList.contains("mg-thread-feature-disabled")) return true;
+    if (document.body && !document.body.classList.contains("mg-thread-view-enabled")) return true;
+    return smartElementRenderTimestamp("thread") >= startedAt;
+  }
+
+  function activeRoomContentIsPresent() {
+    const roomView = document.querySelector(".mmlc-promoted-chat-pane") || findActiveRoomView();
+    if (!(roomView instanceof Element)) return false;
+    if (findLatestVisibleChatEvent(roomView) instanceof Element) return true;
+    return Boolean(roomView.querySelector(".mx_EventTile, [class*='EventTile'], [data-event-id], [role='article'], .mx_MessageComposer, [class*='MessageComposer']"));
+  }
+
+  async function waitForSmartElementRoomContentRendered(startedAt = Date.now(), options = {}) {
+    // The overlay must never become part of the rendering dependency graph.  In
+    // v80/v81 the overlay waited for gallery/thread completion events; in real
+    // Element timelines that could keep the renderers in a reschedule loop and
+    // prevent galleries/threads from appearing at all.  This function is now a
+    // passive trigger only: request several immediate render passes, keep the
+    // overlay visible for a short perceptual warmup, then let the independent
+    // renderer observers/intervals finish their work.
+    const reason = options.reason || "desktop-smart-render-ready";
+    const item = options.item || null;
+    schedulePassiveSmartElementRenderBurst(reason, item);
+    await delay(Math.max(160, Math.min(700, Number(options.passiveWaitMs || 420))));
+    return true;
+  }
+
+  async function openDesktopCachedChat(item) {
+    if (!item) return;
+    if (item.joined === false) {
+      await joinDesktopUnjoinedItem(item);
+      return;
+    }
+
+    dispatchDesktopRoomContentWillShow("desktop-cached-chat-click", item);
+    rememberDesktopCachedChatAsCurrent(item);
+    if (desktopChatItemMatchesCurrentOpenRoom(item)) {
+      const renderStartedAt = Date.now();
+      showChatOpeningOverlay(true, {
+        title: CHAT_OPENING_TITLE_TEXT,
+        detail: CHAT_OPENING_ALMOST_READY_TEXT,
+        soft: true,
+        safetyMaxMs: 9000
+      });
+      renderDesktopHierarchyNativeUiSoon(0);
+      dispatchDesktopRoomContentRefresh("desktop-cached-chat-already-open", item);
+      showChatOpeningOverlay(false, { minVisibleMs: 120 });
+      await waitForSmartElementRoomContentRendered(renderStartedAt, {
+        item,
+        reason: "desktop-cached-chat-already-open-render",
+        maxWaitMs: 6200,
+        passiveWaitMs: 220
+      });
+      setTimeout(() => requestImmediateSmartElementRoomRender("desktop-cached-chat-already-open-after-overlay", item), 120);
+      return;
+    }
+
+    showChatOpeningOverlay(true, {
+      title: CHAT_OPENING_TITLE_TEXT,
+      detail: `Loading ${normalizeSpaces(item.label || "chat")}...`,
+      safetyMaxMs: 8500
+    });
+
+    let opened = false;
+    const renderStartedAt = Date.now();
+    try {
+      await nextAnimationFrame();
+
+      if (desktopChatItemMatchesCurrentOpenRoom(item)) {
+        opened = true;
+        return;
+      }
+
+      if (item.href) {
+        const beforeHref = location.href;
+        const beforeLabel = activeRoomLabel();
+        try {
+          location.assign(new URL(item.href, location.href).toString());
+          opened = await waitForOpenedRoom(item.label, 5200, beforeHref, beforeLabel);
+          if (opened) {
+            dispatchDesktopRoomContentRefresh("desktop-cached-chat-route-opened", item);
+            return;
+          }
+        } catch {}
+      }
+
+      const wasCollapsed = nativeSpacePanelIsCollapsed();
+      await withDesktopHierarchyNativeAction(async () => {
+        opened = await openChatItem(item);
+      }, { restoreCollapsed: wasCollapsed, reason: "desktop-hierarchy-open-chat" });
+      if (opened) dispatchDesktopRoomContentRefresh("desktop-cached-chat-dom-opened", item);
+    } finally {
+      setTimeout(() => dispatchDesktopRoomContentRefresh("desktop-cached-chat-post-open", item), 120);
+      setTimeout(() => dispatchDesktopRoomContentRefresh("desktop-cached-chat-post-open-late", item), 700);
+
+      if (opened || desktopChatItemMatchesCurrentOpenRoom(item)) {
+        showChatOpeningOverlay(false, { minVisibleMs: 180 });
+        await waitForSmartElementRoomContentRendered(renderStartedAt, {
+          item,
+          reason: "desktop-cached-chat-open-render",
+          maxWaitMs: 7600,
+          passiveWaitMs: 260
+        });
+        setTimeout(() => requestImmediateSmartElementRoomRender("desktop-cached-chat-after-overlay-hidden", item), 120);
+        setTimeout(() => requestImmediateSmartElementRoomRender("desktop-cached-chat-after-overlay-hidden-late", item), 680);
+      }
+
+      showChatOpeningOverlay(false, { minVisibleMs: opened ? 260 : 420 });
+    }
+  }
+
+  function desktopSelectedSpaceNode() {
+    const last = lastSelectableSpacePathSegment(desktopSelectedSpacePath);
+    if (!last?.label) return null;
+    return { ...last, path: cloneSpacePathSegments(desktopSelectedSpacePath) };
+  }
+
+  function desktopSpaceNodeIsSelected(item) {
+    const last = lastSelectableSpacePathSegment(desktopSelectedSpacePath.length ? desktopSelectedSpacePath : currentSpacePath);
+    const clean = normalizeSpaces(item?.label || "").toLowerCase();
+    return Boolean(clean && last && normalizeSpaces(last.label || "").toLowerCase() === clean);
+  }
+
+  function desktopSpaceTreeNodesForCurrentMode() {
+    if (desktopSpaceDisplayMode !== "current") return flattenDesktopSpaceTree();
+    return desktopCurrentLevelSpaceTree();
+  }
+
+  function desktopCurrentLevelSpaceTree() {
+    const fullTree = flattenDesktopSpaceTree();
+    const visibility = desktopCurrentSpaceVisibilityInfo();
+    return fullTree.filter(node => desktopSpaceNodeVisibleInCurrentMode(node, visibility));
+  }
+
+  function desktopCurrentSpaceVisibilityInfo() {
+    const selectedPath = Array.isArray(desktopSelectedSpacePath) && desktopSelectedSpacePath.length
+      ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(desktopSelectedSpacePath).filter(segment => segment && segment.type !== "room"))
+      : pathSegmentsFromSpacePath(logicalPathWithoutRoot(currentSpacePath || []).filter(segment => segment && segment.type !== "room"));
+    const selectedSegments = selectedPath
+      .filter(segment => segment && segment.type !== "root" && segment.type !== "room" && segment.type !== "start")
+      .map(segment => normalizeSpaces(segment.label || ""))
+      .filter(Boolean);
+    const selectedRootLabel = selectedSegments[0] || "";
+    const selectedDepth = Math.max(0, selectedSegments.length - 1);
+
+    // In the reduced desktop hierarchy mode the rail must remain navigable:
+    // all top-level spaces are always visible. For the selected top-level branch
+    // show every cached subspace in every branch up to the currently reached
+    // depth plus the next selectable depth. This avoids the old behavior where
+    // only the active path was shown and sibling subtrees disappeared.
+    return {
+      selectedRootKey: selectedRootLabel.toLowerCase(),
+      visibleDepthForSelectedRoot: Math.max(1, selectedDepth + 1)
+    };
+  }
+
+  function desktopSpaceNodeVisibleInCurrentMode(node, visibility = desktopCurrentSpaceVisibilityInfo()) {
+    if (desktopSpaceDisplayMode !== "current") return true;
+    if (!node) return false;
+
+    const level = Number(node.level || 0);
+    if (level <= 0) return true;
+    if (!visibility.selectedRootKey) return false;
+
+    const path = Array.isArray(node.path)
+      ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(node.path).filter(segment => segment && segment.type !== "room"))
+      : [];
+    const rootLabel = normalizeSpaces(path.find(segment => segment && segment.type !== "root" && segment.type !== "start" && segment.type !== "room")?.label || "").toLowerCase();
+    return Boolean(rootLabel && rootLabel === visibility.selectedRootKey && level <= visibility.visibleDepthForSelectedRoot);
+  }
+
+  function flattenDesktopSpaceTree() {
+    const roots = cachedListItems(spaceCacheKey()).filter(item => item && item.type !== "start");
+    const result = [];
+    const seen = new Set();
+    const visit = (item, level, parentPath) => {
+      const label = normalizeSpaces(item?.label || "");
+      if (!label) return;
+      const basePath = Array.isArray(item.path) && item.path.length
+        ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(item.path).filter(segment => segment.type !== "room"))
+        : dedupePathSegments([...(Array.isArray(parentPath) && parentPath.length ? parentPath : [{ label: "Spaces", type: "root" }]), { label, type: "space", avatarSrc: item.avatarSrc || "", icon: item.icon || "" }]);
+      const key = hierarchyCachePathKey(basePath, label);
+      const signature = `${key}:${label.toLowerCase()}`;
+      if (seen.has(signature)) return;
+      seen.add(signature);
+      const node = {
+        ...item,
+        type: item.joined === false ? "subspace-unjoined" : "space",
+        label,
+        level,
+        path: basePath,
+        unread: item.unread || directUnreadForSpacePath(basePath, label)
+      };
+      result.push(node);
+      const children = cachedListItems(spaceDetailCacheKey(basePath, label)).filter(child => child && /space|subspace/i.test(String(child.type || "space")));
+      for (const child of children) {
+        visit(child, level + 1, basePath);
+      }
+    };
+
+    for (const root of roots) visit(root, 0, [{ label: "Spaces", type: "root" }]);
+    return result;
+  }
+
+
+  function captureDesktopHierarchyManualRefreshContext() {
+    const selectedPath = cloneSpacePathSegments(
+      (Array.isArray(desktopSelectedSpacePath) && desktopSelectedSpacePath.length)
+        ? desktopSelectedSpacePath
+        : currentSpacePath
+    );
+    const selectedLast = lastSelectableSpacePathSegment(selectedPath);
+    const activeLabel = normalizeSpaces(activeRoomLabel() || "");
+    const currentHref = location.href || "";
+    const cachedMatch = (() => {
+      try { return findCachedDesktopChatForCurrentOpenRoom(); } catch { return null; }
+    })();
+    const startSelected = document.documentElement.classList.contains("mmlc-desktop-start-selected") ||
+      /^(startseite|home|direct messages|direktnachrichten)$/i.test(normalizeSpaces(selectedLast?.label || currentSpaceLabel || ""));
+
+    return {
+      href: currentHref,
+      routeKey: roomRouteKey(currentHref),
+      activeRoomLabel: activeLabel,
+      currentChatLabel: normalizeSpaces(currentChatLabel || ""),
+      currentChatHref: currentChatHref || currentHref,
+      currentSpaceLabel: normalizeSpaces(currentSpaceLabel || selectedLast?.label || ""),
+      currentSpacePath: cloneSpacePathSegments(currentSpacePath),
+      desktopSelectedSpacePath: selectedPath,
+      startSelected,
+      cachedChat: cachedMatch?.item ? cloneDesktopHierarchyCacheItem(cachedMatch.item) : null
+    };
+  }
+
+  function cloneDesktopHierarchyCacheItem(item) {
+    if (!item || typeof item !== "object") return null;
+    return {
+      ...item,
+      path: cloneSpacePathSegments(item.path),
+      unread: item.unread ? cloneUnreadState(item.unread) : item.unread
+    };
+  }
+
+  function desktopManualRefreshContextPathSignature(path) {
+    return cloneSpacePathSegments(path)
+      .filter(segment => segment && segment.type !== "root" && segment.type !== "room")
+      .map(segment => normalizeSpaces(segment.label || "").toLowerCase())
+      .filter(Boolean)
+      .join("/");
+  }
+
+  function findCachedDesktopChatForManualRefreshContext(context) {
+    if (!context) return null;
+
+    const routeKeys = uniqueValues([
+      context.routeKey,
+      roomRouteKey(context.href || ""),
+      roomRouteKey(context.currentChatHref || ""),
+      roomRouteKey(context.cachedChat?.href || "")
+    ].filter(Boolean));
+    const labels = uniqueValues([
+      context.activeRoomLabel,
+      context.currentChatLabel,
+      context.cachedChat?.label
+    ].map(label => normalizeChatKey(label || "")).filter(Boolean));
+    const preferredPath = desktopManualRefreshContextPathSignature(context.cachedChat?.path || context.desktopSelectedSpacePath || context.currentSpacePath);
+
+    let labelFallback = null;
+    let pathLabelFallback = null;
+
+    for (const [listKey, items] of hierarchyListCache.entries()) {
+      if (!String(listKey).startsWith("chats:") || !Array.isArray(items)) continue;
+      for (const item of items) {
+        if (!item || item.type !== "room") continue;
+        const itemRoute = roomRouteKey(item.href || "");
+        if (itemRoute && routeKeys.includes(itemRoute)) return item;
+
+        const itemLabel = normalizeChatKey(item.label || "");
+        if (itemLabel && labels.includes(itemLabel)) {
+          if (!labelFallback) labelFallback = item;
+          const itemPath = desktopManualRefreshContextPathSignature(item.path);
+          if (preferredPath && itemPath === preferredPath) pathLabelFallback = item;
+        }
+      }
+    }
+
+    return pathLabelFallback || labelFallback;
+  }
+
+  async function restoreDesktopHierarchyManualRefreshContext(context) {
+    if (!context) return false;
+
+    const cachedChat = findCachedDesktopChatForManualRefreshContext(context);
+    if (cachedChat) {
+      rememberDesktopCachedChatAsCurrent(cachedChat);
+      if (!desktopChatItemMatchesCurrentOpenRoom(cachedChat)) {
+        await openDesktopCachedChat(cachedChat);
+      } else {
+        dispatchDesktopRoomContentRefresh("desktop-hierarchy-refresh-restore-open-chat", cachedChat);
+        schedulePassiveSmartElementRenderBurst("desktop-hierarchy-refresh-restore-open-chat", cachedChat);
+      }
+      renderDesktopHierarchyNativeUiSoon(0);
+      return true;
+    }
+
+    if (context.routeKey && context.href && context.href !== location.href) {
+      const beforeHref = location.href;
+      const beforeLabel = activeRoomLabel();
+      try {
+        location.assign(new URL(context.href, location.href).toString());
+        await waitForOpenedRoom(context.activeRoomLabel || context.currentChatLabel || "", 4200, beforeHref, beforeLabel);
+        const restoredMatch = findCachedDesktopChatForCurrentOpenRoom();
+        if (restoredMatch?.item) {
+          rememberDesktopCachedChatAsCurrent(restoredMatch.item);
+        }
+        renderDesktopHierarchyNativeUiSoon(0);
+        return true;
+      } catch {}
+    }
+
+    currentChatLabel = context.currentChatLabel || currentChatLabel;
+    currentChatHref = context.currentChatHref || context.href || currentChatHref;
+    currentSpaceLabel = context.currentSpaceLabel || currentSpaceLabel;
+    currentSpacePath = cloneSpacePathSegments(context.currentSpacePath);
+    desktopSelectedSpacePath = cloneSpacePathSegments(context.desktopSelectedSpacePath);
+
+    if (context.startSelected && !context.activeRoomLabel && !context.routeKey) {
+      desktopSelectedSpacePath = [{ label: "Spaces", type: "root" }, { label: "Startseite", type: "start" }];
+      currentSpaceLabel = "Startseite";
+      currentSpacePath = cloneSpacePathSegments(desktopSelectedSpacePath);
+    } else if (!desktopSelectedSpacePath.length && currentSpacePath.length) {
+      desktopSelectedSpacePath = cloneSpacePathSegments(currentSpacePath);
+    }
+
+    updateDesktopStartSelectedClass();
+    renderDesktopHierarchyNativeUiSoon(0);
+    return Boolean(currentSpaceLabel || currentChatLabel);
+  }
+
+  async function manualRefreshAllSpacesForDesktopHierarchy(options = {}) {
+    desktopHierarchyManualRefreshRun += 1;
+    const run = desktopHierarchyManualRefreshRun;
+    await hydrateSharedPersistentStateForDesktop();
+
+    const restoreContext = options.restoreContext === false
+      ? null
+      : captureDesktopHierarchyManualRefreshContext();
+    let refreshCompleted = false;
+
+    try {
+      const wasCollapsed = nativeSpacePanelIsCollapsed();
+      const roots = await collectDesktopTopLevelSpacesForRefresh();
+      if (run !== desktopHierarchyManualRefreshRun) return;
+      const rootSpaces = roots.filter(item => item && item.type !== "start" && !/^(startseite|home)$/i.test(normalizeSpaces(item.label || "")));
+      if (rootSpaces.length) cacheListItems(spaceCacheKey(), rootSpaces);
+
+      const seen = new Set();
+      for (const item of rootSpaces) {
+        if (run !== desktopHierarchyManualRefreshRun) return;
+        const label = normalizeSpaces(item?.label || "");
+        if (!label || item.joined === false) continue;
+        const path = Array.isArray(item.path) && item.path.length
+          ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(item.path).filter(segment => segment.type !== "room"))
+          : fallbackSpacePath(label);
+        const key = hierarchyCachePathKey(path, label);
+        if (seen.has(key)) continue;
+        seen.add(key);
+
+        const { subspaces, chats } = await refreshOneDesktopSpaceCache(item, path, { run, topLevelOnly: true });
+        if (run !== desktopHierarchyManualRefreshRun) return;
+        if (chats.length || subspaces.length) renderDesktopHierarchyNativeUiSoon(0);
+      }
+
+      if (wasCollapsed) await collapseNativeSpacePanelBeforeDirectChatOpen("desktop-hierarchy-refresh-finished");
+      flushPersistentState();
+      refreshCompleted = true;
+    } finally {
+      if (refreshCompleted && run === desktopHierarchyManualRefreshRun && restoreContext) {
+        await restoreDesktopHierarchyManualRefreshContext(restoreContext);
+      }
+    }
+  }
+
+  async function collectDesktopTopLevelSpacesForRefresh() {
+    return await withNativeElementParseLayout(async () => {
+      await ensureNativeSpacePanelExpandedForSpaceRefresh();
+      await nextAnimationFrame();
+      await delay(180);
+      const samples = [];
+      const addSample = () => {
+        const current = collectSpaces();
+        if (current.length) samples.push(...current);
+        prefetchHierarchyCacheFromSpaceRail();
+      };
+      addSample();
+      await scanSpaceRailScrollContainers(addSample, {});
+      addSample();
+      return dedupeItemsByLabel(samples.length ? samples : collectSpaces());
+    }, { reason: "desktop-hierarchy-refresh-root", width: 1280, waitMs: 900 });
+  }
+
+  async function refreshOneDesktopSpaceCache(item, path, options = {}) {
+    const label = normalizeSpaces(item?.label || "");
+    if (!label) return { subspaces: [], chats: [] };
+    const pathSnapshot = cloneSpacePathSegments(path);
+    currentSpaceLabel = label;
+    currentSpacePath = cloneSpacePathSegments(pathSnapshot);
+
+    return await withNativeElementParseLayout(async () => {
+      if (options.run && options.run !== desktopHierarchyManualRefreshRun) return { subspaces: [], chats: [] };
+      await ensureCurrentSpaceSelectedInLeftPanel(label, {
+        forceDesktopWidth: true,
+        reason: "desktop-hierarchy-refresh-space",
+        pathSnapshot,
+        maxWaitMs: 4200,
+        avoidSubtreeExpansion: true
+      });
+      if (options.run && options.run !== desktopHierarchyManualRefreshRun) return { subspaces: [], chats: [] };
+      await ensureCurrentSpaceOverview({
+        forceOpen: true,
+        preferLeftRail: true,
+        allowContainedRow: false,
+        pathSnapshot,
+        reason: "desktop-hierarchy-refresh-space"
+      });
+      await forceLoadSpaceOverviewContent();
+      if (!spaceOverviewTitleMatchesLabel(label)) {
+        await delay(420);
+        await ensureCurrentSpaceOverview({ forceOpen: true, preferLeftRail: true, allowContainedRow: false, pathSnapshot });
+        await forceLoadSpaceOverviewContent();
+      }
+      prefetchHierarchyCacheFromOverview(findSpaceOverviewPane());
+      let subspaces = collectSubspaces();
+      let chats = collectSpaceOverviewDirectChats();
+      if (!chats.length) {
+        await ensureMiddlePaneExpanded({ allowStyleFallback: true });
+        chats = collectPane2ChatsForCurrentSpaceFallback();
+      }
+      subspaces = subspaces.map(child => ({
+        ...child,
+        path: Array.isArray(child.path) && child.path.length ? child.path : dedupePathSegments([...path, { label: child.label, type: "space", avatarSrc: child.avatarSrc || "", icon: child.icon || "" }])
+      }));
+      chats = chats.map(chat => ({
+        ...chat,
+        path: Array.isArray(chat.path) && chat.path.length ? chat.path : dedupePathSegments([...path, { label: chat.label, type: "room", avatarSrc: chat.avatarSrc || "", icon: chat.icon || "" }])
+      }));
+      cacheListItems(spaceDetailCacheKey(path, label), subspaces);
+      cacheListItems(chatsCacheKey(path, label), chats);
+      return { subspaces, chats };
+    }, { reason: "desktop-hierarchy-refresh-space", width: 1280, waitMs: 900 });
+  }
+
+  async function restoreDesktopEyePosition(button) {
+    try {
+      const data = await chrome.storage.local.get(STORAGE_DESKTOP_EYE_POSITION_KEY);
+      const pos = data?.[STORAGE_DESKTOP_EYE_POSITION_KEY] || {};
+      const right = Number.isFinite(pos.right) ? pos.right : 18;
+      const top = Number.isFinite(pos.top) ? pos.top : 18;
+      button.style.left = "auto";
+      button.style.bottom = "auto";
+      button.style.right = `${right}px`;
+      button.style.top = `${top}px`;
+    } catch {
+      button.style.right = "18px";
+      button.style.top = "18px";
+    }
+  }
+
+  function makeDraggableWithStorage(element, handle, storageKey, defaults = {}) {
+    let dragging = false;
+    let pointerId = null;
+    let startPointerX = 0;
+    let startPointerY = 0;
+    let startLeft = 0;
+    let startTop = 0;
+    let moved = false;
+
+    handle.addEventListener("pointerdown", event => {
+      if (event.button !== 0) return;
+      dragging = true;
+      pointerId = event.pointerId;
+      moved = false;
+      element.dataset.dragMoved = "0";
+      const rect = element.getBoundingClientRect();
+      startPointerX = event.clientX;
+      startPointerY = event.clientY;
+      startLeft = rect.left;
+      startTop = rect.top;
+      element.style.left = `${startLeft}px`;
+      element.style.top = `${startTop}px`;
+      element.style.right = "auto";
+      element.style.bottom = "auto";
+      try { handle.setPointerCapture(pointerId); } catch {}
+      document.body.style.userSelect = "none";
+      event.preventDefault();
+    });
+
+    handle.addEventListener("pointermove", event => {
+      if (!dragging || event.pointerId !== pointerId) return;
+      const dx = event.clientX - startPointerX;
+      const dy = event.clientY - startPointerY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) {
+        moved = true;
+        element.dataset.dragMoved = "1";
+      }
+      const margin = 8;
+      let left = Math.max(margin, Math.min(startLeft + dx, Math.max(margin, window.innerWidth - element.offsetWidth - margin)));
+      let top = Math.max(margin, Math.min(startTop + dy, Math.max(margin, window.innerHeight - element.offsetHeight - margin)));
+      element.style.left = `${left}px`;
+      element.style.top = `${top}px`;
+      saveElementTopRightPosition(element, storageKey);
+    });
+
+    const stop = event => {
+      if (!dragging || event.pointerId !== pointerId) return;
+      dragging = false;
+      try { handle.releasePointerCapture(pointerId); } catch {}
+      pointerId = null;
+      document.body.style.userSelect = "";
+      if (!moved) element.dataset.dragMoved = "0";
+      saveElementTopRightPosition(element, storageKey);
+    };
+    handle.addEventListener("pointerup", stop);
+    handle.addEventListener("pointercancel", () => {
+      dragging = false;
+      pointerId = null;
+      document.body.style.userSelect = "";
+    });
+  }
+
+  async function saveElementTopRightPosition(element, storageKey) {
+    const rect = element.getBoundingClientRect();
+    const payload = {
+      right: Math.max(0, window.innerWidth - rect.right),
+      top: Math.max(0, rect.top)
+    };
+    try { await chrome.storage.local.set({ [storageKey]: payload }); } catch {}
   }
 
   function displayLabelForItem(item) {
@@ -838,6 +2604,21 @@
         suppressMobileWarnings();
       }, 1200);
     }
+  }
+
+  function looksLikeElementMobileWarning(text) {
+    const normalized = String(text || "")
+      .toLowerCase()
+      .replace(/[ä]/g, "ae")
+      .replace(/[ö]/g, "oe")
+      .replace(/[ü]/g, "ue")
+      .replace(/[ß]/g, "ss");
+
+    if (/mobile_guide/.test(normalized)) return true;
+    if (!/(mobile|mobil|phone|tablet|geraet|device)/.test(normalized)) return false;
+    if (!/(element|matrix)/.test(normalized)) return false;
+
+    return /(not supported|unsupported|not work|does not work|may not work|won'?t work|browser|desktop|app|download|install|store|support|suited|geeignet|unterstuetzt|unterstuetzung|funktioniert|funktionieren|kann nicht|koennte nicht|nicht funktionieren|nicht unterstuetzt)/.test(normalized);
   }
 
 
@@ -2942,7 +4723,6 @@
         preferLeftRail: true,
         minimizeLeftPaneAfterSelect: true,
         backgroundRefresh: true,
-        pathSnapshot,
         actionRun
       });
 
@@ -4439,10 +6219,172 @@
     const key = hierarchyCachePathKey(path, label);
     if (!key) return normalizeUnreadState(null);
 
+    return directChatUnreadForSpaceKey(key);
+  }
+
+  function directChatUnreadForSpaceKey(key) {
+    if (!key) return normalizeUnreadState(null);
     const cachedSpaceUnread = unreadSpaceCache.get(key);
     const chats = cachedListItems(`chats:${key}`).filter(item => item?.type === "room");
     const chatUnread = sumUnreadStates(chats.map(item => item.unread || cachedUnreadForRoomItem(item)));
     return mergeSameUnreadStates(cachedSpaceUnread, chatUnread);
+  }
+
+  function desktopLocalUnreadForSpaceItem(item) {
+    if (!item || !item.label || item.type === "start") return cloneUnreadState(item?.unread || startPageUnreadState());
+    const path = Array.isArray(item.path) && item.path.length
+      ? pathSegmentsFromSpacePath(item.path)
+      : fallbackSpacePath(item.label);
+    return desktopLocalUnreadForSpacePath(path, item.label, item.unread);
+  }
+
+  function desktopVisibleUnreadForSpaceItem(item) {
+    if (!item || !item.label || item.type === "start") {
+      return cloneUnreadState(item?.unread || startPageUnreadState());
+    }
+
+    const localUnread = desktopLocalUnreadForSpaceItem(item);
+    if (desktopSpaceDisplayMode !== "current") return localUnread;
+
+    const hiddenDescendantUnread = desktopHiddenDescendantUnreadForVisibleSpaceItem(item);
+    if (!hiddenDescendantUnread?.hasUnread) return localUnread;
+    return sumUnreadStates([localUnread, hiddenDescendantUnread]);
+  }
+
+  function desktopHiddenDescendantUnreadForVisibleSpaceItem(item) {
+    if (!item || !item.label || item.type === "start") return normalizeUnreadState(null);
+
+    const path = Array.isArray(item.path) && item.path.length
+      ? pathSegmentsFromSpacePath(item.path)
+      : fallbackSpacePath(item.label);
+    const label = normalizeSpaces(item.label || "");
+    if (!label) return normalizeUnreadState(null);
+
+    const visibility = desktopCurrentSpaceVisibilityInfo();
+    const itemLevel = Number(item.level || 0);
+    const children = directChildSpaceItemsForUnread(path, label);
+    const hiddenChildBranches = [];
+
+    for (const child of children) {
+      const childLabel = normalizeSpaces(child?.label || "");
+      if (!childLabel) continue;
+      const childPath = childSpacePathForUnread(path, child);
+      const childNode = {
+        ...child,
+        label: childLabel,
+        level: itemLevel + 1,
+        path: childPath
+      };
+
+      if (desktopSpaceNodeVisibleInCurrentMode(childNode, visibility)) continue;
+      hiddenChildBranches.push(desktopBranchUnreadForSpacePath(childPath, childLabel, child.unread));
+    }
+
+    return sumUnreadStates(hiddenChildBranches);
+  }
+
+  function desktopLocalUnreadForSpacePath(path, label = "", explicitTotal = null, seen = new Set()) {
+    const key = hierarchyCachePathKey(path, label);
+    if (!key || seen.has(key)) return normalizeUnreadState(null);
+
+    const directChats = directChatUnreadForSpaceKey(key);
+    const children = directChildSpaceItemsForUnread(path, label);
+    const childBranchUnread = sumUnreadStates(children.map(child => {
+      const childPath = childSpacePathForUnread(path, child);
+      return desktopBranchUnreadForSpacePath(childPath, child.label, child.unread, new Set([...seen, key]));
+    }));
+
+    const rawTotal = normalizeUnreadState(explicitTotal);
+
+    // Element's native SpacePanel badge is a branch total: it includes unread
+    // messages in nested subspaces. The desktop hierarchy shows every subspace
+    // separately, so the badge on the parent should only show the parent-local
+    // remainder. If there is no usable aggregate badge, fall back to the direct
+    // chat count cached for this exact space.
+    if (rawTotal.countKnown && (!childBranchUnread.countKnown || rawTotal.count >= childBranchUnread.count)) {
+      return subtractUnreadStates(rawTotal, childBranchUnread, directChats);
+    }
+
+    if (directChats.hasUnread || directChats.count || directChats.highlightCount) return directChats;
+
+    if (rawTotal.hasUnread && !rawTotal.countKnown && !childBranchUnread.hasUnread) return rawTotal;
+    return normalizeUnreadState(null);
+  }
+
+  function desktopBranchUnreadForSpacePath(path, label = "", explicitTotal = null, seen = new Set()) {
+    const key = hierarchyCachePathKey(path, label);
+    if (!key || seen.has(key)) return normalizeUnreadState(null);
+
+    const directChats = directChatUnreadForSpaceKey(key);
+    const children = directChildSpaceItemsForUnread(path, label);
+    const childBranchUnread = sumUnreadStates(children.map(child => {
+      const childPath = childSpacePathForUnread(path, child);
+      return desktopBranchUnreadForSpacePath(childPath, child.label, child.unread, new Set([...seen, key]));
+    }));
+    const rawTotal = normalizeUnreadState(explicitTotal);
+
+    // Prefer a native branch total if it is plausible. Otherwise construct the
+    // branch contribution from direct chats plus descendant branches. This keeps
+    // old caches, which may contain direct-only values, from being subtracted as
+    // if they were aggregate totals.
+    if (rawTotal.countKnown && (!childBranchUnread.countKnown || rawTotal.count >= childBranchUnread.count)) {
+      return rawTotal;
+    }
+
+    return sumUnreadStates([directChats, childBranchUnread, rawTotal.hasUnread && !rawTotal.countKnown ? rawTotal : null]);
+  }
+
+  function subtractUnreadStates(totalValue, subtractValue, fallbackValue = null) {
+    const total = normalizeUnreadState(totalValue);
+    const subtract = normalizeUnreadState(subtractValue);
+    const fallback = normalizeUnreadState(fallbackValue);
+
+    if (!total.countKnown) return fallback.hasUnread ? fallback : normalizeUnreadState(null);
+
+    const count = Math.max(0, total.count - (subtract.countKnown ? subtract.count : 0));
+    const highlightCount = Math.max(0, (total.highlightCount || 0) - (subtract.highlightCount || 0));
+    const hasHighlight = highlightCount > 0 || (total.hasHighlight && !subtract.hasHighlight && count > 0);
+    const hasUnread = count > 0 || highlightCount > 0 || (fallback.hasUnread && !subtract.hasUnread);
+
+    if (!hasUnread && fallback.hasUnread) return fallback;
+
+    return {
+      count,
+      highlightCount,
+      hasUnread,
+      hasHighlight,
+      countKnown: true,
+      unknownUnread: false,
+      source: total.source || "subtracted"
+    };
+  }
+
+  function directChildSpaceItemsForUnread(path, label = "") {
+    const key = hierarchyCachePathKey(path, label);
+    if (!key) return [];
+    return cachedListItems(`space-detail:${key}`)
+      .filter(item => item && /space|subspace/i.test(String(item.type || "space")) && normalizeSpaces(item.label));
+  }
+
+  function childSpacePathForUnread(parentPath, child) {
+    const cleanLabel = normalizeSpaces(child?.label || "");
+    if (!cleanLabel) return pathSegmentsFromSpacePath(parentPath || []);
+
+    if (Array.isArray(child?.path) && child.path.length) {
+      const normalized = pathSegmentsFromSpacePath(logicalPathWithoutRoot(child.path).filter(segment => segment.type !== "room"));
+      const last = normalized[normalized.length - 1];
+      if (normalizeSpaces(last?.label || "").toLowerCase() === cleanLabel.toLowerCase()) return normalized;
+    }
+
+    return dedupePathSegments([
+      ...pathSegmentsFromSpacePath(logicalPathWithoutRoot(parentPath || [])),
+      {
+        label: cleanLabel,
+        type: "space",
+        avatarSrc: child?.avatarSrc || "",
+        icon: child?.icon || ""
+      }
+    ]);
   }
 
   function unreadForBreadcrumbSegment(path, index) {
@@ -4479,6 +6421,7 @@
         const unread = normalizeUnreadState(item.unread);
         const roomKey = roomUnreadCacheKey(item);
         if (roomKey && unread.hasUnread) unreadRoomCache.set(roomKey, unread);
+        else if (roomKey) unreadRoomCache.delete(roomKey);
         if (unread.hasUnread) unreadValues.push(unread);
       }
       const aggregate = sumUnreadStates(unreadValues);
@@ -5017,6 +6960,10 @@
         clearTimeout(chatOpeningOverlayHideTimer);
         chatOpeningOverlayHideTimer = null;
       }
+      if (chatOpeningOverlaySafetyTimer) {
+        clearTimeout(chatOpeningOverlaySafetyTimer);
+        chatOpeningOverlaySafetyTimer = null;
+      }
 
       const title = overlay.querySelector(".mmlc-chat-opening-title");
       const detail = overlay.querySelector(".mmlc-chat-opening-detail");
@@ -5028,7 +6975,21 @@
       chatOpeningOverlayVisibleSince = Date.now();
       overlay.classList.remove("mmlc-hidden");
       document.documentElement.classList.add("mmlc-chat-opening-loading");
+
+      const safetyMaxMs = Math.max(2500, Number(options.safetyMaxMs) || 10000);
+      chatOpeningOverlaySafetyTimer = setTimeout(() => {
+        chatOpeningOverlaySafetyTimer = null;
+        overlay.classList.add("mmlc-hidden");
+        setSoftReadyState(false);
+        document.documentElement.classList.remove("mmlc-chat-opening-loading");
+        resetPanelVisualLoadingMetrics();
+      }, safetyMaxMs);
       return;
+    }
+
+    if (chatOpeningOverlaySafetyTimer) {
+      clearTimeout(chatOpeningOverlaySafetyTimer);
+      chatOpeningOverlaySafetyTimer = null;
     }
 
     const minVisibleMs = Math.max(0, Number(options.minVisibleMs) || 0);
@@ -5039,6 +7000,10 @@
         if (chatOpeningOverlayHideTimer) clearTimeout(chatOpeningOverlayHideTimer);
         chatOpeningOverlayHideTimer = setTimeout(() => {
           chatOpeningOverlayHideTimer = null;
+          if (chatOpeningOverlaySafetyTimer) {
+            clearTimeout(chatOpeningOverlaySafetyTimer);
+            chatOpeningOverlaySafetyTimer = null;
+          }
           overlay.classList.add("mmlc-hidden");
           setSoftReadyState(false);
           document.documentElement.classList.remove("mmlc-chat-opening-loading");
@@ -5168,7 +7133,14 @@
           scrollActiveChatToBottom("chat-open-finalize-last");
           await delay(120);
         }
-        if (run === chatOpenFinalizeRun) showChatOpeningOverlay(false, { minVisibleMs: 260 });
+        if (run === chatOpenFinalizeRun) {
+          const renderStartedAt = Date.now();
+          await waitForSmartElementRoomContentRendered(renderStartedAt, {
+            reason: "chat-open-finalize-smart-render",
+            maxWaitMs: 5200
+          });
+          showChatOpeningOverlay(false, { minVisibleMs: 260 });
+        }
         return;
       }
 
@@ -6707,18 +8679,18 @@
 
         const activation = findNativeLeftRailSpaceActivationElement(item.element);
         if (activation instanceof Element) {
-          clickElement(activation);
+          clickElementAtCenter(activation);
           dispatchKeyboardLike(activation, "keydown", "Enter", "Enter");
           dispatchKeyboardLike(activation, "keyup", "Enter", "Enter");
           clicked = true;
           await delay(340);
 
           if (!spaceOverviewTitleMatchesLabel(clean) && !spaceOverviewMatchesCurrentSpace({ allowContainedRow: false })) {
-            clickElement(activation);
+            clickElementAtCenter(activation);
             await delay(560);
           }
 
-          await expandSelectedSpaceSubtree(item.element);
+          if (!options.avoidSubtreeExpansion) await expandSelectedSpaceSubtree(item.element);
           rememberCurrentSpace({ ...item, source: item.source || "left-rail" });
           restoreSpacePathSnapshotIfDegraded(pathSnapshot, clean);
         }
@@ -6797,7 +8769,7 @@
         const isFinal = index === path.length - 1;
         const segmentReady = isSelectedElement(item.element) && (isFinal ? spaceOverviewTitleMatchesLabel(cleanSegment) : true);
         if (!segmentReady) {
-          clickElement(activation);
+          clickElementAtCenter(activation);
           dispatchKeyboardLike(activation, "keydown", "Enter", "Enter");
           dispatchKeyboardLike(activation, "keyup", "Enter", "Enter");
           await delay(isFinal ? 380 : 260);
@@ -6806,6 +8778,10 @@
         if (!isFinal) {
           const nextVisible = findSpaceItemForPathPrefix(path, index + 1);
           if (!nextVisible) {
+            if (options.avoidSubtreeExpansion) {
+              failedAt = index + 1;
+              break;
+            }
             await expandSelectedSpaceSubtree(item.element);
             await delay(220);
             forceNativeElementParsePanes(forceOptions);
@@ -6819,7 +8795,7 @@
         if (!spaceOverviewTitleMatchesLabel(cleanFinal) && !spaceOverviewMatchesCurrentSpace({ allowContainedRow: false })) {
           const activation = findNativeLeftRailSpaceActivationElement(selectedFinalItem.element);
           if (activation instanceof Element) {
-            clickElement(activation);
+            clickElementAtCenter(activation);
             await delay(520);
           }
         }
@@ -6885,30 +8861,38 @@
       .filter(Boolean);
   }
 
+
   function findNativeLeftRailSpaceActivationElement(element) {
     if (!(element instanceof Element)) return null;
 
-    const button = element.matches?.(".mx_SpaceButton, [class*='SpaceButton'], [role='button']")
+    const row = getSpaceTreeRow(element) || element;
+    const button = element.matches?.(".mx_SpaceButton, [class*='SpaceButton']")
       ? element
-      : element.querySelector?.(".mx_SpaceButton, [class*='SpaceButton'], [role='button']");
-    const control = normalizeClickable(button || element) || button || element;
+      : row.querySelector?.(".mx_SpaceButton, [class*='SpaceButton']");
 
-    // Do not click the three-dot menu or the collapse/expand chevron when the
-    // intention is selecting the space itself. Those controls often share the
-    // same row and would leave the right pane in the previous chat view.
-    if (control instanceof Element) {
-      const bad = control.closest?.("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']");
-      if (!bad) return control;
+    const safeSelectors = [
+      ".mx_SpaceButton_selectionWrapper",
+      "[class*='SpaceButton_selectionWrapper']",
+      ".mx_SpaceButton_avatarWrapper",
+      "[class*='SpaceButton_avatarWrapper']",
+      ".mx_BaseAvatar",
+      "[class*='BaseAvatar']",
+      "[class*='avatar']"
+    ].join(", ");
+
+    const safeHit = button?.querySelector?.(safeSelectors);
+    if (safeHit instanceof Element &&
+        !safeHit.closest("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']")) {
+      return safeHit;
     }
 
-    const row = getSpaceTreeRow(element) || element;
     const candidates = uniqueElements(Array.from(row.querySelectorAll(".mx_SpaceButton, [class*='SpaceButton'], [role='button'], button")))
       .filter(candidate => candidate instanceof Element)
       .filter(candidate => !candidate.closest(OWNED_SELECTOR))
       .filter(candidate => !candidate.matches("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']"))
       .filter(candidate => !candidate.closest("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']"));
 
-    return candidates[0] || normalizeClickable(element) || element;
+    return candidates[0] || button || element;
   }
 
   function findSpaceItemForCurrentPathOrLabel(label) {
@@ -10149,15 +12133,45 @@
     );
   }
 
+  async function selectNativeStartPageForDesktopHierarchy() {
+    const wasCollapsed = nativeSpacePanelIsCollapsed();
+    let selected = false;
+
+    await withDesktopHierarchyNativeAction(async () => {
+      selected = await ensureStartPageSelected({
+        maxWaitMs: 2600,
+        allowNativeInDesktopHierarchy: true
+      });
+    }, { restoreCollapsed: wasCollapsed, reason: "desktop-hierarchy-start-page" });
+
+    if (!selected) {
+      // Fallback only when Element's native Startseite button cannot be found.
+      openStartPageRoute();
+      selected = await waitForDesktopStartPageVisible(1600);
+    }
+
+    return selected;
+  }
+
+
   function openStartPage() {
+    if (desktopHierarchyModeActive && !isMobileLayoutEnabled()) {
+      openStartPageRoute();
+      return;
+    }
+
     const control = findStartPageControl();
     if (control) {
-      clickElement(control);
+      clickElementAtCenter(control);
       dispatchKeyboardLike(control, "keydown", "Enter", "Enter");
       dispatchKeyboardLike(control, "keyup", "Enter", "Enter");
       return;
     }
 
+    openStartPageRoute();
+  }
+
+  function openStartPageRoute() {
     try {
       const url = new URL(location.href);
       url.hash = "#/home";
@@ -10167,11 +12181,26 @@
     }
   }
 
+  async function waitForDesktopStartPageVisible(timeoutMs = 1600) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (/#\/home(?:$|[/?#])/.test(location.hash || "")) return true;
+      if (isNativeStartPageVisible()) return true;
+      await delay(120);
+    }
+    return /#\/home(?:$|[/?#])/.test(location.hash || "") || isNativeStartPageVisible();
+  }
+
   async function ensureStartPageSelected(options = {}) {
     const maxWaitMs = Math.max(600, Number(options.maxWaitMs || 1800));
     const started = Date.now();
     let clickedAtLeastOnce = false;
     let lastClickAt = 0;
+
+    if (desktopHierarchyModeActive && !isMobileLayoutEnabled() && !options.allowNativeInDesktopHierarchy) {
+      openStartPageRoute();
+      return waitForDesktopStartPageVisible(maxWaitMs);
+    }
 
     await ensureMiddlePaneExpanded();
 
@@ -10182,7 +12211,7 @@
       const shouldClick = !clickedAtLeastOnce || Date.now() - lastClickAt > 360;
 
       if (control instanceof Element && shouldClick) {
-        clickElement(control);
+        clickElementAtCenter(control);
         dispatchKeyboardLike(control, "keydown", "Enter", "Enter");
         dispatchKeyboardLike(control, "keyup", "Enter", "Enter");
         clickedAtLeastOnce = true;
@@ -10761,22 +12790,6 @@
     }
   }
 
-  function looksLikeElementMobileWarning(text) {
-    const normalized = String(text || "")
-      .toLowerCase()
-      .replace(/[ä]/g, "ae")
-      .replace(/[ö]/g, "oe")
-      .replace(/[ü]/g, "ue")
-      .replace(/[ß]/g, "ss");
-
-    if (/mobile_guide/.test(normalized)) return true;
-    if (!/(mobile|mobil|phone|tablet|geraet|device)/.test(normalized)) return false;
-    if (!/(element|matrix)/.test(normalized)) return false;
-
-    return /(not supported|unsupported|not work|does not work|may not work|won'?t work|browser|desktop|app|download|install|store|support|suited|geeignet|unterstuetzt|unterstuetzung|funktioniert|funktionieren|kann nicht|koennte nicht|nicht funktionieren|nicht unterstuetzt)/.test(normalized);
-  }
-
-
   function warningContainerFor(element) {
     if (element.matches("[role='alert'], [role='dialog'], [aria-modal='true'], [class*='Toast'], [class*='Dialog'], [class*='Modal']")) {
       return element;
@@ -11077,6 +13090,36 @@
   }
 
 
+  function clickElementAtCenter(element) {
+    const target = element instanceof Element ? element : null;
+    if (!(target instanceof Element)) return;
+
+    const targetIsTextEntry = isTextEntryElement(target);
+    if (!targetIsTextEntry) blurActiveTextEntry();
+
+    try {
+      target.scrollIntoView({ block: "nearest", inline: "nearest" });
+    } catch {}
+
+    const rect = target.getBoundingClientRect();
+    const clientX = rect.left + Math.max(1, rect.width / 2);
+    const clientY = rect.top + Math.max(1, rect.height / 2);
+
+    dispatchPointerLike(target, "pointerdown", clientX, clientY);
+    dispatchMouseLike(target, "mousedown", clientX, clientY);
+    dispatchPointerLike(target, "pointerup", clientX, clientY);
+    dispatchMouseLike(target, "mouseup", clientX, clientY);
+
+    try {
+      target.click();
+    } catch {
+      dispatchMouseLike(target, "click", clientX, clientY);
+    }
+
+    if (!targetIsTextEntry) dismissVirtualKeyboard("synthetic-click-center");
+  }
+
+
   async function openSpaceItemOverview(item, options = {}) {
     const resolvedItem = resolveSpaceItemForSelection(item, options) || item;
     if (!resolvedItem?.element) return false;
@@ -11199,6 +13242,13 @@
 
     if (item?.source === "home-center-pane") {
       return openHomeCenterPaneChatItem(item, beforeHref, beforeLabel);
+    }
+
+    if (item?.href && item?.joined !== false) {
+      try {
+        location.assign(new URL(item.href, location.href).toString());
+        if (await waitForOpenedRoom(item?.label, 3600, beforeHref, beforeLabel)) return true;
+      } catch {}
     }
 
     let workingItem = item;
@@ -11645,6 +13695,14 @@
     return false;
   }
 
+  function looksLikeRoomUtilityControl(element) {
+    if (!(element instanceof Element)) return false;
+    if (element.closest(OWNED_SELECTOR)) return true;
+    const text = normalizeSpaces(`${element.getAttribute("aria-label") || ""} ${element.getAttribute("title") || ""} ${visibleText(element) || ""}`).toLowerCase();
+    if (/weitere optionen|more options|optionen|options|benachrichtigungsoptionen|notification options|notifications?|menu|menü/.test(text)) return true;
+    return Boolean(element.closest("[class*='hoverMenu'], [class*='menuButton'], [aria-haspopup='menu']"));
+  }
+
   function findRoomActivationElement(candidate, control) {
     const tile =
       candidate?.closest?.(".mx_RoomTile, [class*='RoomTile'], .mx_RoomListItemView, [class*='RoomListItem'], [data-room-id], [role='treeitem'], [role='listitem'], [role='option']") ||
@@ -11657,20 +13715,22 @@
     const link = tile.matches("a[href*='/room/'], a[href*='#/room/']")
       ? tile
       : tile.querySelector("a[href*='/room/'], a[href*='#/room/']");
-    if (link instanceof Element) return link;
+    if (link instanceof Element && !looksLikeRoomUtilityControl(link)) return link;
 
-    if (tile.matches("[data-room-id], [role='treeitem'], [role='listitem'], [role='option'], [tabindex], button, a")) {
+    if (tile.matches("[data-room-id], [role='treeitem'], [role='listitem'], [role='option'], [tabindex], button, a") && !looksLikeRoomUtilityControl(tile)) {
       return tile;
     }
 
-    const preferred = tile.querySelector([
+    const preferred = Array.from(tile.querySelectorAll([
       "a[href*='/room/']",
       "a[href*='#/room/']",
       "[data-room-id]",
+      ".mx_RoomListItemView",
+      "[class*='RoomListItem']",
       "[role='treeitem']",
       "[role='listitem']",
       "[role='option']"
-    ].join(", "));
+    ].join(", "))).find(candidate => candidate instanceof Element && !looksLikeRoomUtilityControl(candidate));
 
     return preferred instanceof Element ? preferred : tile;
   }

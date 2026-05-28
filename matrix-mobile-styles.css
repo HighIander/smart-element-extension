@@ -478,7 +478,7 @@ html.mmlc-mode-thread #mmlc-toolbar-hamburger {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(248, 250, 252, 0.92);
+  background: radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.96), rgba(226, 232, 240, 0.92));
   color: #0f172a;
   pointer-events: all;
   backdrop-filter: blur(10px);
@@ -2203,3 +2203,433 @@ html.mmlc-enabled [data-mmlc-thread-overlay-hidden] {
   touch-action: none !important;
   pointer-events: auto !important;
 }
+
+/* Desktop native hierarchy mode -------------------------------------------------
+   This mode is deliberately separate from the mobile overlay. It injects compact
+   controls into Element's own SpacePanel and RoomListPanel while keeping the
+   native three-pane Element layout visible. */
+#mmlc-desktop-eye-host {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 12px 4px;
+  margin: 0;
+  flex: 0 0 auto;
+}
+
+#mmlc-desktop-refresh-eye {
+  position: relative;
+  z-index: 3;
+  min-width: 56px;
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: color-mix(in srgb, Canvas 92%, ButtonFace 8%);
+  color: CanvasText;
+  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.14);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+#mmlc-desktop-refresh-eye:active {
+  transform: translateY(1px);
+}
+
+#mmlc-desktop-refresh-eye svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+  pointer-events: none;
+}
+
+#mmlc-desktop-refresh-eye.mmlc-desktop-eye-active::after {
+  content: "";
+  position: absolute;
+  width: 34px;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transform: rotate(-24deg);
+}
+
+#mmlc-desktop-refresh-eye.mmlc-desktop-eye-loading svg {
+  animation: mmlc-desktop-eye-spin 0.9s linear infinite;
+}
+
+@keyframes mmlc-desktop-eye-spin {
+  to { transform: rotate(360deg); }
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel {
+  width: 104px !important;
+  min-width: 104px !important;
+  max-width: none !important;
+  flex: 0 0 104px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-expanded:not(.mmlc-desktop-native-action) .mx_SpacePanel {
+  width: 280px !important;
+  min-width: 280px !important;
+  max-width: none !important;
+  flex: 0 0 280px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel > ul.mx_SpaceTreeLevel,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel > ul[role="tree"],
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_ThreadsActivityCentre_container,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_QuickSettingsButton {
+  display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action #mmlc-desktop-space-list-host,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action #mmlc-desktop-chat-list-host {
+  display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action .mx_SpacePanel > ul.mx_SpaceTreeLevel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action .mx_SpacePanel > ul[role="tree"] {
+  display: block !important;
+}
+
+#mmlc-desktop-space-list-host {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px 4px 48px;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+.mmlc-desktop-space-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: visible;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  scrollbar-width: thin;
+}
+
+.mmlc-desktop-space-button {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.mmlc-desktop-space-label {
+  display: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 520;
+  max-width: 218px;
+}
+
+html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-list {
+  align-items: stretch;
+}
+
+html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-expand-toggle) {
+  width: auto;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 3px 8px;
+}
+
+html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-label {
+  display: inline-block;
+}
+
+html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-more,
+html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-expand-toggle {
+  align-self: center;
+}
+
+html.mmlc-desktop-indent-subspaces .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-expand-toggle) {
+  margin-left: calc(var(--mmlc-desktop-level, 0) * 16px);
+}
+
+.mmlc-desktop-space-button:hover,
+.mmlc-desktop-space-button:focus-visible {
+  background: color-mix(in srgb, Highlight 16%, transparent);
+  outline: none;
+}
+
+.mmlc-desktop-space-selected {
+  background: color-mix(in srgb, Highlight 24%, transparent);
+  box-shadow: inset 3px 0 0 Highlight;
+}
+
+.mmlc-desktop-space-muted,
+.mmlc-desktop-chat-muted {
+  opacity: 0.44;
+  filter: grayscale(0.75);
+}
+
+.mmlc-desktop-space-avatar,
+.mmlc-desktop-chat-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  background: color-mix(in srgb, ButtonFace 82%, CanvasText 8%);
+  color: CanvasText;
+  line-height: 1;
+}
+
+.mmlc-desktop-space-avatar img,
+.mmlc-desktop-chat-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.mmlc-desktop-space-more,
+.mmlc-desktop-space-settings,
+.mmlc-desktop-space-expand-toggle {
+  font-size: 18px;
+  font-weight: 700;
+  background: color-mix(in srgb, ButtonFace 84%, transparent);
+}
+
+.mmlc-desktop-space-settings {
+  position: absolute;
+  left: 7px;
+  bottom: 7px;
+}
+
+.mmlc-desktop-unread-badge {
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #d33;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+#mmlc-desktop-space-settings-popover {
+  position: fixed;
+  z-index: 2147483599;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.24);
+  font-size: 13px;
+}
+
+.mmlc-desktop-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.mmlc-desktop-setting-group {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+}
+
+.mmlc-desktop-setting-title {
+  font-weight: 700;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="primary-filters"],
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [class*="roomListPrimaryFilters"],
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [role="listbox"][aria-label*="Filter" i],
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([class*="roomListPrimaryFilters"]) {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel {
+  gap: 0 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="room-list-search"] {
+  margin-bottom: 4px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="room-list-header"] {
+  margin-top: 0 !important;
+  margin-bottom: 2px !important;
+  padding-top: 6px !important;
+  padding-bottom: 2px !important;
+  flex: 0 0 auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="room-list"],
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel .mx_RoomList,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-virtuoso-scroller="true"][aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-virtuoso-scroller="true"][aria-label="Room list"],
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([data-testid="room-list"]),
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([data-virtuoso-scroller="true"][aria-label="Chatliste"]),
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([data-virtuoso-scroller="true"][aria-label="Room list"]) {
+  display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host {
+  display: none !important;
+}
+
+#mmlc-desktop-chat-list-host {
+  flex: 0 1 auto;
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: inherit;
+  color: inherit;
+  margin-top: 0;
+}
+
+.mmlc-desktop-chat-header {
+  display: none !important;
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  box-sizing: border-box;
+}
+
+.mmlc-desktop-chat-more {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 0;
+  background: color-mix(in srgb, ButtonFace 84%, transparent);
+  color: inherit;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.mmlc-desktop-chat-list {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: calc(100vh - 154px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 6px 6px;
+  box-sizing: border-box;
+}
+
+.mmlc-desktop-chat-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px 10px;
+  border-top: 1px solid color-mix(in srgb, CanvasText 10%, transparent);
+  margin-top: 2px;
+}
+
+.mmlc-desktop-chat-list > .mmlc-desktop-chat-footer {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.mmlc-desktop-chat-button {
+  position: relative;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  min-height: 44px;
+  padding: 6px 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.mmlc-desktop-chat-button:hover,
+.mmlc-desktop-chat-button:focus-visible {
+  background: color-mix(in srgb, Highlight 14%, transparent);
+  outline: none;
+}
+
+.mmlc-desktop-chat-avatar {
+  flex: 0 0 32px;
+  border-radius: 999px;
+}
+
+.mmlc-desktop-chat-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 520;
+}
+
+.mmlc-desktop-empty {
+  padding: 16px 12px;
+  opacity: 0.68;
+  font-size: 13px;
+}
+#mmlc-desktop-space-list-host { position: relative; }

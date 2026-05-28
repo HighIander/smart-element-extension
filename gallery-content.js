@@ -284,6 +284,9 @@
   let currentLightboxIndex = 0;
   let globalDragDepth = 0;
   let galleryRebuildTimer = null;
+  let galleryRebuildInFlight = false;
+  let galleryRebuildQueued = false;
+  let galleryAutoRefreshIntervalId = null;
   let dragCleanupTimer = null;
   let lastSentGallery = null;
   let galleryHistory = [];
@@ -298,6 +301,9 @@
   let pageSession = null;
   let lastComposerElement = null;
   let lastKnownRoomKey = "";
+  let lastObservedRoomContentSignature = "";
+  let activeRoomContentMonitorIntervalId = null;
+  let lastActiveRoomForcedRenderAt = 0;
   let lastPasteSignature = "";
   let lastPasteAt = 0;
   let lastDropSignature = "";
@@ -463,7 +469,13 @@
     installTimelineScrollActivityTracker();
     installGalleryObserver();
     installThreadAutoRefreshLoop();
+    installGalleryAutoRefreshLoop();
     installRoomChangeWatcher();
+    installRoomContentRefreshEventBridge();
+    installDirectRoomContentRenderApi();
+    installNativeRoomSelectionRefreshTriggers();
+    installActiveRoomContentRenderMonitor();
+    scheduleRoomContentWarmupRebuilds("boot");
     requestPageSession();
     installHardOverlayCleanup();
     window.addEventListener("pagehide", revokeLightboxDownloadObjectUrls, { once: true });
@@ -548,6 +560,7 @@
       if (!target) return;
 
       setTimeout(closePanelOnRoomChange, 120);
+      setTimeout(() => scheduleRoomContentWarmupRebuilds("navigation-click"), 260);
     }, true);
 
     setInterval(closePanelOnRoomChange, 1000);
@@ -562,6 +575,7 @@
 
     if (!lastKnownRoomKey) {
       lastKnownRoomKey = current;
+      scheduleRoomContentWarmupRebuilds("initial-room");
       return;
     }
 
@@ -572,6 +586,248 @@
     const panel = document.getElementById("mg-panel");
     if (panel && !panel.classList.contains("mg-hidden")) {
       closePanelAndClear();
+    }
+    scheduleRoomContentWarmupRebuilds("room-change");
+  }
+
+  function scheduleRoomContentWarmupRebuilds(reason = "room-warmup") {
+    const delays = [0, 60, 140, 320, 700, 1300, 2400, 4200];
+    for (const delayMs of delays) {
+      setTimeout(() => {
+        const force = delayMs <= 140;
+        scheduleGalleryRebuild(delayMs <= 140 ? 30 : 120, { reason, force });
+        scheduleThreadViewRebuild({ reason, delayMs: delayMs <= 140 ? 50 : 140, allowAutoScroll: true, force });
+      }, delayMs);
+    }
+  }
+
+  function notifySmartElementRenderPass(kind, detail = {}) {
+    const completedAt = Date.now();
+    const root = document.documentElement;
+    if (kind === "gallery") {
+      root.dataset.mgLastGalleryRenderComplete = String(completedAt);
+    } else if (kind === "thread") {
+      root.dataset.mgLastThreadRenderComplete = String(completedAt);
+    }
+
+    const payload = {
+      ...detail,
+      kind,
+      completedAt,
+      room: extractRoomFromUrl() || "",
+      galleryCount: document.querySelectorAll(".mg-inline-gallery").length,
+      threadBlockCount: document.querySelectorAll(".mg-thread-merged, .mg-thread-inline-reply").length
+    };
+
+    try {
+      document.dispatchEvent(new CustomEvent(`smart-element-${kind}-render-complete`, { detail: payload }));
+      document.dispatchEvent(new CustomEvent("smart-element-room-content-render-progress", { detail: payload }));
+    } catch {}
+  }
+
+  function installRoomContentRefreshEventBridge() {
+    const refresh = event => {
+      const reason = event?.detail?.reason || event?.type || "explicit-room-refresh";
+      scheduleRoomContentWarmupRebuilds(reason);
+    };
+
+    const renderNow = event => {
+      const reason = event?.detail?.reason || "explicit-render-now";
+      forceSmartElementRoomContentRender(reason);
+    };
+
+    document.addEventListener("smart-element-room-content-will-show", refresh, true);
+    document.addEventListener("smart-element-room-content-shown", refresh, true);
+    document.addEventListener("smart-element-room-content-render-now", renderNow, true);
+    window.addEventListener("smart-element-room-content-render-now", renderNow, true);
+    document.addEventListener("smart-element-desktop-chat-opened", refresh, true);
+    document.addEventListener("smart-element-desktop-chat-list-rendered", refresh, true);
+    document.addEventListener("smart-element-hierarchy-mode-updated", refresh, true);
+    window.addEventListener("pageshow", refresh, true);
+    window.addEventListener("focus", refresh, true);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") refresh({ type: "visibilitychange" });
+    }, true);
+  }
+
+  function installDirectRoomContentRenderApi() {
+    try {
+      window.__smartElementForceRoomContentRender = (reason = "external-force-render") => {
+        forceSmartElementRoomContentRender(reason);
+      };
+    } catch {}
+  }
+
+  function installNativeRoomSelectionRefreshTriggers() {
+    const trigger = event => {
+      const target = event?.target instanceof Element ? event.target : null;
+      if (!target || isExtensionOwnedElement(target)) return;
+      if (!isNativeRoomSelectionTarget(target)) return;
+
+      const reason = event.type === "keydown" ? "native-room-key-selection" : "native-room-pointer-selection";
+      scheduleRoomContentWarmupRebuilds(reason);
+      scheduleNativeRoomSelectionRenderBurst(reason);
+    };
+
+    document.addEventListener("click", trigger, true);
+    document.addEventListener("pointerup", trigger, true);
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      trigger(event);
+    }, true);
+  }
+
+  function isNativeRoomSelectionTarget(target) {
+    if (!(target instanceof Element)) return false;
+    if (target.closest("#mg-panel, #mg-thread-side-panel, .mg-lightbox, .mg-inline-gallery, .mg-thread-merged, .mg-thread-inline-reply")) return false;
+
+    const row = target.closest([
+      ".mx_RoomListItemView",
+      "[data-testid='room-list'] [role='option']",
+      "[data-testid='room-list'] button",
+      "[aria-label^='Öffne den Chat']",
+      "[aria-label^='Open chat']",
+      "[aria-label*=' den Chat ']",
+      "[aria-label*=' chat ']"
+    ].join(", "));
+
+    if (!(row instanceof Element)) return false;
+    if (row.closest(".mmlc-desktop-chat-list-host, #mmlc-panel, #mmlc-toolbar, .mmlc-desktop-space-rail")) return false;
+    if (target.closest("[aria-haspopup='menu'], [aria-label*='Option'], [aria-label*='option'], [aria-label*='Benachrichtigung'], [aria-label*='notification']")) return false;
+
+    const text = `${row.getAttribute("aria-label") || ""} ${row.textContent || ""}`.toLowerCase();
+    return /chat|room|nachricht|message|öffne|open|direkt/.test(text) || Boolean(row.querySelector("[data-testid='room-name'], [class*='roomName']"));
+  }
+
+  function scheduleNativeRoomSelectionRenderBurst(reason = "native-room-selection") {
+    const delays = [80, 180, 360, 700, 1200, 2100, 3400, 5200, 7600];
+    for (const delayMs of delays) {
+      window.setTimeout(() => {
+        forceSmartElementRoomContentRender(`${reason}-${delayMs}`);
+      }, delayMs);
+    }
+  }
+
+  function installActiveRoomContentRenderMonitor() {
+    const check = reason => checkActiveRoomContentForRender(reason);
+
+    if (!activeRoomContentMonitorIntervalId) {
+      activeRoomContentMonitorIntervalId = window.setInterval(() => check("active-room-monitor"), 650);
+    }
+
+    window.addEventListener("hashchange", () => check("hashchange"), true);
+    window.addEventListener("popstate", () => check("popstate"), true);
+    window.addEventListener("focus", () => check("focus-active-room"), true);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") check("visibility-active-room");
+    }, true);
+  }
+
+  function checkActiveRoomContentForRender(reason = "active-room-monitor") {
+    if (document.visibilityState === "hidden") return;
+
+    const signature = currentActiveRoomContentSignature();
+    if (!signature) return;
+
+    const changed = signature !== lastObservedRoomContentSignature;
+    if (changed) {
+      lastObservedRoomContentSignature = signature;
+      scheduleRoomContentWarmupRebuilds(`${reason}-changed`);
+      scheduleNativeRoomSelectionRenderBurst(`${reason}-changed`);
+      forceSmartElementRoomContentRender(`${reason}-changed-now`);
+      lastActiveRoomForcedRenderAt = Date.now();
+      return;
+    }
+
+    // Direct-message rooms sometimes keep the same route while Element swaps the
+    // visible timeline. Keep nudging the renderer shortly after a visible room is
+    // detected, but throttle it so normal typing/scrolling is not disturbed.
+    if (Date.now() - lastActiveRoomForcedRenderAt > 1800 && shouldAutoRefreshGalleryView()) {
+      forceSmartElementRoomContentRender(`${reason}-steady`);
+      lastActiveRoomForcedRenderAt = Date.now();
+    }
+  }
+
+  function currentActiveRoomContentSignature() {
+    const roomView = document.querySelector(".mx_RoomView, [data-testid='room-view'], [class*='RoomView'], [role='log']");
+    const scroller = findMainTimelineScroller();
+    const eventIds = visibleMainTimelineEventIds(8);
+    const header = activeRoomTitleFromDom();
+    const route = `${location.pathname}${location.search}${location.hash}`;
+
+    if (!roomView && !scroller && !eventIds.length && !header) return "";
+    return [route, header, eventIds.join("|")].join("::");
+  }
+
+  function activeRoomTitleFromDom() {
+    const candidates = [
+      "[data-testid='room-header'] h1",
+      "[data-testid='room-header'] [title]",
+      ".mx_RoomHeader h1",
+      ".mx_RoomHeader_name",
+      "[class*='RoomHeader'] h1",
+      "[class*='RoomHeader'] [title]"
+    ];
+
+    for (const selector of candidates) {
+      const element = document.querySelector(selector);
+      const value = normalizeSpaces(element?.getAttribute?.("title") || element?.textContent || "");
+      if (value && !/^(threads|chatliste|room list)$/i.test(value)) return value;
+    }
+
+    return "";
+  }
+
+  function visibleMainTimelineEventIds(limit = 8) {
+    const roots = [
+      document.querySelector(".mx_RoomView, [data-testid='room-view'], [class*='RoomView']"),
+      document.querySelector("[role='log']"),
+      findMainTimelineScroller()
+    ].filter(Boolean);
+
+    const ids = [];
+    const seen = new Set();
+    for (const root of roots) {
+      for (const element of root.querySelectorAll("[data-event-id], [id^='$']")) {
+        const id = element.getAttribute("data-event-id") || element.id || "";
+        if (!/^\$/.test(id) || seen.has(id)) continue;
+        seen.add(id);
+        ids.push(id);
+        if (ids.length >= limit) return ids;
+      }
+    }
+    return ids;
+  }
+
+  function forceSmartElementRoomContentRender(reason = "force-render") {
+    const options = { reason, force: true, allowAutoScroll: true };
+
+    try {
+      if (galleryRebuildTimer) {
+        clearTimeout(galleryRebuildTimer);
+        galleryRebuildTimer = null;
+      }
+      void rebuildInlineGalleries(options).catch(error => {
+        console.warn("Immediate gallery render failed.", error);
+      });
+    } catch (error) {
+      console.warn("Could not start immediate gallery render.", error);
+    }
+
+    try {
+      if (threadViewRebuildTimer) {
+        clearTimeout(threadViewRebuildTimer);
+        threadViewRebuildTimer = null;
+      }
+      if (mergedThreadViewEnabled && isThreadViewFeatureEnabled()) {
+        void rebuildMergedThreadView(options).catch(error => {
+          console.warn("Immediate thread render failed.", error);
+        });
+      } else {
+        scheduleThreadViewRebuild({ ...options, delayMs: 40 });
+      }
+    } catch (error) {
+      console.warn("Could not start immediate thread render.", error);
     }
   }
 
@@ -3113,7 +3369,7 @@
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["data-event-id", "title", "aria-label"]
+      attributeFilter: ["data-event-id", "title", "aria-label", "class", "style", "src", "srcset", "href", "data-testid", "aria-expanded"]
     });
 
     scheduleGalleryRebuild();
@@ -3122,7 +3378,7 @@
 
   function shouldMutationTriggerGalleryRebuild(mutation) {
     if (mutation.type === "attributes") {
-      return mutation.attributeName === "data-event-id";
+      return ["data-event-id", "class", "style", "src", "srcset", "href", "data-testid", "aria-label", "title"].includes(mutation.attributeName);
     }
 
     if (mutation.type !== "childList") return false;
@@ -3135,7 +3391,7 @@
     if (!mergedThreadViewEnabled) return false;
 
     if (mutation.type === "attributes") {
-      return mutation.attributeName === "data-event-id";
+      return ["data-event-id", "class", "style", "src", "srcset", "href", "data-testid", "aria-label", "title", "aria-expanded"].includes(mutation.attributeName);
     }
 
     if (mutation.type !== "childList") return false;
@@ -3308,19 +3564,17 @@
     return Date.now() - lastTimelineScrollAt < thresholdMs;
   }
 
-  function scheduleGalleryRebuild() {
+  function scheduleGalleryRebuild(delayMs = 450, options = {}) {
     if (galleryRebuildTimer) {
       clearTimeout(galleryRebuildTimer);
     }
 
-    galleryRebuildTimer = setTimeout(rebuildInlineGalleries, 450);
+    galleryRebuildTimer = setTimeout(() => rebuildInlineGalleries(options), Math.max(20, Number(delayMs) || 450));
   }
 
   async function refreshGalleryMetadataFromElementTimeline() {
     const requestId = `mg_gallery_meta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const room = extractRoomFromUrl();
-
-    if (!room) return;
 
     return new Promise(resolve => {
       const timeout = setTimeout(() => {
@@ -3362,31 +3616,52 @@
     });
   }
 
-  async function rebuildInlineGalleries() {
+  async function rebuildInlineGalleries(options = {}) {
     galleryRebuildTimer = null;
 
-    if (recentlyObservedTimelineScroll(220)) {
-      scheduleGalleryRebuild();
+    if (galleryRebuildInFlight) {
+      galleryRebuildQueued = true;
       return;
     }
 
-    await refreshGalleryMetadataFromElementTimeline();
-    if (!shouldHideNativeGallerySources()) restorePreviouslyHiddenPlaceholders();
+    galleryRebuildInFlight = true;
 
-    const galleryScrollPositions = captureGalleryScrollPositions();
-    currentGalleryBuildPass += 1;
+    try {
+      if (!options.force && recentlyObservedTimelineScroll(220)) {
+        scheduleGalleryRebuild(180, options);
+        return;
+      }
 
-    const explicitGroups = findExplicitGalleryGroups();
-    for (const group of explicitGroups) {
-      if (group.images.length > 0) {
-        buildInlineGallery(group.anchor, group.images, group.id);
+      await refreshGalleryMetadataFromElementTimeline();
+      if (!shouldHideNativeGallerySources()) restorePreviouslyHiddenPlaceholders();
+
+      const galleryScrollPositions = captureGalleryScrollPositions();
+      currentGalleryBuildPass += 1;
+
+      const explicitGroups = findExplicitGalleryGroups();
+      for (const group of explicitGroups) {
+        if (group.images.length > 0) {
+          buildInlineGallery(group.anchor, group.images, group.id);
+        }
+      }
+
+      buildStoredGalleryFallbacks();
+      rebuildNativeThreadAttachedGalleries();
+      cleanupStaleInlineGalleryRenderPass(currentGalleryBuildPass);
+      restoreGalleryScrollPositions(galleryScrollPositions);
+    } finally {
+      notifySmartElementRenderPass("gallery", {
+        reason: "gallery-rebuild-complete",
+        queued: Boolean(galleryRebuildQueued),
+        pass: currentGalleryBuildPass
+      });
+      galleryRebuildInFlight = false;
+
+      if (galleryRebuildQueued) {
+        galleryRebuildQueued = false;
+        scheduleGalleryRebuild(90);
       }
     }
-
-    buildStoredGalleryFallbacks();
-    rebuildNativeThreadAttachedGalleries();
-    cleanupStaleInlineGalleryRenderPass(currentGalleryBuildPass);
-    restoreGalleryScrollPositions(galleryScrollPositions);
   }
 
   function galleryInstanceKey(gallery) {
@@ -3448,7 +3723,10 @@
   }
 
   function scheduleThreadViewRebuild(options = {}) {
-    if (!mergedThreadViewEnabled) return;
+    if (!mergedThreadViewEnabled) {
+      notifySmartElementRenderPass("thread", { reason: options.reason || "thread-render-disabled", skipped: true });
+      return;
+    }
 
     if (threadViewRebuildTimer) {
       clearTimeout(threadViewRebuildTimer);
@@ -3456,6 +3734,24 @@
 
     const delayMs = Math.max(80, Number(options.delayMs ?? 650));
     threadViewRebuildTimer = setTimeout(() => rebuildMergedThreadView(options), delayMs);
+  }
+
+  function installGalleryAutoRefreshLoop() {
+    if (galleryAutoRefreshIntervalId) return;
+
+    galleryAutoRefreshIntervalId = window.setInterval(() => {
+      if (!shouldAutoRefreshGalleryView()) return;
+      scheduleGalleryRebuild(90, { reason: "gallery-auto-refresh", force: true });
+    }, 850);
+  }
+
+  function shouldAutoRefreshGalleryView() {
+    if (document.visibilityState === "hidden") return false;
+
+    return Boolean(
+      findMainTimelineScroller() ||
+      document.querySelector(".mx_RoomView, [data-testid='room-view'], [class*='RoomView'], [role='log'], [data-event-id], .mx_EventTile")
+    );
   }
 
   function installThreadAutoRefreshLoop() {
@@ -3466,16 +3762,18 @@
       scheduleThreadViewRebuild({
         reason: "thread-auto-refresh",
         delayMs: 120,
-        allowAutoScroll: true
+        allowAutoScroll: true,
+        force: true
       });
-    }, 2600);
+    }, 1000);
 
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible" && shouldAutoRefreshMergedThreadView()) {
         scheduleThreadViewRebuild({
           reason: "thread-visibility-refresh",
           delayMs: 120,
-          allowAutoScroll: true
+          allowAutoScroll: true,
+          force: true
         });
       }
     }, true);
@@ -3484,7 +3782,6 @@
   function shouldAutoRefreshMergedThreadView() {
     if (!mergedThreadViewEnabled || !isThreadViewFeatureEnabled()) return false;
     if (document.visibilityState === "hidden") return false;
-    if (!extractRoomFromUrl()) return false;
 
     const root = document.documentElement;
     return Boolean(
@@ -3499,11 +3796,6 @@
   async function refreshThreadMetadataFromElementTimeline() {
     const requestId = `mg_thread_meta_${Date.now()}_${Math.random().toString(36).slice(2)}`;
     const room = extractRoomFromUrl();
-
-    if (!room) {
-      ingestThreadMetadata({ events: [], threads: [] });
-      return true;
-    }
 
     return new Promise(resolve => {
       const timeout = setTimeout(() => {
@@ -3589,7 +3881,7 @@
         return;
       }
 
-      if (recentlyObservedTimelineScroll(280)) {
+      if (!options.force && recentlyObservedTimelineScroll(280)) {
         scheduleThreadViewRebuild(options);
         return;
       }
@@ -3637,6 +3929,11 @@
         dispatchMergedThreadViewUpdated(latestThreadMessage, autoScrollIntent);
       }
     } finally {
+      notifySmartElementRenderPass("thread", {
+        reason: options.reason || "thread-rebuild-complete",
+        queued: Boolean(threadViewRebuildQueued),
+        signature: lastMergedThreadRenderSignature || ""
+      });
       threadViewRebuildInFlight = false;
 
       if (threadViewRebuildQueued) {
@@ -7320,6 +7617,7 @@
       withVisibleGallerySources(imageItems, () => {
         applyInlineGalleryIndent(existing, anchor, parent);
       });
+      markGallerySourcePlaceholders(imageItems);
       return;
     }
 
@@ -7370,6 +7668,7 @@
 
     const reference = findDirectChildForParent(anchor, parent);
     parent.insertBefore(gallery, reference);
+    markGallerySourcePlaceholders(imageItems);
   }
 
 
@@ -7513,6 +7812,7 @@
       if (shouldHideNativeGallerySources()) {
         for (const element of restored) {
           element.classList.add("mg-gallery-placeholder");
+          element.dataset.mgGalleryPlaceholderPass = String(currentGalleryBuildPass);
         }
       }
     }
