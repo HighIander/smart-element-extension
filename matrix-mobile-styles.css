@@ -2266,10 +2266,13 @@ html.mmlc-enabled [data-mmlc-thread-overlay-hidden] {
 }
 
 html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel {
+  position: relative !important;
+  z-index: 2147483504 !important;
   width: 104px !important;
   min-width: 104px !important;
   max-width: none !important;
   flex: 0 0 104px !important;
+  overflow: visible !important;
 }
 
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-expanded:not(.mmlc-desktop-native-action) .mx_SpacePanel {
@@ -2277,6 +2280,52 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-expanded:not(.mmlc-des
   min-width: 280px !important;
   max-width: none !important;
   flex: 0 0 280px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-native-action) .mx_SpacePanel {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  flex: 0 0 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  min-height: 44px !important;
+  padding: 6px 0 2px !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu > span:not([role="img"]) {
+  display: none !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu {
+  display: none !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu {
+  position: fixed !important;
+  left: 8px !important;
+  top: 4px !important;
+  width: 76px !important;
+  z-index: 2147483501 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open.mmlc-desktop-space-floating-labels-expanded:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu {
+  width: 280px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_SpacePanel_toggleCollapse,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel [class*="SpacePanel_toggleCollapse"] {
+  display: none !important;
 }
 
 html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel > ul.mx_SpaceTreeLevel,
@@ -2297,6 +2346,8 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action .mx_SpacePanel > ul[
 }
 
 #mmlc-desktop-space-list-host {
+  position: relative;
+  z-index: 2147483504;
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
@@ -2306,7 +2357,89 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action .mx_SpacePanel > ul[
   gap: 4px;
   padding: 6px 4px 48px;
   box-sizing: border-box;
-  overflow: hidden;
+  overflow: visible;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) #mmlc-desktop-space-list-host {
+  padding-top: 42px;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-expanded):not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) #mmlc-desktop-space-list-host {
+  padding-top: 76px;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host {
+  position: fixed;
+  left: 8px;
+  top: 12px;
+  width: 40px;
+  height: 40px;
+  min-height: 0;
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  z-index: 2147483500;
+  pointer-events: auto;
+}
+
+html.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  left: 8px;
+  top: 12px;
+  width: 40px;
+  height: 40px;
+  z-index: 2147483610;
+}
+
+html.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host > .mmlc-desktop-space-expand-toggle {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed !important;
+  left: 8px !important;
+  top: 12px !important;
+  z-index: 2147483620 !important;
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  min-height: 38px !important;
+  margin: 0 !important;
+  pointer-events: auto !important;
+  background: color-mix(in srgb, #ffe2bd 72%, Canvas 28%) !important;
+  color: #8a4b08 !important;
+  border: 1px solid color-mix(in srgb, #f2b36f 62%, transparent) !important;
+  border-radius: 999px !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24) !important;
+}
+
+html.mmlc-desktop-middle-pane-hidden.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host {
+  display: none !important;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host {
+  top: 54px;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open #mmlc-desktop-space-list-host {
+  position: fixed;
+  left: 8px;
+  top: 48px;
+  width: 76px;
+  max-height: calc(100vh - 64px);
+  padding: 8px 6px 48px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, transparent);
+  border-radius: 10px;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.28);
+  z-index: 2147483500;
+  pointer-events: auto;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open.mmlc-desktop-space-floating-labels-expanded #mmlc-desktop-space-list-host {
+  width: 280px;
 }
 
 .mmlc-desktop-space-list {
@@ -2353,11 +2486,11 @@ html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-list {
   align-items: stretch;
 }
 
-html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-expand-toggle) {
+html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-refresh):not(.mmlc-desktop-space-expand-toggle):not(.mmlc-desktop-space-maximize-toggle):not(.mmlc-desktop-space-sticky-toggle) {
   width: auto;
   justify-content: flex-start;
   gap: 8px;
-  padding: 3px 8px;
+  padding: 3px 28px 3px 8px;
 }
 
 html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-label {
@@ -2369,7 +2502,84 @@ html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-expand-toggle {
   align-self: center;
 }
 
-html.mmlc-desktop-indent-subspaces .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-expand-toggle) {
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-expand-toggle,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-maximize-toggle {
+  position: absolute;
+  top: 8px;
+  right: -14px;
+  z-index: 2147483505;
+  pointer-events: auto;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  border-radius: 999px;
+  box-shadow: 0 4px 13px rgba(0, 0, 0, 0.22);
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-maximize-toggle {
+  top: 42px;
+}
+
+html.mmlc-desktop-space-panel-hidden .mmlc-desktop-space-list {
+  align-items: center;
+  overflow: hidden;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) .mmlc-desktop-space-list {
+  overflow: visible;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) .mmlc-desktop-space-button:not(.mmlc-desktop-space-expand-toggle),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) .mmlc-desktop-space-settings {
+  display: none !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) .mmlc-desktop-space-expand-toggle {
+  position: absolute;
+  left: 1px;
+  top: 1px;
+  margin: 0;
+  pointer-events: auto;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-list {
+  align-items: center;
+  overflow-y: auto;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open.mmlc-desktop-space-floating-labels-expanded .mmlc-desktop-space-list {
+  align-items: stretch;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-refresh):not(.mmlc-desktop-space-expand-toggle):not(.mmlc-desktop-space-maximize-toggle):not(.mmlc-desktop-space-sticky-toggle) {
+  width: 38px;
+  justify-content: center;
+  gap: 0;
+  padding: 0;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open.mmlc-desktop-space-floating-labels-expanded .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-refresh):not(.mmlc-desktop-space-expand-toggle):not(.mmlc-desktop-space-maximize-toggle):not(.mmlc-desktop-space-sticky-toggle) {
+  width: auto;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 3px 28px 3px 8px;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open.mmlc-desktop-space-floating-labels-expanded .mmlc-desktop-space-label {
+  display: inline-block;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-more,
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-expand-toggle,
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-maximize-toggle,
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-sticky-toggle {
+  align-self: center;
+}
+
+html.mmlc-desktop-indent-subspaces.mmlc-desktop-space-floating-labels-expanded .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-refresh):not(.mmlc-desktop-space-expand-toggle):not(.mmlc-desktop-space-maximize-toggle):not(.mmlc-desktop-space-sticky-toggle),
+html.mmlc-desktop-indent-subspaces:not(.mmlc-desktop-space-panel-hidden) .mmlc-desktop-space-button:not(.mmlc-desktop-space-more):not(.mmlc-desktop-space-settings):not(.mmlc-desktop-space-refresh):not(.mmlc-desktop-space-expand-toggle):not(.mmlc-desktop-space-maximize-toggle):not(.mmlc-desktop-space-sticky-toggle) {
   margin-left: calc(var(--mmlc-desktop-level, 0) * 16px);
 }
 
@@ -2416,10 +2626,50 @@ html.mmlc-desktop-indent-subspaces .mmlc-desktop-space-button:not(.mmlc-desktop-
 
 .mmlc-desktop-space-more,
 .mmlc-desktop-space-settings,
-.mmlc-desktop-space-expand-toggle {
+.mmlc-desktop-space-refresh,
+.mmlc-desktop-space-expand-toggle,
+.mmlc-desktop-space-maximize-toggle,
+.mmlc-desktop-space-sticky-toggle {
   font-size: 18px;
   font-weight: 700;
   background: color-mix(in srgb, ButtonFace 84%, transparent);
+}
+
+.mmlc-desktop-space-expand-toggle,
+.mmlc-desktop-space-maximize-toggle {
+  background: color-mix(in srgb, #ffe2bd 72%, Canvas 28%);
+  color: #8a4b08;
+  border: 1px solid color-mix(in srgb, #f2b36f 62%, transparent);
+  box-sizing: border-box;
+}
+
+.mmlc-desktop-space-more svg,
+.mmlc-desktop-space-settings svg,
+.mmlc-desktop-space-refresh svg,
+.mmlc-desktop-space-expand-toggle svg,
+.mmlc-desktop-space-maximize-toggle svg,
+.mmlc-desktop-space-sticky-toggle svg,
+.mmlc-desktop-middle-toggle svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  pointer-events: none;
+}
+
+.mmlc-desktop-space-refresh {
+  position: absolute;
+  left: 7px;
+  bottom: 52px;
+}
+
+.mmlc-desktop-space-refresh:disabled {
+  cursor: progress;
+  opacity: 0.72;
+}
+
+.mmlc-desktop-space-refresh-loading svg {
+  animation: mmlc-desktop-eye-spin 0.9s linear infinite;
 }
 
 .mmlc-desktop-space-settings {
@@ -2430,8 +2680,8 @@ html.mmlc-desktop-indent-subspaces .mmlc-desktop-space-button:not(.mmlc-desktop-
 
 .mmlc-desktop-unread-badge {
   position: absolute;
-  right: -3px;
-  top: -3px;
+  right: 0;
+  top: 0;
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
@@ -2442,6 +2692,20 @@ html.mmlc-desktop-indent-subspaces .mmlc-desktop-space-button:not(.mmlc-desktop-
   line-height: 16px;
   text-align: center;
   box-sizing: border-box;
+}
+
+.mmlc-desktop-minimized-space-unread-badge {
+  top: -6px;
+  right: -6px;
+  transform: none;
+  z-index: 1;
+}
+
+html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-button .mmlc-desktop-unread-badge,
+.mmlc-desktop-chat-button .mmlc-desktop-unread-badge {
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 #mmlc-desktop-space-settings-popover {
@@ -2495,10 +2759,62 @@ html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desk
 
 html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel {
   gap: 0 !important;
+  position: relative !important;
+  overflow: visible !important;
 }
 
 html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="room-list-search"] {
   margin-bottom: 4px !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"] {
+  width: calc(100% - 58px) !important;
+  max-width: calc(100% - 58px) !important;
+  margin-left: 52px !important;
+  margin-right: 6px !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open).mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"] {
+  width: calc(100% - 58px) !important;
+  max-width: calc(100% - 58px) !important;
+  margin-left: 52px !important;
+  margin-right: 6px !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Suchen" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Search" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Suchen" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Search" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) .mx_RoomListPanel [class*="Search"]:has(input):not(:where([data-testid="room-list-search"] *)) {
+  width: calc(100% - 58px) !important;
+  max-width: calc(100% - 58px) !important;
+  margin-left: 52px !important;
+  margin-right: 6px !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open).mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Suchen" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open).mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Search" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open).mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Suchen" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open).mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Search" i]):not(:where([data-testid="room-list-search"] *)),
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open).mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [class*="Search"]:has(input):not(:where([data-testid="room-list-search"] *)) {
+  width: calc(100% - 58px) !important;
+  max-width: calc(100% - 58px) !important;
+  margin-left: 52px !important;
+  margin-right: 6px !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open):not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"] > * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open).mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"] > * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="room-list-header"] {
@@ -2526,20 +2842,189 @@ html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desk
   flex: 0 0 0 !important;
 }
 
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host {
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Suchen" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Search" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Suchen" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Search" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel [class*="Search"]:has(input) {
   display: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) [data-testid="left-panel"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel_outerWrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel_wrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel {
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  flex: 0 0 48px !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] {
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto !important;
+  max-height: 100% !important;
+  overflow: visible !important;
+  z-index: 2147483504 !important;
+  background: inherit !important;
+  color: inherit !important;
+  box-shadow: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_LeftPanel_panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_LeftPanel_outerWrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_LeftPanel_wrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_LeftPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel {
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  max-height: 100% !important;
+  flex: 1 1 auto !important;
+  overflow: visible !important;
 }
 
 #mmlc-desktop-chat-list-host {
-  flex: 0 1 auto;
+  position: relative;
+  flex: 1 1 auto;
   min-height: 0;
   width: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   background: inherit;
   color: inherit;
   margin-top: 0;
+}
+
+.mmlc-desktop-middle-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  align-self: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, #9cccf7 62%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, #dff0ff 74%, Canvas 26%);
+  color: #145f96;
+  box-sizing: border-box;
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1;
+  margin: 6px auto;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle {
+  position: absolute;
+  top: 50%;
+  right: -16px;
+  z-index: 2147483608 !important;
+  transform: translateY(-50%);
+  pointer-events: auto;
+  margin: 0;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle + .mmlc-desktop-chat-list {
+  margin-top: 0;
+}
+
+#mmlc-desktop-middle-restore {
+  display: none;
+  position: fixed !important;
+  top: 12px;
+  left: 88px;
+  z-index: 2147483608 !important;
+  transform: none;
+  pointer-events: auto;
+  margin: 0;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open) #mmlc-desktop-middle-restore {
+  display: inline-flex;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-expanded #mmlc-desktop-middle-restore {
+  left: 264px;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-hidden #mmlc-desktop-middle-restore {
+  left: 12px;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-middle-restore {
+  top: 12px;
+  transform: none;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open) #mmlc-desktop-chat-list-host {
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+  flex: 1 1 auto;
+  align-items: center;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open) #mmlc-desktop-chat-list-host > :not(.mmlc-desktop-middle-toggle) {
+  display: none !important;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle {
+  display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host {
+  width: 100%;
+  min-width: 100%;
+  max-width: 100%;
+  padding-bottom: 52px;
+  box-sizing: border-box;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle:not(.mmlc-desktop-middle-sticky-toggle) {
+  position: absolute;
+  right: -16px;
+  top: 50%;
+  z-index: 2147483608 !important;
+  transform: translateY(-50%);
+  pointer-events: auto;
+  margin: 0;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-sticky-toggle {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  z-index: 2147483608 !important;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  margin: 0;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24);
 }
 
 .mmlc-desktop-chat-header {
@@ -2595,12 +3080,14 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected:not(.mmlc-desktop-n
 
 .mmlc-desktop-chat-button {
   position: relative;
+  width: 100%;
+  box-sizing: border-box;
   border: 0;
   border-radius: 10px;
   background: transparent;
   color: inherit;
   min-height: 44px;
-  padding: 6px 8px;
+  padding: 6px 32px 6px 8px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2632,4 +3119,3 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected:not(.mmlc-desktop-n
   opacity: 0.68;
   font-size: 13px;
 }
-#mmlc-desktop-space-list-host { position: relative; }
