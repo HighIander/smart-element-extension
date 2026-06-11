@@ -1,3 +1,4 @@
+/* SMART ELEMENT PATCH VERIFIED: native Space safe double-click with delayed outside-area menu dismissal, first top-level landing retry, DM/Space chat-list collapse sync with shared sticky temporary-open behavior, and 42px round centered floating avatar. */
 (async () => {
   "use strict";
 
@@ -183,9 +184,19 @@
   let desktopSpacePaneTemporaryOpen = false;
   let desktopSpaceFloatingLabelsExpanded = true;
   let desktopSpaceFloatingCloseHandlersInstalled = false;
+  let desktopSpaceFloatingMouseLeaveTarget = null;
   let desktopMiddlePaneHidden = false;
   let desktopMiddlePaneTemporaryOpen = false;
+  let desktopMiddlePaneTemporaryFromSpaceSelection = false;
+  let desktopMiddlePaneSpaceLandingHoldUntil = 0;
   let desktopMiddleFloatingCloseHandlersInstalled = false;
+  let desktopMiddleFloatingMouseLeaveTarget = null;
+  let desktopMiddleEdgePositionFrame = null;
+  let desktopMiddleEdgeResizeObserver = null;
+  let desktopMiddleEdgeResizeObservedElements = new Set();
+  let desktopMiddleEdgeTrackingTimer = null;
+  let desktopSpaceFloatingOpenedAt = 0;
+  let desktopMiddleFloatingOpenedAt = 0;
   let desktopSpaceDisplayMode = "full";
   let desktopHierarchyObserver = null;
   let desktopEyePlacementObserver = null;
@@ -193,6 +204,11 @@
   let desktopUnreadSyncObserver = null;
   let desktopUnreadSyncTimer = null;
   let desktopUnreadPeriodicTimer = null;
+  let desktopChatListUnreadImmediateTimer = null;
+  let desktopChatListUnreadPollingTimer = null;
+  let desktopChatListUnreadPollingWasOpen = false;
+  let desktopChatListUnreadPollingContextKey = "";
+  let desktopChatListUnreadPollingRun = 0;
   let desktopSpacePanelExpandAttemptAt = 0;
   let desktopOpenRoomRestoreTimer = null;
   let desktopOpenRoomRestoreUntil = 0;
@@ -201,6 +217,8 @@
   let desktopHierarchyHydrated = false;
   let desktopHierarchyManualRefreshRun = 0;
   let desktopSelectedSpaceCacheRefreshTimer = null;
+  let desktopSelectedSpaceLandingTimer = null;
+  let desktopSelectedSpaceLandingRun = 0;
   let desktopInitialAutoRefreshStarted = false;
   let hierarchyCacheSavedAt = 0;
   let desktopSelectedSpacePath = [];
@@ -527,7 +545,9 @@
       window.addEventListener("resize", () => { if (isMobileLayoutEnabled()) scheduleThreadClosePosition(); }, { passive: true });
       window.addEventListener("resize", () => { if (isMobileLayoutEnabled()) refreshPromotedPanesSoon(); }, { passive: true });
       window.addEventListener("resize", () => { if (isMobileLayoutEnabled()) scheduleChatViewportMetricsUpdate(); }, { passive: true });
+      window.addEventListener("resize", () => { scheduleDesktopMiddleEdgePositionUpdate(); }, { passive: true });
       window.visualViewport?.addEventListener?.("resize", () => { if (isMobileLayoutEnabled()) scheduleChatViewportMetricsUpdate(); }, { passive: true });
+      window.visualViewport?.addEventListener?.("resize", () => { scheduleDesktopMiddleEdgePositionUpdate(); }, { passive: true });
       window.visualViewport?.addEventListener?.("scroll", () => { if (isMobileLayoutEnabled()) scheduleChatViewportMetricsUpdate(); }, { passive: true });
       window.addEventListener("beforeunload", flushPersistentState);
       window.addEventListener("pagehide", flushPersistentState);
@@ -545,6 +565,7 @@
         if (!isMobileLayoutEnabled()) return;
         suppressMobileGuideRedirect();
         suppressMobileWarnings();
+        enforceNativeNavigationPanesOpen("mobile-maintenance");
       }, 1200);
     }
 
@@ -581,6 +602,11 @@
       clearTimeout(desktopSelectedSpaceCacheRefreshTimer);
       desktopSelectedSpaceCacheRefreshTimer = null;
     }
+    if (desktopSelectedSpaceLandingTimer) {
+      clearTimeout(desktopSelectedSpaceLandingTimer);
+      desktopSelectedSpaceLandingTimer = null;
+    }
+    desktopSelectedSpaceLandingRun += 1;
     selectorPeriodicBackgroundRefreshRun += 1;
     chatListBackgroundRefreshRun += 1;
     homeChatListBackgroundRefreshRun += 1;
@@ -1056,6 +1082,10 @@
     return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1Zm0 5a1 1 0 0 1 1-1h14a1 1 0 1 1 0 2H5a1 1 0 0 1-1-1Zm1 4a1 1 0 1 0 0 2h14a1 1 0 1 0 0-2H5Z"/></svg>`;
   }
 
+  function desktopListIconSvg() {
+    return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 5.5A1.5 1.5 0 1 1 5 8.5 1.5 1.5 0 0 1 5 5.5Zm0 5A1.5 1.5 0 1 1 5 13.5 1.5 1.5 0 0 1 5 10.5Zm0 5A1.5 1.5 0 1 1 5 18.5 1.5 1.5 0 0 1 5 15.5ZM9 6h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm0 5h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Zm0 5h10a1 1 0 1 1 0 2H9a1 1 0 1 1 0-2Z"/></svg>`;
+  }
+
   function desktopPinIconSvg() {
     return `<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.7 2.3a1 1 0 0 1 1.4 0l5.6 5.6a1 1 0 0 1 0 1.4l-2.1 2.1a1 1 0 0 1-1.4 0l-.7-.7-4.2 4.2v4.2a1 1 0 0 1-1.7.7l-3.1-3.1-4.8 4.8a1 1 0 0 1-1.4-1.4l4.8-4.8-3.1-3.1a1 1 0 0 1 .7-1.7h4.2l4.2-4.2-.7-.7a1 1 0 0 1 0-1.4l1.4-1.4Z"/></svg>`;
   }
@@ -1088,6 +1118,7 @@
       desktopHierarchyModeActive = true;
       await persistDesktopHierarchyMode();
       enableDesktopHierarchyNativeMode();
+      enforceNativeNavigationPanesOpen("desktop-hierarchy-enabled-lock-open");
       await waitForDesktopHierarchyChatListRendered(300);
     } finally {
       desktopHierarchyRefreshInProgress = false;
@@ -1119,6 +1150,7 @@
       desktopHierarchyModeActive = true;
       await persistDesktopHierarchyMode();
       enableDesktopHierarchyNativeMode();
+      enforceNativeNavigationPanesOpen("desktop-hierarchy-enabled-lock-open");
       await waitForDesktopHierarchyChatListRendered(300);
     } finally {
       desktopHierarchyRefreshInProgress = false;
@@ -1199,8 +1231,28 @@
     return /^(expanded|icons|hidden)$/.test(String(value || "")) ? String(value) : "icons";
   }
 
+  function nativeNavigationPanesMustRemainOpen() {
+    // Mobile chat/thread routes still need hard locking because Element collapses
+    // the native navigation panes to inert/0px containers. Desktop hierarchy mode
+    // only needs anti-collapse repair; the Smart Element space/chat panes must
+    // still be allowed to switch to their own compact menu buttons.
+    return isMobileLayoutEnabled();
+  }
+
+  function nativeNavigationPanesShouldBeRepaired() {
+    return isMobileLayoutEnabled() || (desktopHierarchyModeActive === true && isDesktopHierarchyNativeModeUsable());
+  }
+
   function syncDesktopPaneModeClasses() {
-    const mode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
+    let mode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
+    if (nativeNavigationPanesMustRemainOpen()) {
+      if (mode === "hidden") mode = "icons";
+      desktopSpacePaneTemporaryOpen = false;
+      desktopSpaceFloatingLabelsExpanded = false;
+      desktopMiddlePaneHidden = false;
+      desktopMiddlePaneTemporaryOpen = false;
+      desktopMiddlePaneTemporaryFromSpaceSelection = false;
+    }
     desktopSpacePaneMode = mode;
     if (mode !== "hidden") {
       desktopSpacePaneTemporaryOpen = false;
@@ -1208,7 +1260,10 @@
     desktopSpaceLabelsExpanded = mode === "expanded";
     const floatingOpen = mode === "hidden" && desktopSpacePaneTemporaryOpen === true;
     const floatingLabelsExpanded = floatingOpen && desktopSpaceFloatingLabelsExpanded === true;
-    if (!desktopMiddlePaneHidden) desktopMiddlePaneTemporaryOpen = false;
+    if (!desktopMiddlePaneHidden) {
+      desktopMiddlePaneTemporaryOpen = false;
+      desktopMiddlePaneTemporaryFromSpaceSelection = false;
+    }
     const middleFloatingOpen = desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryOpen === true;
     document.documentElement.classList.toggle("mmlc-desktop-space-panel-expanded", mode === "expanded");
     document.documentElement.classList.toggle("mmlc-desktop-space-panel-hidden", mode === "hidden");
@@ -1219,10 +1274,192 @@
     document.documentElement.classList.toggle("mmlc-desktop-middle-pane-floating-open", middleFloatingOpen);
     updateDesktopSpaceFloatingCloseHandlers();
     updateDesktopMiddleFloatingCloseHandlers();
+    updateDesktopChatListUnreadPollingState();
+    scheduleDesktopMiddleEdgePositionUpdate();
+  }
+
+  function scheduleDesktopMiddleEdgePositionUpdate() {
+    if (desktopMiddleEdgePositionFrame) return;
+    desktopMiddleEdgePositionFrame = window.requestAnimationFrame?.(() => {
+      desktopMiddleEdgePositionFrame = null;
+      updateDesktopMiddleEdgePosition();
+    }) || window.setTimeout(() => {
+      desktopMiddleEdgePositionFrame = null;
+      updateDesktopMiddleEdgePosition();
+    }, 0);
+  }
+
+  function scheduleDesktopMiddleEdgePositionUpdates(delays = [0, 60, 140, 300, 700, 1200]) {
+    for (const delayMs of delays) {
+      const ms = Math.max(0, Number(delayMs) || 0);
+      window.setTimeout(() => scheduleDesktopMiddleEdgePositionUpdate(), ms);
+    }
+  }
+
+  function desktopMiddleEdgePositionTargets() {
+    return uniqueElements([
+      document.querySelector("#left-panel, [data-testid='left-panel']"),
+      document.getElementById("mmlc-desktop-chat-list-host"),
+      document.querySelector("nav.mx_RoomListPanel, nav[aria-label='Chatliste'], nav[aria-label='Room list'], .mx_RoomListPanel"),
+      document.querySelector(".mx_LeftPanel_panel"),
+      document.querySelector(".mx_LeftPanel_roomListContainer"),
+      ...desktopRoomPaneEdgeCandidates(),
+      document.getElementById("matrixchat"),
+      document.body
+    ].filter(Boolean));
+  }
+
+  function refreshDesktopMiddleEdgePositionObserver() {
+    if (typeof ResizeObserver === "undefined" || !isDesktopHierarchyNativeModeUsable()) return;
+    if (!desktopMiddleEdgeResizeObserver) {
+      desktopMiddleEdgeResizeObserver = new ResizeObserver(() => scheduleDesktopMiddleEdgePositionUpdate());
+    }
+
+    const nextTargets = new Set(desktopMiddleEdgePositionTargets().filter(element => element instanceof Element));
+    let changed = nextTargets.size !== desktopMiddleEdgeResizeObservedElements.size;
+    if (!changed) {
+      for (const element of nextTargets) {
+        if (!desktopMiddleEdgeResizeObservedElements.has(element)) {
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (!changed) return;
+
+    try { desktopMiddleEdgeResizeObserver.disconnect(); } catch {}
+    desktopMiddleEdgeResizeObservedElements = nextTargets;
+    for (const element of desktopMiddleEdgeResizeObservedElements) {
+      try { desktopMiddleEdgeResizeObserver.observe(element); } catch {}
+    }
+  }
+
+  function disconnectDesktopMiddleEdgePositionObserver() {
+    try { desktopMiddleEdgeResizeObserver?.disconnect(); } catch {}
+    desktopMiddleEdgeResizeObserver = null;
+    desktopMiddleEdgeResizeObservedElements = new Set();
+  }
+
+  function desktopRoomPaneEdgeCandidates() {
+    return uniqueElements([
+      ...document.querySelectorAll(".mx_RoomView_wrapper, .mx_RoomView, .mx_MainSplit, .mx_RoomView_body, [class*='RoomView_wrapper'], [class*='RoomView'], [class*='MainSplit']"),
+      ...document.querySelectorAll("[data-panel='true']:not(#left-panel):not([data-testid='left-panel'])")
+    ].filter(element => element instanceof HTMLElement && !element.closest(OWNED_SELECTOR)));
+  }
+
+  function visibleElementLeftEdge(element, minWidth = 90, minHeight = 80) {
+    if (!(element instanceof HTMLElement)) return NaN;
+    const rect = element.getBoundingClientRect();
+    if (!Number.isFinite(rect.left) || !Number.isFinite(rect.width) || !Number.isFinite(rect.height)) return NaN;
+    if (rect.width < minWidth || rect.height < minHeight || rect.right <= 0 || rect.left >= window.innerWidth) return NaN;
+    const style = getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden" || Number.parseFloat(style.opacity || "1") === 0) return NaN;
+    return Math.round(rect.left);
+  }
+
+  function startDesktopMiddleEdgePositionTracking() {
+    if (desktopMiddleEdgeTrackingTimer || !isDesktopHierarchyNativeModeUsable()) return;
+    desktopMiddleEdgeTrackingTimer = window.setInterval(() => {
+      if (!isDesktopHierarchyNativeModeUsable()) {
+        stopDesktopMiddleEdgePositionTracking();
+        return;
+      }
+      scheduleDesktopMiddleEdgePositionUpdate();
+    }, 250);
+  }
+
+  function stopDesktopMiddleEdgePositionTracking() {
+    if (!desktopMiddleEdgeTrackingTimer) return;
+    window.clearInterval(desktopMiddleEdgeTrackingTimer);
+    desktopMiddleEdgeTrackingTimer = null;
+  }
+
+  function updateDesktopMiddleEdgePosition() {
+    const html = document.documentElement;
+    if (!(html instanceof HTMLElement)) return;
+    refreshDesktopMiddleEdgePositionObserver();
+
+    const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
+    const host = document.getElementById("mmlc-desktop-chat-list-host");
+    const roomPanel = document.querySelector("nav.mx_RoomListPanel, nav[aria-label='Chatliste'], nav[aria-label='Room list'], .mx_RoomListPanel");
+    const roomEdges = desktopRoomPaneEdgeCandidates()
+      .map(element => visibleElementLeftEdge(element))
+      .filter(edge => Number.isFinite(edge) && edge > 40)
+      .sort((a, b) => a - b);
+    const roomEdge = roomEdges.length ? roomEdges[0] : NaN;
+    const candidates = [leftPanel, host, roomPanel];
+    let edgeX = Number.isFinite(roomEdge) ? roomEdge : NaN;
+
+    if (!Number.isFinite(edgeX)) {
+      for (const candidate of candidates) {
+        if (!(candidate instanceof HTMLElement)) continue;
+        const rect = candidate.getBoundingClientRect();
+        if (!Number.isFinite(rect.right) || !Number.isFinite(rect.width)) continue;
+        if (rect.width < 40 || rect.right <= 0) continue;
+
+        edgeX = Math.round(rect.right);
+        break;
+      }
+    }
+
+    if (Number.isFinite(edgeX) && edgeX > 0) {
+      html.style.setProperty("--mmlc-desktop-middle-edge-x", `${edgeX}px`);
+    } else {
+      html.style.removeProperty("--mmlc-desktop-middle-edge-x");
+    }
+
+    positionDesktopMiddleEdgeButton(edgeX);
+  }
+
+  function positionDesktopMiddleEdgeButton(edgeX = NaN) {
+    const button = document.getElementById("mmlc-desktop-middle-restore");
+    if (!(button instanceof HTMLElement)) return;
+
+    const hidden = desktopMiddlePaneHidden === true;
+    const floatingOpen = desktopMiddleFloatingPaneIsOpen();
+    const spaceMode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
+
+    button.style.position = "fixed";
+    button.style.zIndex = "2147483647";
+    button.style.pointerEvents = "auto";
+    button.style.margin = "0";
+    button.style.display = "inline-flex";
+
+    if (hidden && !floatingOpen) {
+      button.style.transform = "none";
+      button.style.top = spaceMode === "hidden" && !desktopSpaceFloatingPaneIsOpen() ? "62px" : "12px";
+      if (spaceMode === "expanded") {
+        button.style.left = "264px";
+      } else if (spaceMode === "hidden" && !desktopSpaceFloatingPaneIsOpen()) {
+        button.style.left = "8px";
+      } else {
+        button.style.left = "88px";
+      }
+      return;
+    }
+
+    const fallbackEdge = (() => {
+      const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
+      if (leftPanel instanceof HTMLElement) {
+        const rect = leftPanel.getBoundingClientRect();
+        if (Number.isFinite(rect.right) && rect.right > 40) return Math.round(rect.right);
+      }
+      const cssValue = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--mmlc-desktop-middle-edge-x"));
+      if (Number.isFinite(cssValue) && cssValue > 40) return cssValue;
+      return Math.min(Math.max(104, Math.round(window.innerWidth * 0.42)), Math.max(104, window.innerWidth - 56));
+    })();
+
+    const x = Number.isFinite(edgeX) && edgeX > 40 ? edgeX : fallbackEdge;
+    button.style.left = `${Math.max(8, Math.round(x) - 18)}px`;
+    button.style.top = "50vh";
+    button.style.transform = "translateY(-50%)";
   }
 
   function nextDesktopSpacePaneMode() {
     const mode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
+    if (nativeNavigationPanesMustRemainOpen()) {
+      return mode === "expanded" ? "icons" : "expanded";
+    }
     if (mode === "expanded") return "icons";
     if (mode === "icons") return "hidden";
     return "icons";
@@ -1251,14 +1488,81 @@
   function updateDesktopSpaceFloatingCloseHandlers() {
     const shouldInstall = desktopSpaceFloatingPaneIsOpen();
     if (shouldInstall && !desktopSpaceFloatingCloseHandlersInstalled) {
+      desktopSpaceFloatingOpenedAt = Date.now();
       document.addEventListener("pointerdown", handleDesktopSpaceFloatingOutsidePointerDown, true);
+      document.addEventListener("pointermove", handleDesktopSpaceFloatingGlobalPointerMove, true);
       document.addEventListener("keydown", handleDesktopSpaceFloatingKeyDown, true);
       desktopSpaceFloatingCloseHandlersInstalled = true;
     } else if (!shouldInstall && desktopSpaceFloatingCloseHandlersInstalled) {
       document.removeEventListener("pointerdown", handleDesktopSpaceFloatingOutsidePointerDown, true);
+      document.removeEventListener("pointermove", handleDesktopSpaceFloatingGlobalPointerMove, true);
       document.removeEventListener("keydown", handleDesktopSpaceFloatingKeyDown, true);
       desktopSpaceFloatingCloseHandlersInstalled = false;
     }
+
+    const nextLeaveTarget = shouldInstall
+      ? document.getElementById("mmlc-desktop-space-list-host")
+      : null;
+    if (desktopSpaceFloatingMouseLeaveTarget !== nextLeaveTarget) {
+      desktopSpaceFloatingMouseLeaveTarget?.removeEventListener("mouseleave", handleDesktopSpaceFloatingMouseLeave, true);
+      desktopSpaceFloatingMouseLeaveTarget = nextLeaveTarget instanceof HTMLElement ? nextLeaveTarget : null;
+      desktopSpaceFloatingMouseLeaveTarget?.addEventListener("mouseleave", handleDesktopSpaceFloatingMouseLeave, true);
+    }
+  }
+
+  function desktopSpaceFloatingStillContainsRelatedTarget(event) {
+    const related = event?.relatedTarget;
+    if (!(related instanceof Node)) return false;
+    const host = document.getElementById("mmlc-desktop-space-list-host");
+    const popover = document.getElementById("mmlc-desktop-space-settings-popover");
+    return Boolean(
+      host instanceof HTMLElement && host.contains(related) ||
+      popover instanceof HTMLElement && popover.contains(related)
+    );
+  }
+
+  function horizontalBoundsForElements(elements) {
+    let left = Infinity;
+    let right = -Infinity;
+    for (const element of elements) {
+      if (!(element instanceof Element)) continue;
+      const rect = element.getBoundingClientRect();
+      if (!Number.isFinite(rect.left) || !Number.isFinite(rect.right) || rect.width <= 0 || rect.height <= 0) continue;
+      left = Math.min(left, rect.left);
+      right = Math.max(right, rect.right);
+    }
+    return Number.isFinite(left) && Number.isFinite(right) && right > left ? { left, right } : null;
+  }
+
+  function eventMovedHorizontallyOutsideFloatingBounds(event, elements, marginPx = 10) {
+    const x = Number(event?.clientX);
+    if (!Number.isFinite(x)) return false;
+    const bounds = horizontalBoundsForElements(elements);
+    if (!bounds) return false;
+    const margin = Math.max(0, Number(marginPx) || 0);
+    return x < bounds.left - margin || x > bounds.right + margin;
+  }
+
+  function handleDesktopSpaceFloatingGlobalPointerMove(event) {
+    if (!desktopSpaceFloatingPaneIsOpen()) return;
+    if (Date.now() - desktopSpaceFloatingOpenedAt < 220) return;
+    const host = document.getElementById("mmlc-desktop-space-list-host");
+    const popover = document.getElementById("mmlc-desktop-space-settings-popover");
+    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [host, popover], 14)) return;
+    closeDesktopSpaceFloatingPane("pointer-move-horizontal");
+  }
+
+  function handleDesktopSpaceFloatingMouseLeave(event) {
+    if (!desktopSpaceFloatingPaneIsOpen()) return;
+    if (Date.now() - desktopSpaceFloatingOpenedAt < 220) return;
+    if (desktopSpaceFloatingStillContainsRelatedTarget(event)) return;
+    // Element frequently re-parents/re-renders the floating Space menu while the
+    // pointer is still vertically above the pane. Treat mouseleave as a close
+    // request only when the pointer has actually crossed the left or right edge.
+    const host = document.getElementById("mmlc-desktop-space-list-host");
+    const popover = document.getElementById("mmlc-desktop-space-settings-popover");
+    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [host, popover], 14)) return;
+    closeDesktopSpaceFloatingPane("mouse-leave-horizontal");
   }
 
   function handleDesktopSpaceFloatingOutsidePointerDown(event) {
@@ -1279,29 +1583,103 @@
   function closeDesktopMiddleFloatingPane(reason = "desktop-middle-floating-close") {
     if (!desktopMiddleFloatingPaneIsOpen()) return false;
     desktopMiddlePaneTemporaryOpen = false;
+    desktopMiddlePaneTemporaryFromSpaceSelection = false;
     syncDesktopPaneModeClasses();
     renderDesktopMiddleChatNativeUi();
     renderDesktopHierarchyNativeUiSoon(0);
     return true;
   }
 
+  function desktopMiddleFloatingLeaveTarget() {
+    return document.querySelector("#left-panel, [data-testid='left-panel']") ||
+      document.getElementById("mmlc-desktop-chat-list-host");
+  }
+
   function updateDesktopMiddleFloatingCloseHandlers() {
     const shouldInstall = desktopMiddleFloatingPaneIsOpen();
     if (shouldInstall && !desktopMiddleFloatingCloseHandlersInstalled) {
+      desktopMiddleFloatingOpenedAt = Date.now();
       document.addEventListener("pointerdown", handleDesktopMiddleFloatingOutsidePointerDown, true);
+      document.addEventListener("pointermove", handleDesktopMiddleFloatingGlobalPointerMove, true);
       document.addEventListener("click", handleDesktopMiddleFloatingNativeRoomClick, true);
       document.addEventListener("keydown", handleDesktopMiddleFloatingKeyDown, true);
       desktopMiddleFloatingCloseHandlersInstalled = true;
     } else if (!shouldInstall && desktopMiddleFloatingCloseHandlersInstalled) {
       document.removeEventListener("pointerdown", handleDesktopMiddleFloatingOutsidePointerDown, true);
+      document.removeEventListener("pointermove", handleDesktopMiddleFloatingGlobalPointerMove, true);
       document.removeEventListener("click", handleDesktopMiddleFloatingNativeRoomClick, true);
       document.removeEventListener("keydown", handleDesktopMiddleFloatingKeyDown, true);
       desktopMiddleFloatingCloseHandlersInstalled = false;
     }
+
+    const nextLeaveTarget = shouldInstall ? desktopMiddleFloatingLeaveTarget() : null;
+    if (desktopMiddleFloatingMouseLeaveTarget !== nextLeaveTarget) {
+      desktopMiddleFloatingMouseLeaveTarget?.removeEventListener("mouseleave", handleDesktopMiddleFloatingMouseLeave, true);
+      desktopMiddleFloatingMouseLeaveTarget = nextLeaveTarget instanceof HTMLElement ? nextLeaveTarget : null;
+      desktopMiddleFloatingMouseLeaveTarget?.addEventListener("mouseleave", handleDesktopMiddleFloatingMouseLeave, true);
+    }
+  }
+
+  function desktopMiddleFloatingStillContainsRelatedTarget(event) {
+    const related = event?.relatedTarget;
+    if (!(related instanceof Node)) return false;
+    return [
+      document.querySelector("#left-panel, [data-testid='left-panel']"),
+      document.getElementById("mmlc-desktop-chat-list-host"),
+      document.getElementById("mmlc-desktop-middle-restore"),
+      document.getElementById("mmlc-desktop-space-list-host"),
+      document.getElementById("mmlc-desktop-space-settings-popover")
+    ].some(element => element instanceof HTMLElement && element.contains(related));
+  }
+
+  function handleDesktopMiddleFloatingGlobalPointerMove(event) {
+    if (!desktopMiddleFloatingPaneIsOpen()) return;
+    if (Date.now() - desktopMiddleFloatingOpenedAt < 220) return;
+
+    // A chat list opened by selecting a Space is not a fragile hover popup. Keep
+    // it stable until the user either selects a chat or explicitly closes it.
+    // The previous pointer-move based close could misread Element's repaired
+    // left-panel geometry and collapse the pane even while the pointer was still
+    // visibly inside the chat list.
+    if (desktopMiddlePaneTemporaryFromSpaceSelection === true) return;
+
+    if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
+    const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
+    const host = document.getElementById("mmlc-desktop-chat-list-host");
+    const restore = document.getElementById("mmlc-desktop-middle-restore");
+    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
+    closeDesktopMiddleFloatingPane("pointer-move-horizontal");
+  }
+
+  function handleDesktopMiddleFloatingMouseLeave(event) {
+    if (!desktopMiddleFloatingPaneIsOpen()) return;
+    if (Date.now() - desktopMiddleFloatingOpenedAt < 220) return;
+
+    // Space-selection auto-open must not collapse from transient DOM mouseleave
+    // events while Element repairs/reparents the native left panel.
+    if (desktopMiddlePaneTemporaryFromSpaceSelection === true) return;
+
+    if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) {
+      const delayMs = Math.max(80, Math.min(10000, desktopMiddlePaneSpaceLandingHoldUntil - Date.now() + 80));
+      window.setTimeout(() => {
+        if (!desktopMiddleFloatingPaneIsOpen()) return;
+        if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
+        closeDesktopMiddleFloatingPane("mouse-leave-after-space-landing");
+      }, delayMs);
+      return;
+    }
+    if (desktopMiddleFloatingStillContainsRelatedTarget(event)) return;
+    const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
+    const host = document.getElementById("mmlc-desktop-chat-list-host");
+    const restore = document.getElementById("mmlc-desktop-middle-restore");
+    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
+    closeDesktopMiddleFloatingPane("mouse-leave-horizontal");
   }
 
   function handleDesktopMiddleFloatingOutsidePointerDown(event) {
     if (!desktopMiddleFloatingPaneIsOpen()) return;
+    if (desktopMiddlePaneTemporaryFromSpaceSelection === true) return;
+    if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
     const target = event.target;
     if (target instanceof Element && target.closest("#left-panel, [data-testid='left-panel'], #mmlc-desktop-middle-restore, #mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover")) return;
     closeDesktopMiddleFloatingPane("outside-pointer");
@@ -1330,6 +1708,114 @@
     if (event.key === "Escape") closeDesktopMiddleFloatingPane("escape");
   }
 
+  function removeDesktopSpaceFloatingAvatar() {
+    document.getElementById("mmlc-desktop-space-floating-avatar")?.remove();
+  }
+
+  function nativeSpacePanelUserAvatarElement() {
+    const panel = document.querySelector(SPACE_PANEL_SELECTOR);
+    if (!(panel instanceof HTMLElement) || panel.closest(OWNED_SELECTOR)) return null;
+    const userMenu = panel.querySelector(".mx_UserMenu, [class*='UserMenu']");
+    if (!(userMenu instanceof HTMLElement)) return null;
+    return uniqueElements([
+      userMenu.querySelector("button span[role='img']"),
+      userMenu.querySelector("span[role='img']"),
+      userMenu.querySelector("button [class*='avatar']"),
+      userMenu.querySelector("[class*='avatar']"),
+      userMenu.querySelector("img[src]")
+    ]).find(candidate => candidate instanceof HTMLElement) || null;
+  }
+
+  function syncDesktopSpaceFloatingAvatar(visible) {
+    if (!visible) {
+      removeDesktopSpaceFloatingAvatar();
+      return;
+    }
+
+    const source = nativeSpacePanelUserAvatarElement();
+    if (!(source instanceof HTMLElement)) {
+      removeDesktopSpaceFloatingAvatar();
+      return;
+    }
+
+    const sourceImage = source.matches?.("img[src], img[srcset]")
+      ? source
+      : source.querySelector?.("img[src], img[srcset]");
+    const src = sourceImage?.currentSrc || sourceImage?.src || sourceImage?.getAttribute?.("src") || "";
+    const label = source.getAttribute("aria-label") || sourceImage?.getAttribute?.("alt") || "";
+    const rect = source.getBoundingClientRect();
+    const floatingHost = document.getElementById("mmlc-desktop-space-list-host");
+    const hostRect = floatingHost instanceof HTMLElement ? floatingHost.getBoundingClientRect() : null;
+    const hostLooksUsable = Boolean(
+      hostRect &&
+      Number.isFinite(hostRect.left) &&
+      Number.isFinite(hostRect.top) &&
+      hostRect.width >= 36 &&
+      hostRect.height >= 36
+    );
+
+    // The native avatar lives inside Element's SpacePanel, which can be clipped
+    // or placed below the floating menu in Element's own stacking contexts. The
+    // mirrored avatar is therefore positioned from the floating menu host itself,
+    // not from the native avatar rectangle. Keep the mirror strictly square so
+    // the round mask can never become an ellipse if Element temporarily reports
+    // a non-square native avatar wrapper.
+    const size = 42;
+    const left = hostLooksUsable
+      ? Math.round(hostRect.left + (hostRect.width - size) / 2)
+      : (Number.isFinite(rect.left) && rect.width >= 12 ? Math.round(rect.left + (rect.width - size) / 2) : 64);
+    const top = hostLooksUsable
+      ? Math.max(6, Math.round(hostRect.top - size * 0.72))
+      : (Number.isFinite(rect.top) && rect.height >= 12 ? Math.round(rect.top + (rect.height - size) / 2) : 36);
+    const width = size;
+    const height = size;
+
+    let mirror = document.getElementById("mmlc-desktop-space-floating-avatar");
+    if (!(mirror instanceof HTMLElement)) {
+      mirror = document.createElement("div");
+      mirror.id = "mmlc-desktop-space-floating-avatar";
+      mirror.className = "mmlc-desktop-native mmlc-desktop-space-floating-avatar";
+      document.body.appendChild(mirror);
+    }
+
+    mirror.style.left = `${Math.round(left)}px`;
+    mirror.style.top = `${Math.round(top)}px`;
+    mirror.style.width = `${Math.round(width)}px`;
+    mirror.style.height = `${Math.round(height)}px`;
+    mirror.style.minWidth = `${Math.round(width)}px`;
+    mirror.style.minHeight = `${Math.round(height)}px`;
+    mirror.style.maxWidth = `${Math.round(width)}px`;
+    mirror.style.maxHeight = `${Math.round(height)}px`;
+    mirror.style.aspectRatio = "1 / 1";
+    mirror.style.borderRadius = "50%";
+    mirror.style.overflow = "hidden";
+    mirror.style.boxSizing = "border-box";
+    mirror.setAttribute("aria-hidden", "true");
+    mirror.title = label || "";
+
+    if (src) {
+      let img = mirror.querySelector("img");
+      if (!(img instanceof HTMLImageElement)) {
+        mirror.replaceChildren();
+        img = document.createElement("img");
+        img.alt = "";
+        img.decoding = "async";
+        img.loading = "eager";
+        img.referrerPolicy = "no-referrer";
+        mirror.appendChild(img);
+      }
+      img.style.width = "100%";
+      img.style.height = "100%";
+      img.style.objectFit = "cover";
+      img.style.borderRadius = "50%";
+      img.style.display = "block";
+      if (img.src !== src) img.src = src;
+    } else {
+      const text = String(label || "?").trim().slice(0, 2).toUpperCase() || "?";
+      if (mirror.textContent !== text || mirror.querySelector("img")) mirror.replaceChildren(document.createTextNode(text));
+    }
+  }
+
   function desktopSpacePaneToggleIconSvg() {
     const mode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
     if (mode === "hidden") return desktopSpacePaneTemporaryOpen ? desktopArrowLeftIconSvg() : desktopMenuIconSvg();
@@ -1355,8 +1841,10 @@
     installDesktopHierarchyObserver();
     installDesktopUnreadSyncObserver();
     startDesktopUnreadPeriodicSync();
+    startDesktopMiddleEdgePositionTracking();
     desktopReloadSelectionSynced = false;
     scheduleDesktopOpenRoomSelectionRestore(80);
+    refreshDesktopNativeSpaceBarUnreadNow("enable-desktop-hierarchy");
     scheduleDesktopUnreadDomSync(120);
     renderDesktopHierarchyNativeUiSoon(0);
   }
@@ -1378,6 +1866,7 @@
       "mmlc-desktop-start-selected"
     );
     desktopSpacePaneTemporaryOpen = false;
+    removeDesktopSpaceFloatingAvatar();
     desktopMiddlePaneTemporaryOpen = false;
     updateDesktopSpaceFloatingCloseHandlers();
     updateDesktopMiddleFloatingCloseHandlers();
@@ -1397,6 +1886,9 @@
       desktopHierarchyObserver.disconnect();
       desktopHierarchyObserver = null;
     }
+    disconnectDesktopMiddleEdgePositionObserver();
+    stopDesktopMiddleEdgePositionTracking();
+    document.documentElement.style.removeProperty("--mmlc-desktop-middle-edge-x");
     if (desktopUnreadSyncObserver) {
       desktopUnreadSyncObserver.disconnect();
       desktopUnreadSyncObserver = null;
@@ -1409,6 +1901,7 @@
       clearInterval(desktopUnreadPeriodicTimer);
       desktopUnreadPeriodicTimer = null;
     }
+    stopDesktopChatListUnreadPolling();
     if (desktopOpenRoomRestoreTimer) {
       clearTimeout(desktopOpenRoomRestoreTimer);
       desktopOpenRoomRestoreTimer = null;
@@ -1431,7 +1924,8 @@
     desktopHierarchyRenderTimer = setTimeout(() => {
       desktopHierarchyRenderTimer = null;
       if (!isDesktopHierarchyNativeModeUsable()) return;
-      enforceNativeSpacePanelExpandedForDesktopUnreadSync();
+      if (nativeNavigationPanesShouldBeRepaired()) enforceNativeNavigationPanesOpen("desktop-hierarchy-render-repair");
+      else enforceNativeSpacePanelExpandedForDesktopUnreadSync();
       if (!desktopReloadSelectionSynced) {
         syncDesktopSelectedSpaceFromOpenRoom({ restoreOnly: true }) || restoreDesktopSelectionFromLoadedState({ allowCachedRoomMatch: true });
       } else if (!desktopSelectedSpacePath.length) {
@@ -1442,6 +1936,7 @@
       renderDesktopSpaceRailNativeUi();
       renderDesktopMiddleChatNativeUi();
       updateNativeStartPageHeadingLabel();
+      scheduleDesktopMiddleEdgePositionUpdates([0, 80, 240, 600]);
     }, Math.max(0, delayMs));
   }
 
@@ -1465,8 +1960,109 @@
     if (desktopUnreadPeriodicTimer) return;
     desktopUnreadPeriodicTimer = setInterval(() => {
       if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return;
-      scheduleDesktopUnreadDomSync(0, { render: false });
+
+      // The native Element SpacePanel is the authoritative source for Space/DM
+      // unread totals. Poll it continuously while hierarchy mode is active so
+      // the Smart Element Space bar, the minimized Space menu button and the
+      // Direct Messages entry stay current even when the middle chat list is
+      // closed and no room-list polling is running.
+      refreshDesktopNativeSpaceBarUnreadNow("native-spacebar-periodic-poll");
     }, 1000);
+  }
+
+  function desktopChatListPaneIsOpenForUnreadPolling() {
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return false;
+    if (!isDesktopHierarchyNativeModeUsable()) return false;
+
+    // A visible middle/chat-list pane means either the pane is persistently open
+    // or it is minimized but currently shown as Smart Element's temporary
+    // floating chat list.  Both Direct Messages and Space chat lists share this
+    // state, so unread updates must treat them identically.
+    if (desktopMiddlePaneHidden !== true) return true;
+    return desktopMiddleFloatingPaneIsOpen();
+  }
+
+  function desktopChatListUnreadPollingContextSignature() {
+    const context = desktopSelectedChatListContext();
+    if (!context?.listKey) return "";
+    return `${context.listKey}|${spacePathSignature(context.path)}|${normalizeSpaces(context.label || "").toLowerCase()}`;
+  }
+
+  function updateDesktopChatListUnreadPollingState() {
+    const open = desktopChatListPaneIsOpenForUnreadPolling();
+    const contextKey = open ? desktopChatListUnreadPollingContextSignature() : "";
+    const becameOpen = open && !desktopChatListUnreadPollingWasOpen;
+    const contextChanged = open && contextKey && contextKey !== desktopChatListUnreadPollingContextKey;
+
+    desktopChatListUnreadPollingWasOpen = open;
+    desktopChatListUnreadPollingContextKey = contextKey;
+
+    if (!open) {
+      stopDesktopChatListUnreadPolling();
+      return;
+    }
+
+    if (becameOpen || contextChanged) {
+      refreshDesktopChatListUnreadNow("chat-list-opened");
+      scheduleDesktopChatListUnreadImmediateUpdate(180, "chat-list-opened-after-native-render");
+    }
+
+    startDesktopChatListUnreadPolling();
+  }
+
+  function startDesktopChatListUnreadPolling() {
+    if (desktopChatListUnreadPollingTimer) return;
+    const run = ++desktopChatListUnreadPollingRun;
+    desktopChatListUnreadPollingTimer = setInterval(() => {
+      if (run !== desktopChatListUnreadPollingRun) return;
+      if (!desktopChatListPaneIsOpenForUnreadPolling()) {
+        stopDesktopChatListUnreadPolling();
+        return;
+      }
+      refreshDesktopChatListUnreadNow("chat-list-open-poll");
+    }, 1500);
+  }
+
+  function stopDesktopChatListUnreadPolling() {
+    desktopChatListUnreadPollingRun += 1;
+    desktopChatListUnreadPollingWasOpen = false;
+    desktopChatListUnreadPollingContextKey = "";
+    if (desktopChatListUnreadPollingTimer) {
+      clearInterval(desktopChatListUnreadPollingTimer);
+      desktopChatListUnreadPollingTimer = null;
+    }
+    if (desktopChatListUnreadImmediateTimer) {
+      clearTimeout(desktopChatListUnreadImmediateTimer);
+      desktopChatListUnreadImmediateTimer = null;
+    }
+  }
+
+  function scheduleDesktopChatListUnreadImmediateUpdate(delayMs = 0, reason = "chat-list-unread-update") {
+    if (!desktopChatListPaneIsOpenForUnreadPolling()) return;
+    if (desktopChatListUnreadImmediateTimer) clearTimeout(desktopChatListUnreadImmediateTimer);
+    desktopChatListUnreadImmediateTimer = setTimeout(() => {
+      desktopChatListUnreadImmediateTimer = null;
+      refreshDesktopChatListUnreadNow(reason);
+    }, Math.max(0, Number(delayMs) || 0));
+  }
+
+  function refreshDesktopChatListUnreadNow(reason = "chat-list-unread-update") {
+    if (!desktopChatListPaneIsOpenForUnreadPolling()) return false;
+
+    const changed = syncDesktopUnreadCachesFromElementDom();
+    if (changed) {
+      persistHierarchyCacheSoon();
+      persistUnreadCacheSoon();
+    }
+
+    const domChanged = updateDesktopUnreadBadgesInPlace();
+    if (changed || domChanged) updateHierarchyBar();
+
+    // Do not rebuild the whole middle pane here.  The purpose of this loop is
+    // only to keep unread badges current while the chat list is visible; a
+    // rebuild would disturb hover/floating state and can steal focus from
+    // Element's native room list in Direct Messages.
+    return Boolean(changed || domChanged);
   }
 
   function desktopUnreadMutationLooksRelevant(mutation) {
@@ -1504,6 +2100,29 @@
       // an opt-in path for callers that explicitly need structure changes.
       if (options.render === true && changed) renderDesktopHierarchyNativeUiSoon(0);
     }, Math.max(0, delayMs));
+  }
+
+  function refreshDesktopNativeSpaceBarUnreadNow(reason = "native-spacebar-unread-refresh") {
+    if (!desktopHierarchyModeActive || isMobileLayoutEnabled()) return false;
+    if (!isDesktopHierarchyNativeModeUsable()) return false;
+
+    let changed = false;
+
+    // Keep DM/Startseite and all visible native SpacePanel badges in sync.
+    // This intentionally does not rebuild the hierarchy or walk rooms; it only
+    // copies unread counters from Element's native SpacePanel into Smart
+    // Element's caches and then updates existing badges in place.
+    changed = syncNativeStartPageUnreadIntoCache() || changed;
+    changed = syncNativeSpaceRailUnreadIntoCache() || changed;
+
+    if (changed) {
+      persistHierarchyCacheSoon();
+      persistUnreadCacheSoon();
+    }
+
+    const domChanged = updateDesktopUnreadBadgesInPlace();
+    if (changed || domChanged) updateHierarchyBar();
+    return Boolean(changed || domChanged);
   }
 
   function syncDesktopUnreadCachesFromElementDom() {
@@ -1830,6 +2449,7 @@
     const mode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
     const floatingOpen = desktopSpaceFloatingPaneIsOpen();
     const floatingLabelsExpanded = floatingOpen && desktopSpaceFloatingLabelsExpanded === true;
+    syncDesktopSpaceFloatingAvatar(floatingOpen);
 
     // Keep the minimized/floating space menu outside Element's native SpacePanel.
     // Element and the mobile layout rules may set the whole native SpacePanel to
@@ -1870,7 +2490,7 @@
     expandToggle.setAttribute("aria-pressed", mode === "expanded" || floatingLabelsExpanded ? "true" : "false");
     expandToggle.setAttribute("aria-expanded", floatingOpen ? "true" : "false");
     expandToggle.innerHTML = desktopSpacePaneToggleIconSvg();
-    if (mode === "hidden" && !floatingOpen) appendDesktopMinimizedSpaceUnreadBadge(expandToggle);
+    if (mode === "hidden") appendDesktopMinimizedSpaceUnreadBadge(expandToggle);
     protectDesktopNativeButton(expandToggle);
     expandToggle.addEventListener("click", event => {
       event.preventDefault();
@@ -1878,6 +2498,16 @@
       event.stopImmediatePropagation?.();
       if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("space-pane-toggle");
       const currentMode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
+      if (nativeNavigationPanesMustRemainOpen() && currentMode === "hidden") {
+        desktopSpacePaneTemporaryOpen = false;
+        desktopSpaceFloatingLabelsExpanded = false;
+        desktopSpacePaneMode = "icons";
+        syncDesktopPaneModeClasses();
+        enforceNativeNavigationPanesOpen("desktop-space-toggle-lock-open");
+        persistDesktopHierarchySettings();
+        renderDesktopHierarchyNativeUiSoon(0);
+        return;
+      }
       if (currentMode === "hidden") {
         if (!desktopSpacePaneTemporaryOpen) {
           desktopSpacePaneTemporaryOpen = true;
@@ -1916,6 +2546,16 @@
       event.stopImmediatePropagation?.();
       if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("space-pane-maximize");
       const currentMode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
+      if (nativeNavigationPanesMustRemainOpen() && currentMode === "hidden") {
+        desktopSpacePaneTemporaryOpen = false;
+        desktopSpaceFloatingLabelsExpanded = false;
+        desktopSpacePaneMode = "expanded";
+        syncDesktopPaneModeClasses();
+        enforceNativeNavigationPanesOpen("desktop-space-maximize-lock-open");
+        persistDesktopHierarchySettings();
+        renderDesktopHierarchyNativeUiSoon(0);
+        return;
+      }
       if (currentMode === "hidden") {
         desktopSpacePaneTemporaryOpen = true;
         desktopSpaceFloatingLabelsExpanded = true;
@@ -2030,6 +2670,17 @@
       toggleDesktopSpaceSettingsPopover(settingsButton);
     });
     host.appendChild(settingsButton);
+
+    // Re-run the avatar placement after the floating host has actually been
+    // rebuilt and laid out. The first call at the top of this render pass can
+    // still see the old host dimensions, which made the mirror appear off-center
+    // or left the native, clipped avatar visible.
+    syncDesktopSpaceFloatingAvatar(floatingOpen);
+    if (floatingOpen) {
+      requestAnimationFrame(() => syncDesktopSpaceFloatingAvatar(desktopSpaceFloatingPaneIsOpen()));
+      setTimeout(() => syncDesktopSpaceFloatingAvatar(desktopSpaceFloatingPaneIsOpen()), 80);
+    }
+    updateDesktopSpaceFloatingCloseHandlers();
   }
 
   function makeDesktopSpaceButton(item) {
@@ -2062,12 +2713,21 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
+
+      // Do not close the temporary chat-list pane before selecting another
+      // Space. Keeping it open avoids a visible collapse/reopen cycle and keeps
+      // the boundary/edge button stable while the right pane changes.
+      if (desktopMiddleFloatingPaneIsOpen()) {
+        desktopMiddlePaneTemporaryOpen = true;
+        desktopMiddlePaneTemporaryFromSpaceSelection = true;
+        syncDesktopPaneModeClasses();
+      }
+
       if (item.joined === false) {
         joinDesktopUnjoinedItem(item).catch(error => console.warn("Could not join desktop hierarchy space.", error));
       } else {
         selectDesktopSpaceNode(item).catch(error => console.warn("Could not select desktop hierarchy space.", error));
       }
-      if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("space-click");
       if (desktopSpaceFloatingPaneIsOpen()) closeDesktopSpaceFloatingPane("space-click");
     });
 
@@ -2129,6 +2789,7 @@
   function renderDesktopMiddleChatNativeUi() {
     syncDesktopPaneModeClasses();
     renderDesktopMiddlePaneRestoreButton();
+    scheduleDesktopMiddleEdgePositionUpdates([0, 50, 140, 300, 700]);
     const roomPanel = document.querySelector("nav.mx_RoomListPanel, nav[aria-label='Chatliste'], nav[aria-label='Room list'], .mx_RoomListPanel");
     if (!(roomPanel instanceof HTMLElement) || roomPanel.closest(OWNED_SELECTOR)) return;
 
@@ -2158,18 +2819,26 @@
     updateDesktopStartSelectedClass();
 
     const middleFloatingOpen = desktopMiddleFloatingPaneIsOpen();
+    host.classList.toggle("mmlc-desktop-chat-list-host-start", Boolean(isStart));
 
     host.replaceChildren();
-    host.appendChild(makeDesktopMiddlePaneToggleButton());
+    renderDesktopMiddlePaneEdgeButton();
     if (middleFloatingOpen) host.appendChild(makeDesktopMiddlePaneStickyButton());
+    updateDesktopMiddleFloatingCloseHandlers();
 
     if (isStart || (desktopMiddlePaneHidden && !middleFloatingOpen)) {
+      // Direct Messages use Element's own native room list. The Smart Element
+      // host still stays mounted so the shared blue collapse/restore edge button
+      // and the sticky/pin button are available in exactly the same temporary
+      // floating state as for Space chat lists.
+      scheduleDesktopChatListUnreadImmediateUpdate(0, "desktop-dm-chat-list-rendered");
       dispatchDesktopRoomContentRefresh("desktop-chat-list-rendered");
       updateNativeStartPageHeadingLabel();
       return;
     }
 
     syncDesktopUnreadCachesFromElementDom();
+    scheduleDesktopChatListUnreadImmediateUpdate(0, "desktop-chat-list-rendered");
     const rawChats = cachedListItemsWithFallback(chatsCacheKey(path, label), label);
     const chats = rawChats
       .filter(item => item?.type === "room")
@@ -2213,17 +2882,27 @@
   }
 
   function renderDesktopMiddlePaneRestoreButton() {
+    renderDesktopMiddlePaneEdgeButton();
+  }
+
+  function renderDesktopMiddlePaneEdgeButton() {
     const existing = document.getElementById("mmlc-desktop-middle-restore");
-    if (!desktopMiddlePaneHidden || desktopMiddleFloatingPaneIsOpen() || !isDesktopHierarchyNativeModeUsable()) {
+    if (!isDesktopHierarchyNativeModeUsable()) {
       existing?.remove();
       return;
     }
-    if (existing instanceof HTMLElement) return;
 
-    const button = makeDesktopMiddlePaneToggleButton();
-    button.id = "mmlc-desktop-middle-restore";
-    button.classList.add("mmlc-desktop-native", "mmlc-desktop-middle-restore");
-    document.body?.appendChild(button);
+    const replacement = makeDesktopMiddlePaneToggleButton();
+    replacement.id = "mmlc-desktop-middle-restore";
+    replacement.classList.add("mmlc-desktop-native", "mmlc-desktop-middle-restore", "mmlc-desktop-middle-edge-button");
+
+    if (existing instanceof HTMLElement) {
+      existing.replaceWith(replacement);
+    } else {
+      document.body?.appendChild(replacement);
+    }
+
+    scheduleDesktopMiddleEdgePositionUpdates([0, 60, 160, 360, 800]);
   }
 
   function makeDesktopMiddlePaneToggleButton() {
@@ -2237,24 +2916,50 @@
     button.setAttribute("aria-label", button.title);
     button.setAttribute("aria-pressed", hidden ? "true" : "false");
     button.setAttribute("aria-expanded", floatingOpen ? "true" : "false");
-    button.innerHTML = opensPane ? desktopArrowRightIconSvg() : desktopArrowLeftIconSvg();
-    if (opensPane && desktopMiddleRestoreReplacesMinimizedSpaceMenu()) appendDesktopMinimizedSpaceUnreadBadge(button);
+    button.innerHTML = opensPane ? desktopListIconSvg() : desktopArrowLeftIconSvg();
+    if (opensPane) appendDesktopMinimizedChatUnreadBadge(button);
     protectDesktopNativeButton(button);
     button.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
       if (desktopMiddlePaneHidden) {
-        desktopMiddlePaneTemporaryOpen = !desktopMiddlePaneTemporaryOpen;
+        // In minimized mode this blue edge button must always be able to close
+        // the temporary chat list again, even while Space selection keeps that
+        // list open until the user picks a chat.  Closing explicitly cancels the
+        // temporary Space-selection hold; opening keeps the existing minimized
+        // preference and shows only the floating Smart Element chat list.
+        const willOpen = !desktopMiddlePaneTemporaryOpen;
+        desktopMiddlePaneTemporaryOpen = willOpen;
+        desktopMiddlePaneTemporaryFromSpaceSelection = false;
+        if (!willOpen) desktopMiddlePaneSpaceLandingHoldUntil = 0;
         syncDesktopPaneModeClasses();
+        if (willOpen) {
+          enforceNativeNavigationPanesOpen("desktop-middle-toggle-open-floating");
+          ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
+        }
+        renderDesktopMiddleChatNativeUi();
+        scheduleDesktopChatListUnreadImmediateUpdate(0, willOpen ? "desktop-middle-toggle-open" : "desktop-middle-toggle-close");
+        renderDesktopHierarchyNativeUiSoon(0);
+        return;
+      }
+      if (nativeNavigationPanesMustRemainOpen()) {
+        desktopMiddlePaneHidden = false;
+        desktopMiddlePaneTemporaryOpen = false;
+        syncDesktopPaneModeClasses();
+        persistDesktopHierarchySettings();
+        enforceNativeNavigationPanesOpen("desktop-middle-toggle-lock-open");
+        ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
         renderDesktopMiddleChatNativeUi();
         renderDesktopHierarchyNativeUiSoon(0);
         return;
       }
       desktopMiddlePaneHidden = true;
       desktopMiddlePaneTemporaryOpen = false;
+      desktopMiddlePaneTemporaryFromSpaceSelection = false;
       syncDesktopPaneModeClasses();
       persistDesktopHierarchySettings();
+      enforceNativeNavigationPanesOpen("desktop-middle-toggle-hide");
       renderDesktopMiddleChatNativeUi();
       renderDesktopHierarchyNativeUiSoon(0);
     });
@@ -2275,6 +2980,7 @@
       event.stopImmediatePropagation?.();
       desktopMiddlePaneHidden = false;
       desktopMiddlePaneTemporaryOpen = false;
+      desktopMiddlePaneTemporaryFromSpaceSelection = false;
       syncDesktopPaneModeClasses();
       persistDesktopHierarchySettings();
       renderDesktopMiddleChatNativeUi();
@@ -2305,6 +3011,7 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
+
       const action = item.joined === false ? joinDesktopUnjoinedItem(item) : openDesktopCachedChat(item);
       if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("chat-click");
       action.catch(error => console.warn(item.joined === false ? "Could not join desktop hierarchy chat." : "Could not open cached chat.", error));
@@ -2363,6 +3070,16 @@
       currentSpaceElement = findNativeStartPageSpaceButton() || null;
       currentSpaceSource = "start";
       updateDesktopStartSelectedClass();
+
+      // Treat the DM/start selection like a Space selection for the companion
+      // chat list: if the Smart Element chat list is minimized, reveal it as a
+      // temporary floating pane instead of leaving the user on the right pane
+      // only.
+      ensureDesktopMiddlePaneVisibleForSpaceOpen();
+      beginDesktopMiddlePaneSpaceLandingHold(1800);
+      renderDesktopHierarchyNativeUiSoon(0);
+      await waitForDesktopHierarchyChatListRendered(240);
+
       showChatOpeningOverlay(true, {
         title: "Opening direct messages.",
         detail: "Switching to Element's native start page..."
@@ -2372,8 +3089,14 @@
       } finally {
         showChatOpeningOverlay(false, { minVisibleMs: 360 });
       }
+      reassertDesktopMiddlePaneOpenForSpaceLanding("desktop-start-page-chatlist-open-final");
       renderDesktopHierarchyNativeUiSoon(0);
       return;
+    }
+
+    if (desktopSelectedSpaceCacheRefreshTimer) {
+      clearTimeout(desktopSelectedSpaceCacheRefreshTimer);
+      desktopSelectedSpaceCacheRefreshTimer = null;
     }
 
     const path = Array.isArray(item.path) && item.path.length ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(item.path)) : fallbackSpacePath(item.label);
@@ -2381,18 +3104,155 @@
     currentSpaceLabel = item.label;
     currentSpacePath = cloneSpacePathSegments(path);
     const pathSnapshot = cloneSpacePathSegments(path);
-    const selectableDepth = selectableSpacePathFromSnapshot(pathSnapshot, item.label).length;
 
     // Space selection is deliberately cache-first. Opening Element's native
     // SpaceHierarchy here used to trigger expensive layout switches, overview
     // clicks and scroll probes on every normal Space change. The native parser is
     // now reserved for manual refreshes or missing/stale caches.
+    ensureDesktopMiddlePaneVisibleForSpaceOpen();
+    beginDesktopMiddlePaneSpaceLandingHold(1800);
     renderDesktopHierarchyNativeUiSoon(0);
     await waitForDesktopHierarchyChatListRendered(240);
-    scheduleDesktopSelectedSpaceCacheRefreshIfNeeded(item, pathSnapshot, item.label);
+    scheduleDesktopSelectedSpaceLandingScreen(item, pathSnapshot, item.label);
+    // Do not auto-refresh the Space/chat structure from a normal Space click.
+    // Even when limited to stale/missing caches, refreshOneDesktopSpaceCache()
+    // has to visit Element's native hierarchy and can visibly walk through
+    // subspaces in the right pane. Structure refresh is now manual-only here;
+    // the already cached middle list stays in control.
   }
 
-  function scheduleDesktopSelectedSpaceCacheRefreshIfNeeded(item, path, label) {
+
+  function scheduleDesktopSelectedSpaceLandingScreen(item, path, label, options = {}) {
+    const selectedLabel = normalizeSpaces(label || item?.label || "");
+    if (!selectedLabel || !isDesktopHierarchyNativeModeUsable()) return;
+    if (/^(startseite|home|direct messages|direktnachrichten)$/i.test(selectedLabel)) return;
+
+    const pathSnapshot = cloneSpacePathSegments(path && path.length ? path : fallbackSpacePath(selectedLabel));
+    const run = ++desktopSelectedSpaceLandingRun;
+    beginDesktopMiddlePaneSpaceLandingHold(Number(options.holdMs || 1800));
+    scheduleDesktopMiddlePaneSpaceLandingReassertions(run, "desktop-space-landing-scheduled");
+
+    if (desktopSelectedSpaceLandingTimer) {
+      clearTimeout(desktopSelectedSpaceLandingTimer);
+      desktopSelectedSpaceLandingTimer = null;
+    }
+
+    desktopSelectedSpaceLandingTimer = window.setTimeout(() => {
+      desktopSelectedSpaceLandingTimer = null;
+      openDesktopSelectedSpaceLandingScreen(selectedLabel, pathSnapshot, run, options, item)
+        .catch(error => console.warn("Smart Element could not show the native Space landing screen.", error));
+    }, Number(options.delayMs || 80));
+  }
+
+  async function openDesktopSelectedSpaceLandingScreen(label, pathSnapshot, run, options = {}, sourceItem = null) {
+    const selectedLabel = normalizeSpaces(label || "");
+    if (!selectedLabel || run !== desktopSelectedSpaceLandingRun) return false;
+    if (!isDesktopHierarchyNativeModeUsable()) return false;
+
+    const selectedNode = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(desktopSelectedSpacePath);
+    const currentSelectedLabel = normalizeSpaces(selectedNode?.label || currentSpaceLabel || "").toLowerCase();
+    if (!currentSelectedLabel || currentSelectedLabel !== selectedLabel.toLowerCase()) return false;
+
+    // Keep this path deliberately simple. Older builds called the generic
+    // ensureCurrentSpaceOverview()/ensureCurrentSpaceSelectedInLeftPanel()
+    // machinery here. That machinery performs repeated path searches, keyboard
+    // Enter dispatches, extra overview clicks, native-pane expansion/repair, and
+    // verification loops. On first-level Spaces this could briefly select the
+    // previous DM/start page, open Element menus, then click the target Space
+    // again. For the landing screen we only need the vanilla gesture: click the
+    // target Space once to select it and click it once more to show its Space
+    // landing page.
+    beginDesktopMiddlePaneSpaceLandingHold(Number(options.holdMs || 1800));
+    reassertDesktopMiddlePaneOpenForSpaceLanding("desktop-space-landing-simple-before");
+    // Do not clear the promoted/native right-pane content before the native
+    // double-click has completed; otherwise the previously selected DM pane can
+    // become visible if the target Space click is still pending.
+    clearThreadPanelMarks();
+    currentChatLabel = "";
+    currentChatHref = "";
+    enforceNativeNavigationPanesOpen("desktop-space-landing-simple");
+    await ensureMiddlePaneExpanded({ allowStyleFallback: true });
+    reassertDesktopMiddlePaneOpenForSpaceLanding("desktop-space-landing-simple-after-middle");
+
+    const targetPath = selectableSpacePathFromSnapshot(pathSnapshot, selectedLabel);
+
+    // Subspaces can only receive the vanilla double-click if Element has their
+    // native rail row mounted.  Make only the required parent branch visible; do
+    // not run the generic hierarchy/overview refresh that walks through sibling
+    // subspaces and causes right-pane flicker.
+    await ensureNativeSpacePathVisibleForLanding(targetPath);
+
+    const resolveTarget = () => resolveNativeSpaceRailTargetForLanding(targetPath, selectedLabel, sourceItem);
+
+    let target = resolveTarget();
+    if (!(target?.button instanceof Element)) return false;
+
+    const clickNativeSpace = async (phase) => {
+      if (run !== desktopSelectedSpaceLandingRun) return false;
+      const activeNode = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(desktopSelectedSpacePath);
+      const activeLabel = normalizeSpaces(activeNode?.label || currentSpaceLabel || "").toLowerCase();
+      if (!activeLabel || activeLabel !== selectedLabel.toLowerCase()) return false;
+
+      target = resolveTarget();
+      if (!(target?.button instanceof Element)) return false;
+
+      // Dispatch exactly one vanilla-like click to the Space button itself. Use
+      // coordinates over the avatar/selection area, but keep event.target on the
+      // Space button so nearby DM/menu/expand controls cannot steal the click.
+      clickNativeSpaceButtonWithoutMenu(target.button);
+      await delay(phase === "select" ? 520 : 820);
+      reassertDesktopMiddlePaneOpenForSpaceLanding(`desktop-space-landing-simple-${phase}`);
+      return run === desktopSelectedSpaceLandingRun;
+    };
+
+    const isTopLevelNativeSpace = targetPath.length <= 1;
+
+    if (!await clickNativeSpace("select")) return false;
+
+    // The first top-level Space below Startseite/DM can occasionally lose the
+    // first native selection click while Element is closing its Startseite menu
+    // or reconciling the collapsed Space rail.  Verify selection for top-level
+    // Spaces and repeat only the selection click when Element did not mark the
+    // intended row active yet.  Subspaces are left on the normal path because
+    // their branch expansion already verifies the parent row.
+    if (isTopLevelNativeSpace) {
+      await delay(120);
+      target = resolveTarget();
+      if (target?.button instanceof Element && !isSelectedElement(target.button)) {
+        if (!await clickNativeSpace("select-retry")) return false;
+      }
+    }
+
+    if (!await clickNativeSpace("overview")) return false;
+
+    // Do not leave the previous DM/start page on the right when the vanilla
+    // second-click landing action was swallowed by Element.  This happens most
+    // often for the first top-level Space below the DM icon.  One extra overview
+    // click is safe because clicking an already-selected Space again keeps the
+    // Space landing page open; it does not traverse the hierarchy or refresh the
+    // cache.
+    if (isTopLevelNativeSpace) {
+      await delay(220);
+      if (!spaceOverviewTitleMatchesLabel(selectedLabel)) {
+        if (!await clickNativeSpace("overview-retry")) return false;
+        await delay(260);
+      }
+    }
+
+    if (run !== desktopSelectedSpaceLandingRun) return false;
+    // Only clear promoted chat content after the native two-click Space landing
+    // gesture has run. Clearing it before the native pane updates exposed the
+    // previously selected DM/start content on the right pane for the first
+    // top-level Space under the DM icon.
+    clearPromotedChatPane();
+    reassertDesktopMiddlePaneOpenForSpaceLanding("desktop-space-landing-simple-final");
+    scheduleDesktopMiddlePaneSpaceLandingReassertions(run, "desktop-space-landing-simple-final-reassert");
+    dispatchDesktopRoomContentWillShow("desktop-space-landing-simple", { label: selectedLabel });
+    dispatchDesktopRoomContentRefresh("desktop-space-landing-simple", { label: selectedLabel });
+    return Boolean(findSpaceOverviewPane()) || true;
+  }
+
+  function scheduleDesktopSelectedSpaceCacheRefreshIfNeeded(item, path, label, options = {}) {
     const selectedLabel = normalizeSpaces(label || item?.label || "");
     if (!selectedLabel || !isDesktopHierarchyNativeModeUsable()) return;
     if (desktopHierarchyRefreshInProgress) return;
@@ -2421,14 +3281,82 @@
       if (currentLabel && currentLabel !== selectedLabel.toLowerCase()) return;
 
       refreshOneDesktopSpaceCache(itemSnapshot, cloneSpacePathSegments(pathSnapshot), { reason: "desktop-cache-missing-or-stale" })
-        .then(result => {
+        .then(async result => {
           if (result?.chats?.length || result?.subspaces?.length) {
             renderDesktopHierarchyNativeUiSoon(0);
             flushPersistentState();
           }
+          // Do not auto-open any room after a Space cache refresh. The user stays
+          // on the selected Space's chat list until they explicitly open a room.
         })
         .catch(error => console.warn("Smart Element selected space cache refresh failed.", error));
     }, 1500);
+  }
+
+  function desktopMiddlePaneShouldHoldOpenForSpaceLanding() {
+    return desktopMiddlePaneHidden === true &&
+      desktopMiddlePaneTemporaryFromSpaceSelection === true &&
+      Date.now() < desktopMiddlePaneSpaceLandingHoldUntil;
+  }
+
+  function beginDesktopMiddlePaneSpaceLandingHold(durationMs = 4200) {
+    if (!(desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryFromSpaceSelection === true)) return false;
+    desktopMiddlePaneSpaceLandingHoldUntil = Math.max(
+      desktopMiddlePaneSpaceLandingHoldUntil || 0,
+      Date.now() + Math.max(600, Math.min(10000, Number(durationMs) || 4200))
+    );
+    desktopMiddlePaneTemporaryOpen = true;
+    syncDesktopPaneModeClasses();
+    return true;
+  }
+
+  function reassertDesktopMiddlePaneOpenForSpaceLanding(reason = "desktop-space-landing-keep-chatlist") {
+    if (!(desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryFromSpaceSelection === true)) return false;
+    desktopMiddlePaneTemporaryOpen = true;
+    syncDesktopPaneModeClasses();
+    enforceNativeNavigationPanesOpen(reason);
+    ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
+    renderDesktopMiddleChatNativeUi();
+    renderDesktopHierarchyNativeUiSoon(0);
+    return true;
+  }
+
+  function scheduleDesktopMiddlePaneSpaceLandingReassertions(run, reason = "desktop-space-landing-keep-chatlist") {
+    // Keep the chat list open, but avoid a long sequence of repair passes. Those
+    // passes can make Element repaint the right pane repeatedly after the correct
+    // Space landing view has already appeared.
+    for (const delayMs of [0, 120, 360]) {
+      window.setTimeout(() => {
+        if (run && run !== desktopSelectedSpaceLandingRun) return;
+        if (!desktopMiddlePaneShouldHoldOpenForSpaceLanding() && delayMs > 0) return;
+        reassertDesktopMiddlePaneOpenForSpaceLanding(`${reason}-${delayMs}`);
+      }, delayMs);
+    }
+  }
+
+  function ensureDesktopMiddlePaneVisibleForSpaceOpen() {
+    if (!isDesktopHierarchyNativeModeUsable()) return false;
+
+    // The middle/chat-list collapsed state is shared for Space chat lists and
+    // Direct Messages. Selecting either kind of node reveals the same middle
+    // pane when it was minimized, but only as a temporary floating pane. The
+    // pin/sticky button can then promote that temporary state to persistent,
+    // while selecting a chat collapses it again.
+    if (desktopMiddlePaneHidden === true) {
+      desktopMiddlePaneTemporaryOpen = true;
+      desktopMiddlePaneTemporaryFromSpaceSelection = true;
+      syncDesktopPaneModeClasses();
+    } else {
+      desktopMiddlePaneTemporaryOpen = false;
+      desktopMiddlePaneTemporaryFromSpaceSelection = false;
+      syncDesktopPaneModeClasses();
+    }
+
+    enforceNativeNavigationPanesOpen("desktop-middle-shared-open");
+    ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
+    renderDesktopMiddleChatNativeUi();
+    scheduleDesktopChatListUnreadImmediateUpdate(0, "desktop-middle-open-for-selection");
+    return true;
   }
 
   function dispatchDesktopRoomContentRefresh(reason, item = null) {
@@ -2530,6 +3458,11 @@
       clearTimeout(desktopSelectedSpaceCacheRefreshTimer);
       desktopSelectedSpaceCacheRefreshTimer = null;
     }
+    if (desktopSelectedSpaceLandingTimer) {
+      clearTimeout(desktopSelectedSpaceLandingTimer);
+      desktopSelectedSpaceLandingTimer = null;
+    }
+    desktopSelectedSpaceLandingRun += 1;
     if (!item) return;
     if (item.joined === false) {
       await joinDesktopUnjoinedItem(item);
@@ -3695,41 +4628,11 @@
   }
 
   function minimizeNativeLeftPaneForSpaceOverview(reason = "space-overview") {
-    // Element's Android portrait layout often keeps the native left room-list pane
-    // expanded after selecting a space. In that state the right-hand space
-    // hierarchy/detail pane is not rendered or remains stuck on the old chat.
-    // During explicit manual refreshes, hide only the native room-list pane while
-    // keeping the space rail and right/middle panes visible for parsing.
-    const selectors = [
-      "#left-panel",
-      "[data-testid='left-panel']",
-      "#left-panel .mx_LeftPanel",
-      "#left-panel .mx_LeftPanel_panel",
-      "#left-panel .mx_LeftPanel_outerWrapper",
-      "#left-panel .mx_LeftPanel_wrapper",
-      "#left-panel .mx_RoomListPanel",
-      "#left-panel [aria-label='Chatliste']",
-      "#left-panel [aria-label='Room list']"
-    ];
-
-    for (const element of queryNativeParseElements(selectors)) {
-      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
-      rememberNativeParseStyle(element);
-      element.dataset.mmlcNativeLeftMinimized = String(reason || "space-overview");
-      element.removeAttribute("inert");
-      element.style.display = "none";
-      element.style.visibility = "hidden";
-      element.style.opacity = "0";
-      element.style.pointerEvents = "none";
-      element.style.flex = "0 0 0px";
-      element.style.flexShrink = "1";
-      element.style.width = "0px";
-      element.style.minWidth = "0px";
-      element.style.maxWidth = "0px";
-      element.style.overflow = "hidden";
-    }
-
-    dispatchNativeParseResize();
+    // The extension depends on Element's native space rail and room-list pane
+    // staying mounted. Do not collapse the middle pane while opening or parsing
+    // a space overview; instead repair any collapse that Element applied.
+    enforceNativeNavigationPanesOpen(reason || "space-overview");
+    return false;
   }
 
 
@@ -3781,6 +4684,9 @@
     closeNativeThreadPanel();
     restoreChatViewportScrollLock();
     restoreNativeReturnLeftPaneMinimize();
+    restoreNativeSpacePanelCollapsedFallback();
+    restoreMobileChatNativePaneConstraints();
+    document.documentElement.classList.remove("mmlc-native-chat-panes-constrained");
     dismissVirtualKeyboard(reason || "return-to-selector");
     requestElementLayoutRefresh(reason);
     dispatchNativeParseResize();
@@ -3797,26 +4703,19 @@
           pathSnapshot
         });
         restoreSpacePathSnapshotIfDegraded(pathSnapshot, selectedLabel);
-
-        const clicked = clickNativeLeftPaneMinimizeButton(reason);
-        if (clicked) await delay(220);
+        enforceNativeNavigationPanesOpen(reason || "return-to-selector");
         return true;
       }, { reason, width: 1280 });
       if (run !== selectorReturnNativeLayoutRun) return false;
-    } else {
-      const clicked = clickNativeLeftPaneMinimizeButton(reason);
-      if (clicked) await delay(220);
     }
 
-    if (!isNativeLeftPaneMinimized()) {
-      forceNativeLeftPaneMinimizedForSelectorReturn(reason);
-    }
-
+    enforceNativeNavigationPanesOpen(reason || "return-to-selector");
     restoreSpacePathSnapshotIfDegraded(pathSnapshot, selectedLabel);
     clearStaleNativeParseLayout();
     dispatchNativeParseResize();
     return true;
   }
+
 
   async function clickCurrentSpaceButtonInNativeSpaceRailTwice(label = currentSpaceLabel, reason = "return-to-selector", run = selectorReturnNativeLayoutRun, options = {}) {
     const clean = normalizeSpaces(label || currentSpaceLabel || "");
@@ -3963,35 +4862,10 @@
   }
 
   function forceNativeLeftPaneMinimizedForSelectorReturn(reason = "return-to-selector") {
-    const selectors = [
-      "#left-panel",
-      "[data-testid='left-panel']",
-      "#left-panel .mx_LeftPanel_panel",
-      "#left-panel .mx_LeftPanel_outerWrapper",
-      "#left-panel .mx_LeftPanel_wrapper",
-      "#left-panel .mx_LeftPanel",
-      "#left-panel .mx_LeftPanel_roomListContainer",
-      "#left-panel .mx_RoomListPanel",
-      "#left-panel [aria-label='Chatliste']",
-      "#left-panel [aria-label='Room list']"
-    ];
-
-    for (const element of queryNativeParseElements(selectors)) {
-      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
-      rememberNativeReturnLeftPaneStyle(element);
-      element.dataset.mmlcNativeReturnLeftMinimized = String(reason || "return-to-selector");
-      element.style.display = "none";
-      element.style.visibility = "hidden";
-      element.style.opacity = "0";
-      element.style.pointerEvents = "none";
-      element.style.flex = "0 0 0px";
-      element.style.flexShrink = "1";
-      element.style.width = "0px";
-      element.style.minWidth = "0px";
-      element.style.maxWidth = "0px";
-      element.style.overflow = "hidden";
-    }
+    enforceNativeNavigationPanesOpen(reason || "return-to-selector");
+    return false;
   }
+
 
   function restoreNativeReturnLeftPaneMinimize() {
     for (const [element, styles] of nativeReturnLeftPaneForcedStyles.entries()) {
@@ -4199,58 +5073,29 @@
   }
 
   function constrainElementLeftPanelForMobileChat(reason = "mobile-chat") {
-    const panel = document.querySelector("#left-panel, [data-testid='left-panel']");
-    if (!(panel instanceof HTMLElement) || panel.closest(OWNED_SELECTOR)) return false;
-
-    rememberMobileChatNativePaneStyle(panel);
-    panel.dataset.mmlcMobileChatPaneConstrained = String(reason || "mobile-chat");
-    panel.style.flex = "0 1 min(38vw, 420px)";
-    panel.style.flexGrow = "0";
-    panel.style.flexShrink = "1";
-    panel.style.flexBasis = "min(38vw, 420px)";
-    panel.style.width = "min(38vw, 420px)";
-    panel.style.minWidth = "0px";
-    panel.style.maxWidth = "38vw";
-    panel.style.overflow = "hidden";
-    panel.style.overflowX = "hidden";
-    panel.style.overflowY = "auto";
-
-    for (const child of panel.querySelectorAll(":scope > *, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_RoomListPanel")) {
-      if (!(child instanceof HTMLElement)) continue;
-      rememberMobileChatNativePaneStyle(child);
-      child.dataset.mmlcMobileChatPaneConstrained = String(reason || "mobile-chat");
-      child.style.maxWidth = "100%";
-      child.style.overflowX = "hidden";
-    }
-    return true;
+    // Keep the room-list pane open even in mobile chat/thread mode. Element may
+    // otherwise set it to inert with a 0px flex basis, which breaks subsequent
+    // room and space operations.
+    return forceElementLeftPanelOpen(reason || "mobile-chat");
   }
 
   function constrainNativeSpacePanelForMobileChat(reason = "mobile-chat") {
-    const panel = nativeSpacePanelElement();
-    if (!(panel instanceof HTMLElement)) return false;
-
-    rememberMobileChatNativePaneStyle(panel);
-    panel.dataset.mmlcMobileChatPaneConstrained = String(reason || "mobile-chat");
-    panel.style.flex = "0 0 48px";
-    panel.style.flexGrow = "0";
-    panel.style.flexShrink = "0";
-    panel.style.flexBasis = "48px";
-    panel.style.width = "48px";
-    panel.style.minWidth = "48px";
-    panel.style.maxWidth = "48px";
-    panel.style.overflow = "hidden";
-    panel.classList.add("collapsed");
-    return true;
+    // Keep the native space rail expanded rather than reducing it to an icon
+    // strip; the Smart Element hierarchy relies on the full native pane staying
+    // present and interactive.
+    return forceNativeSpacePanelOpen(reason || "mobile-chat");
   }
+
 
   function enforceMobileChatNativePaneConstraints(reason = "mobile-chat") {
     if (!isMobileLayoutEnabled()) return false;
     if (currentMode !== "chat" && currentMode !== "thread") return false;
 
-    const spaceConstrained = constrainNativeSpacePanelForMobileChat(reason);
-    const middleConstrained = constrainElementLeftPanelForMobileChat(reason);
-    if (spaceConstrained || middleConstrained) {
-      document.documentElement.classList.add("mmlc-native-chat-panes-constrained");
+    const spaceOpen = constrainNativeSpacePanelForMobileChat(reason);
+    const middleOpen = constrainElementLeftPanelForMobileChat(reason);
+    if (spaceOpen || middleOpen) {
+      document.documentElement.classList.remove("mmlc-native-chat-panes-constrained");
+      document.documentElement.classList.add("mmlc-native-navigation-panes-open");
       requestElementLayoutRefresh(reason);
       return true;
     }
@@ -4258,31 +5103,12 @@
   }
 
   async function collapseNativeSpacePanelBeforeDirectChatOpen(reason = "direct-message-open") {
-    const panel = nativeSpacePanelElement();
-    if (!(panel instanceof HTMLElement)) return false;
-    if (nativeSpacePanelIsCollapsed(panel)) return true;
-
-    const button = findNativeSpacePanelCollapseButton();
-    if (button instanceof Element) {
-      try {
-        button.dataset.mmlcDmSpacePanelCollapseClicked = String(reason || "direct-message-open");
-        clickElement(button);
-      } catch {}
-      await delay(180);
-      if (nativeSpacePanelIsCollapsed(panel)) {
-        dispatchNativeParseResize();
-        return true;
-      }
-    }
-
-    // Last resort: only squeeze the SpacePanel itself. Do not touch #left-panel,
-    // the room view, the timeline, or media nodes. This keeps the v44 image
-    // loading behaviour intact while still freeing width for the native chat pane.
-    forceNativeSpacePanelCollapsedFallback(reason);
-    dispatchNativeParseResize();
-    await nextAnimationFrame();
-    return true;
+    enforceNativeNavigationPanesOpen(reason || "direct-message-open");
+    await ensureNativeSpacePanelExpandedForSpaceRefresh();
+    await ensureMiddlePaneExpanded({ allowStyleFallback: true });
+    return false;
   }
+
 
   async function waitForNativeRightSpaceOverviewAfterLeftMinimize(label = currentSpaceLabel, maxWaitMs = 1800) {
     const clean = normalizeSpaces(label || currentSpaceLabel || "").toLowerCase();
@@ -4299,6 +5125,171 @@
     }
 
     return Boolean(findSpaceOverviewPane());
+  }
+
+  function nativeNavigationPaneOpenWidth(kind = "middle") {
+    const viewportWidth = Math.max(320, Number(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0));
+    if (kind === "space") return Math.max(172, Math.min(260, Math.round(viewportWidth * 0.28)));
+    return Math.max(260, Math.min(420, Math.round(viewportWidth * 0.42)));
+  }
+
+  function forceNativeNavigationContainerOpen(reason = "keep-panes-open") {
+    const containers = queryNativeParseElements([
+      "#matrixchat",
+      ".mx_MatrixChat_wrapper",
+      ".mx_MatrixChat",
+      "[data-group='true']"
+    ]);
+
+    for (const element of containers) {
+      if (!(element instanceof HTMLElement) || element.closest(OWNED_SELECTOR)) continue;
+      rememberMobileChatNativePaneStyle(element);
+      element.dataset.mmlcNavigationPanesOpen = String(reason || "keep-panes-open");
+      element.removeAttribute("inert");
+      element.style.display = "flex";
+      element.style.visibility = "visible";
+      element.style.opacity = "1";
+      element.style.pointerEvents = "auto";
+      element.style.flexFlow = element.matches("[data-group='true']") ? "row" : element.style.flexFlow;
+      element.style.overflow = element.id === "matrixchat" ? "hidden" : "visible";
+    }
+  }
+
+  function forceNativeSpacePanelOpen(reason = "keep-panes-open") {
+    const panel = nativeSpacePanelElement();
+    if (!(panel instanceof HTMLElement)) return false;
+
+    rememberMobileChatNativePaneStyle(panel);
+    panel.dataset.mmlcNavigationPanesOpen = String(reason || "keep-panes-open");
+    panel.removeAttribute("inert");
+    panel.classList.remove("collapsed");
+    panel.style.display = "flex";
+    panel.style.visibility = "visible";
+    panel.style.opacity = "1";
+    panel.style.pointerEvents = "auto";
+    const desktopMode = isDesktopHierarchyNativeModeUsable() ? normalizeDesktopSpacePaneMode(desktopSpacePaneMode) : "expanded";
+    const width = desktopMode === "hidden"
+      ? 0
+      : desktopMode === "icons"
+        ? 104
+        : nativeNavigationPaneOpenWidth("space");
+    panel.style.flex = `0 0 ${width}px`;
+    panel.style.flexGrow = "0";
+    panel.style.flexShrink = "0";
+    panel.style.flexBasis = `${width}px`;
+    panel.style.width = `${width}px`;
+    panel.style.minWidth = desktopMode === "hidden" ? "0px" : desktopMode === "icons" ? "104px" : "160px";
+    panel.style.maxWidth = desktopMode === "hidden" ? "0px" : desktopMode === "icons" ? "104px" : "300px";
+    panel.style.margin = desktopMode === "hidden" ? "0" : panel.style.margin;
+    panel.style.padding = desktopMode === "hidden" ? "0" : panel.style.padding;
+    panel.style.overflow = "visible";
+
+    if (desktopMode !== "hidden") {
+      for (const child of panel.querySelectorAll(":scope > *, .mx_SpaceTreeLevel, .mx_SpaceButton, [class*='SpaceButton']")) {
+        if (!(child instanceof HTMLElement) || child.closest(OWNED_SELECTOR)) continue;
+        rememberMobileChatNativePaneStyle(child);
+        child.removeAttribute("inert");
+        child.style.visibility = "visible";
+        child.style.opacity = "1";
+        child.style.pointerEvents = "auto";
+      }
+    }
+
+    return true;
+  }
+
+  function forceElementLeftPanelOpen(reason = "keep-panes-open") {
+    const panel = findMiddlePanePanel();
+    if (!(panel instanceof HTMLElement) || panel.closest(OWNED_SELECTOR)) return false;
+
+    const smartMiddleIntentionallyHidden = !nativeNavigationPanesMustRemainOpen()
+      && isDesktopHierarchyNativeModeUsable()
+      && desktopMiddlePaneHidden === true
+      && !desktopMiddleFloatingPaneIsOpen();
+    const width = smartMiddleIntentionallyHidden ? 48 : nativeNavigationPaneOpenWidth("middle");
+    rememberMobileChatNativePaneStyle(panel);
+    panel.dataset.mmlcNavigationPanesOpen = String(reason || "keep-panes-open");
+    panel.removeAttribute("inert");
+    panel.removeAttribute("data-mmlc-mobile-chat-pane-constrained");
+    panel.removeAttribute("data-mmlc-native-return-left-minimized");
+    panel.style.display = "flex";
+    panel.style.visibility = "visible";
+    panel.style.opacity = "1";
+    panel.style.pointerEvents = "auto";
+    panel.style.flex = `0 0 ${width}px`;
+    panel.style.flexGrow = "0";
+    panel.style.flexShrink = "0";
+    panel.style.flexBasis = `${width}px`;
+    panel.style.width = `${width}px`;
+    panel.style.minWidth = smartMiddleIntentionallyHidden ? "48px" : "240px";
+    panel.style.maxWidth = smartMiddleIntentionallyHidden ? "48px" : "460px";
+    panel.style.overflow = smartMiddleIntentionallyHidden ? "hidden" : "visible";
+    panel.style.overflowX = smartMiddleIntentionallyHidden ? "hidden" : "visible";
+    panel.style.overflowY = smartMiddleIntentionallyHidden ? "hidden" : "auto";
+
+    for (const child of panel.querySelectorAll(":scope > *, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel")) {
+      if (!(child instanceof HTMLElement) || child.closest(OWNED_SELECTOR)) continue;
+      rememberMobileChatNativePaneStyle(child);
+      child.removeAttribute("inert");
+      child.style.display = child.style.display === "none" ? "flex" : child.style.display;
+      child.style.visibility = "visible";
+      child.style.opacity = "1";
+      child.style.pointerEvents = "auto";
+      child.style.maxWidth = smartMiddleIntentionallyHidden ? "48px" : "100%";
+      child.style.overflowX = smartMiddleIntentionallyHidden ? "hidden" : "visible";
+    }
+
+    return true;
+  }
+
+  function enforceNativeNavigationPanesOpen(reason = "keep-panes-open") {
+    if (!nativeNavigationPanesShouldBeRepaired()) return false;
+
+    if (nativeNavigationPanesMustRemainOpen()) {
+      if (desktopSpacePaneMode === "hidden") desktopSpacePaneMode = "icons";
+      desktopSpacePaneTemporaryOpen = false;
+      desktopSpaceFloatingLabelsExpanded = false;
+      desktopMiddlePaneHidden = false;
+      desktopMiddlePaneTemporaryOpen = false;
+    }
+
+    restoreNativeSpacePanelCollapsedFallback();
+    restoreNativeReturnLeftPaneMinimize();
+    document.documentElement.classList.remove("mmlc-native-chat-panes-constrained");
+    document.documentElement.classList.add("mmlc-native-navigation-panes-open");
+
+    forceNativeNavigationContainerOpen(reason);
+
+    const panel = nativeSpacePanelElement();
+    let clickedExpand = false;
+    if (nativeSpacePanelIsCollapsed(panel)) {
+      const button = findNativeSpacePanelExpandButton(panel);
+      if (button instanceof Element) {
+        try { button.dataset.mmlcSpacePanelExpandClicked = String(reason || "keep-panes-open"); } catch {}
+        clickElement(button);
+        clickedExpand = true;
+      }
+    }
+
+    const spaceOpen = forceNativeSpacePanelOpen(reason);
+    const middleOpen = forceElementLeftPanelOpen(reason);
+
+    if (middleOpen && desktopMiddlePaneHidden !== true) {
+      ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
+    }
+
+    dispatchNativeParseResize();
+    if (clickedExpand) {
+      setTimeout(() => {
+        forceNativeSpacePanelOpen(reason);
+        forceElementLeftPanelOpen(reason);
+        dispatchNativeParseResize();
+        scheduleDesktopMiddleEdgePositionUpdates([0, 80, 240]);
+      }, 220);
+    }
+
+    scheduleDesktopMiddleEdgePositionUpdates([0, 80, 240, 600]);
+    return Boolean(spaceOpen || middleOpen || clickedExpand);
   }
 
   function queryNativeParseElements(selectors) {
@@ -5214,6 +6205,11 @@
       clearTimeout(desktopSelectedSpaceCacheRefreshTimer);
       desktopSelectedSpaceCacheRefreshTimer = null;
     }
+    if (desktopSelectedSpaceLandingTimer) {
+      clearTimeout(desktopSelectedSpaceLandingTimer);
+      desktopSelectedSpaceLandingTimer = null;
+    }
+    desktopSelectedSpaceLandingRun += 1;
     selectorPeriodicBackgroundRefreshRun += 1;
     chatListBackgroundRefreshRun += 1;
     homeChatListBackgroundRefreshRun += 1;
@@ -6717,6 +7713,31 @@
     return sumUnreadStates(states);
   }
 
+  function desktopTotalAllSpacesUnreadState() {
+    const topLevelStates = [];
+    const nodes = flattenDesktopSpaceTree();
+    for (const node of nodes) {
+      if (!node || node.type === "start") continue;
+      if (!desktopShowUnjoinedSpaces && node.joined === false) continue;
+      const level = Number.isFinite(Number(node.level)) ? Number(node.level) : 0;
+      if (level !== 0) continue;
+      const label = normalizeSpaces(node.label || "");
+      if (!label) continue;
+      const path = Array.isArray(node.path) && node.path.length
+        ? pathSegmentsFromSpacePath(node.path)
+        : fallbackSpacePath(label);
+      topLevelStates.push(desktopBranchTotalUnreadForSpacePath(path, label, node.unread));
+    }
+
+    const totalSpacesAndDm = sumUnreadStates([startPageUnreadState(), ...topLevelStates]);
+    if (totalSpacesAndDm.hasUnread || totalSpacesAndDm.count || totalSpacesAndDm.highlightCount) return totalSpacesAndDm;
+
+    // If there are only partial caches, fall back to the currently rendered rail
+    // instead of showing no badge. This remains a menu-badge-only fallback and is
+    // never moved to the chat-list restore button.
+    return desktopTotalVisibleSpaceUnreadState();
+  }
+
   function desktopCurrentChatListUnreadState() {
     const context = desktopSelectedChatListContext();
     if (!context?.listKey) return normalizeUnreadState(null);
@@ -6730,19 +7751,11 @@
   }
 
   function desktopMinimizedSpaceMenuUnreadState() {
-    const totalUnread = desktopTotalVisibleSpaceUnreadState();
-    const currentChatListUnread = desktopCurrentChatListUnreadState();
-    const unknownTotalFallback = !totalUnread.countKnown && totalUnread.hasUnread ? totalUnread : null;
-    return subtractUnreadStates(totalUnread, currentChatListUnread, unknownTotalFallback);
-  }
-
-  function desktopMiddleRestoreReplacesMinimizedSpaceMenu() {
-    return (
-      normalizeDesktopSpacePaneMode(desktopSpacePaneMode) === "hidden" &&
-      desktopMiddlePaneHidden === true &&
-      !desktopSpaceFloatingPaneIsOpen() &&
-      !desktopMiddleFloatingPaneIsOpen()
-    );
+    // The minimized Space-pane menu button represents the entire Space/DM
+    // navigation entry point.  It must therefore show the full unread total,
+    // independent of whether some of those unread messages are also visible on
+    // the currently selected chat-list restore button.
+    return desktopTotalAllSpacesUnreadState();
   }
 
   function makeDesktopMinimizedSpaceUnreadBadge() {
@@ -6752,27 +7765,45 @@
     return badge;
   }
 
+  function makeDesktopMinimizedChatUnreadBadge() {
+    if (desktopMiddlePaneHidden !== true) return null;
+    const badge = makeUnreadBadge(desktopCurrentChatListUnreadState(), "mmlc-desktop-unread-badge");
+    if (badge) badge.classList.add("mmlc-desktop-minimized-chat-unread-badge");
+    return badge;
+  }
+
   function appendDesktopMinimizedSpaceUnreadBadge(container) {
     if (!(container instanceof Element)) return;
     const badge = makeDesktopMinimizedSpaceUnreadBadge();
     if (badge) container.appendChild(badge);
   }
 
-  function updateDesktopMinimizedSpaceUnreadBadgeElement(container, shouldShow) {
+  function appendDesktopMinimizedChatUnreadBadge(container) {
+    if (!(container instanceof Element)) return;
+    const badge = makeDesktopMinimizedChatUnreadBadge();
+    if (badge) container.appendChild(badge);
+  }
+
+  function updateDesktopMinimizedUnreadBadgeElement(container, shouldShow, makeBadge, badgeClassName) {
     if (!(container instanceof Element)) return false;
-    const oldBadge = Array.from(container.children).find(child =>
-      child instanceof Element && child.classList.contains("mmlc-desktop-minimized-space-unread-badge")
+    const minimizedBadgeClasses = [
+      "mmlc-desktop-minimized-space-unread-badge",
+      "mmlc-desktop-minimized-chat-unread-badge"
+    ];
+    const oldBadges = Array.from(container.children).filter(child =>
+      child instanceof Element && minimizedBadgeClasses.some(className => child.classList.contains(className))
     );
-    const nextBadge = shouldShow ? makeDesktopMinimizedSpaceUnreadBadge() : null;
-    const oldSignature = oldBadge instanceof Element
-      ? normalizeSpaces(`${oldBadge.textContent || ""}|${oldBadge.className || ""}|${oldBadge.getAttribute("aria-label") || ""}`)
+    const matchingOldBadge = oldBadges.find(child => child instanceof Element && child.classList.contains(badgeClassName));
+    const nextBadge = shouldShow && typeof makeBadge === "function" ? makeBadge() : null;
+    const oldSignature = matchingOldBadge instanceof Element
+      ? normalizeSpaces(`${matchingOldBadge.textContent || ""}|${matchingOldBadge.className || ""}|${matchingOldBadge.getAttribute("aria-label") || ""}`)
       : "";
     const nextSignature = nextBadge instanceof Element
       ? normalizeSpaces(`${nextBadge.textContent || ""}|${nextBadge.className || ""}|${nextBadge.getAttribute("aria-label") || ""}`)
       : "";
 
-    if (oldSignature === nextSignature) return false;
-    oldBadge?.remove();
+    if (oldBadges.length === 1 && oldSignature === nextSignature) return false;
+    for (const badge of oldBadges) badge.remove();
     if (nextBadge) container.appendChild(nextBadge);
     return true;
   }
@@ -6780,12 +7811,21 @@
   function updateDesktopMinimizedSpaceUnreadBadgesInPlace() {
     let changed = false;
     const spaceHidden = normalizeDesktopSpacePaneMode(desktopSpacePaneMode) === "hidden";
-    const spaceMenuVisible = spaceHidden && !desktopSpaceFloatingPaneIsOpen() && !desktopMiddleRestoreReplacesMinimizedSpaceMenu();
     const spaceMenuButton = document.querySelector("#mmlc-desktop-space-list-host > .mmlc-desktop-space-expand-toggle");
-    changed = updateDesktopMinimizedSpaceUnreadBadgeElement(spaceMenuButton, spaceMenuVisible) || changed;
+    changed = updateDesktopMinimizedUnreadBadgeElement(
+      spaceMenuButton,
+      spaceHidden,
+      makeDesktopMinimizedSpaceUnreadBadge,
+      "mmlc-desktop-minimized-space-unread-badge"
+    ) || changed;
 
     const middleRestoreButton = document.getElementById("mmlc-desktop-middle-restore");
-    changed = updateDesktopMinimizedSpaceUnreadBadgeElement(middleRestoreButton, desktopMiddleRestoreReplacesMinimizedSpaceMenu()) || changed;
+    changed = updateDesktopMinimizedUnreadBadgeElement(
+      middleRestoreButton,
+      desktopMiddlePaneHidden === true && !desktopMiddleFloatingPaneIsOpen(),
+      makeDesktopMinimizedChatUnreadBadge,
+      "mmlc-desktop-minimized-chat-unread-badge"
+    ) || changed;
     return changed;
   }
 
@@ -9451,6 +10491,9 @@
 
     if (mode === "spaces" || mode === "rooms") {
       ensureMiddlePaneExpandedSoon();
+      enforceNativeNavigationPanesOpen(`set-mode-${mode}`);
+    } else if (mode === "chat" || mode === "thread") {
+      enforceNativeNavigationPanesOpen(`set-mode-${mode}`);
     }
 
     if (mode === "thread") {
@@ -9917,6 +10960,316 @@
       .filter(Boolean);
   }
 
+
+  function nativeSpaceRailButtonForElement(element, expectedLabel = "") {
+    if (!(element instanceof Element)) return null;
+
+    const expected = normalizeSpaces(expectedLabel || "").toLowerCase();
+    const row = getSpaceTreeRow(element) || element;
+    const candidates = uniqueElements([
+      element.matches?.(".mx_SpaceButton, [class*='SpaceButton']") ? element : null,
+      element.closest?.(".mx_SpaceButton, [class*='SpaceButton']"),
+      row.querySelector?.(".mx_SpaceButton[aria-label], [class*='SpaceButton'][aria-label]"),
+      row.querySelector?.(".mx_SpaceButton, [class*='SpaceButton']")
+    ]).filter(candidate => candidate instanceof Element);
+
+    return candidates.find(candidate => {
+      if (!(candidate instanceof Element) || candidate.closest(OWNED_SELECTOR)) return false;
+      if (looksLikeStartControl(candidate) || looksLikeSpaceUtilityControl(candidate)) return false;
+      const label = normalizeSpaces(getSpaceControlLabel(candidate) || getElementLabel(candidate) || candidate.getAttribute("aria-label") || "").toLowerCase();
+      if (expected && label !== expected) return false;
+      if (/^(startseite|home|direct messages|direktnachrichten)$/.test(label)) return false;
+      return true;
+    }) || null;
+  }
+
+  async function ensureNativeSpacePathVisibleForLanding(targetPath) {
+    const path = selectableSpacePathFromSnapshot(targetPath);
+    if (path.length <= 1) return true;
+
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const next = findBestNativeSpaceControlForPath(path.slice(0, index + 2), path[index + 1]?.label);
+      if (next?.element instanceof Element && isRendered(next.element)) continue;
+
+      const parent = findBestNativeSpaceControlForPath(path.slice(0, index + 1), path[index]?.label) || findSpaceItemForPathPrefix(path, index);
+      const parentElement = parent?.element instanceof Element ? parent.element : parent;
+      if (!(parentElement instanceof Element)) continue;
+
+      await expandSelectedSpaceSubtree(parentElement);
+      await delay(180);
+    }
+
+    return true;
+  }
+
+  function findBestNativeSpaceControlForPath(targetPath, selectedLabel = "") {
+    const path = selectableSpacePathFromSnapshot(targetPath, selectedLabel);
+    const expectedLabels = path
+      .map(segment => normalizeSpaces(segment?.label || "").toLowerCase())
+      .filter(Boolean);
+    const clean = normalizeSpaces(selectedLabel || expectedLabels[expectedLabels.length - 1] || "").toLowerCase();
+    if (!clean) return null;
+
+    const controls = collectSpaceControls().filter(item => {
+      if (!(item?.element instanceof Element)) return false;
+      if (looksLikeStartControl(item.element) || looksLikeSpaceUtilityControl(item.element)) return false;
+      return normalizeSpaces(item.label || "").toLowerCase() === clean;
+    });
+    if (!controls.length) return null;
+
+    const scored = controls.map(item => {
+      const labels = spaceItemLogicalPathLabels(item, controls);
+      let score = 0;
+      if (isRendered(item.element)) score += 100;
+      if (labels.length === expectedLabels.length && expectedLabels.every((part, i) => labels[i] === part)) score += 1200;
+      if (labels.length >= expectedLabels.length) {
+        const tail = labels.slice(labels.length - expectedLabels.length);
+        if (expectedLabels.every((part, i) => tail[i] === part)) score += 850;
+      }
+      if ((item.level || 1) === expectedLabels.length) score += 80;
+      if (isSelectedElement(item.element)) score += 30;
+      score -= Math.abs((item.level || 1) - expectedLabels.length) * 18;
+      return { item, score };
+    }).sort((a, b) => b.score - a.score || (a.item.top || 0) - (b.item.top || 0));
+
+    return scored[0]?.item || null;
+  }
+
+  function resolveNativeSpaceRailTargetForLanding(targetPath, selectedLabel, sourceItem = null) {
+    const clean = normalizeSpaces(selectedLabel || "");
+    const path = selectableSpacePathFromSnapshot(targetPath, clean);
+    const sourcePath = Array.isArray(sourceItem?.path) && sourceItem.path.length
+      ? selectableSpacePathFromSnapshot(sourceItem.path, clean)
+      : path;
+    const best = findBestNativeSpaceControlForPath(sourcePath, clean) || findBestNativeSpaceControlForPath(path, clean);
+    const byPath = best || (path.length ? findSpaceItemForPathPrefix(path, path.length - 1) : null);
+    const item = byPath || findSpaceItemForCurrentPathOrLabel(clean) || findSpaceItemByLabel(clean);
+    const button = nativeSpaceRailButtonForElement(item?.element, clean);
+
+    if (button instanceof Element) {
+      return { item, button };
+    }
+
+    // Last resort: search only true SpacePanel buttons by exact aria/visible
+    // label. This excludes the Startseite/DM control and native menu buttons, so
+    // the first top-level Space under DM cannot accidentally open the DM pane.
+    const expected = clean.toLowerCase();
+    const buttons = uniqueElements(Array.from(document.querySelectorAll([
+      `${SPACE_PANEL_SELECTOR} .mx_SpaceButton[aria-label]`,
+      `${SPACE_PANEL_SELECTOR} [class*='SpaceButton'][aria-label]`,
+      `${SPACE_PANEL_SELECTOR} [role='treeitem'] .mx_SpaceButton`,
+      `${SPACE_PANEL_SELECTOR} [role='treeitem'] [class*='SpaceButton']`
+    ].join(", ")))).filter(candidate => candidate instanceof Element && !candidate.closest(OWNED_SELECTOR));
+
+    const exact = buttons.find(candidate => {
+      if (looksLikeStartControl(candidate) || looksLikeSpaceUtilityControl(candidate)) return false;
+      if (candidate.matches?.("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']")) return false;
+      if (candidate.closest?.("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']")) return false;
+      const label = normalizeSpaces(getSpaceControlLabel(candidate) || getElementLabel(candidate) || candidate.getAttribute("aria-label") || "").toLowerCase();
+      return label && label === expected && !/^(startseite|home|direct messages|direktnachrichten)$/.test(label);
+    });
+
+    return exact instanceof Element ? { item, button: exact } : null;
+  }
+
+  function clickNativeSpaceButtonWithoutMenu(button) {
+    const target = button instanceof Element ? button : null;
+    if (!(target instanceof Element)) return;
+    if (!isTextEntryElement(target)) blurActiveTextEntry();
+
+    try {
+      target.scrollIntoView({ block: "nearest", inline: "nearest" });
+    } catch {}
+
+    const activationTarget = nativeSpaceButtonSafeActivationTarget(target);
+    const hitTarget = activationTarget instanceof Element ? activationTarget : target;
+
+    const rect = hitTarget.getBoundingClientRect();
+    const buttonRect = target.getBoundingClientRect();
+    const fallbackX = buttonRect.left + Math.max(8, Math.min(28, buttonRect.width / 4 || 18));
+    const fallbackY = buttonRect.top + Math.max(8, Math.min(buttonRect.height - 8, buttonRect.height / 2 || 18));
+    const clientX = Number.isFinite(rect.left) && rect.width > 0 ? rect.left + rect.width / 2 : fallbackX;
+    const clientY = Number.isFinite(rect.top) && rect.height > 0 ? rect.top + rect.height / 2 : fallbackY;
+
+    // Fire the one synthetic click from the avatar/selection area, not from the
+    // full Space button.  Element places menu and expand controls inside the same
+    // Space row; target.click() on the full row can be interpreted as a row-menu
+    // action in some narrow/collapsed layouts.  A bubbling click from the safe
+    // child reproduces the user's normal click on the Space icon/name area while
+    // staying away from Startseite/Space option buttons.
+    dispatchPointerLike(hitTarget, "pointerdown", clientX, clientY);
+    dispatchMouseLike(hitTarget, "mousedown", clientX, clientY);
+    dispatchPointerLike(hitTarget, "pointerup", clientX, clientY);
+    dispatchMouseLike(hitTarget, "mouseup", clientX, clientY);
+    dispatchMouseLike(hitTarget, "click", clientX, clientY);
+
+    dismissVirtualKeyboard("native-space-button-click");
+    scheduleCloseNativeSpaceMenusOpenedBySyntheticClick();
+  }
+
+  function nativeSpaceButtonSafeActivationTarget(button) {
+    const target = button instanceof Element ? button : null;
+    if (!(target instanceof Element)) return null;
+
+    const safeSelectors = [
+      ".mx_SpaceButton_selectionWrapper",
+      "[class*='SpaceButton_selectionWrapper']",
+      ".mx_SpaceButton_avatarWrapper",
+      "[class*='SpaceButton_avatarWrapper']",
+      ".mx_BaseAvatar",
+      "[class*='BaseAvatar']",
+      "[class*='avatar']",
+      "img"
+    ];
+
+    for (const selector of safeSelectors) {
+      const candidate = target.querySelector?.(selector);
+      if (!(candidate instanceof Element) || !isRendered(candidate)) continue;
+      if (candidate.closest?.("[class*='menuButton'], [aria-haspopup='true'], [class*='toggleCollapse']")) continue;
+      return candidate;
+    }
+
+    return target;
+  }
+
+  function scheduleCloseNativeSpaceMenusOpenedBySyntheticClick() {
+    // Do not use Escape here: in Smart Element's floating-pane mode Escape also
+    // closes the temporary chat-list pane.  Instead, imitate a normal user
+    // cleanup click on an empty part of the message pane after each synthetic
+    // native Space click.  The cleanup is intentionally delayed a little: the
+    // first top-level Space directly below Startseite/DM is especially sensitive
+    // to an immediate outside click while Element is still committing the Space
+    // selection, which can leave the previous DM/start page visible on the
+    // right.  Delayed outside clicks still close Radix/Element popovers but no
+    // longer race the Space landing update.
+    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-120"), 120);
+    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-280"), 280);
+    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-520"), 520);
+    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-880"), 880);
+  }
+
+  function closeNativeSpaceMenusOpenedBySyntheticClick() {
+    // Kept as a compatibility wrapper for older call sites; intentionally closes
+    // native popovers by outside-clicking the right pane rather than by Escape.
+    clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-menu-close-wrapper");
+  }
+
+  function clickOpenMessageAreaToDismissNativeSpaceMenus(reason = "native-space-menu-outside-click") {
+    const point = openMessageAreaClickPointForNativeMenuDismissal();
+    if (!point) return false;
+
+    let target = document.elementFromPoint(point.x, point.y);
+    if (!(target instanceof Element) || target.closest(OWNED_SELECTOR)) {
+      target = point.element instanceof Element ? point.element : document.body;
+    }
+
+    if (target instanceof Element && target.closest?.("#left-panel, [data-testid='left-panel'], .mx_SpacePanel, [class*='SpacePanel'], #mmlc-desktop-space-list-host, #mmlc-desktop-chat-list-host")) {
+      target = point.element instanceof Element ? point.element : document.body;
+    }
+
+    if (!(target instanceof Element)) target = document.body;
+
+    try {
+      target.dispatchEvent(new PointerEvent("pointerdown", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+        button: 0,
+        buttons: 1,
+        clientX: point.x,
+        clientY: point.y
+      }));
+    } catch {
+      dispatchMouseLike(target, "mousedown", point.x, point.y);
+    }
+
+    dispatchMouseLike(target, "mousedown", point.x, point.y);
+
+    try {
+      target.dispatchEvent(new PointerEvent("pointerup", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        pointerId: 1,
+        pointerType: "mouse",
+        isPrimary: true,
+        button: 0,
+        buttons: 0,
+        clientX: point.x,
+        clientY: point.y
+      }));
+    } catch {
+      dispatchMouseLike(target, "mouseup", point.x, point.y);
+    }
+
+    dispatchMouseLike(target, "mouseup", point.x, point.y);
+    dispatchMouseLike(target, "click", point.x, point.y);
+    return true;
+  }
+
+  function openMessageAreaClickPointForNativeMenuDismissal() {
+    const viewportWidth = Math.max(1, window.innerWidth || document.documentElement.clientWidth || 1);
+    const viewportHeight = Math.max(1, window.innerHeight || document.documentElement.clientHeight || 1);
+    const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
+    const spacePanel = document.querySelector(SPACE_PANEL_SELECTOR);
+    const leftBoundary = Math.max(
+      0,
+      leftPanel instanceof Element ? leftPanel.getBoundingClientRect().right || 0 : 0,
+      spacePanel instanceof Element ? spacePanel.getBoundingClientRect().right || 0 : 0
+    );
+
+    const candidates = uniqueElements([
+      findSpaceOverviewPane(),
+      findActiveRoomView(),
+      ...document.querySelectorAll(".mx_SpaceRoomView, [class*='SpaceRoomView'], .mx_RoomView, [data-testid='room-view'], [class*='RoomView'], .mx_MainSplit, [class*='MainSplit']"),
+      document.querySelector(".mx_MatrixChat, [class*='MatrixChat']"),
+      document.getElementById("matrixchat")
+    ].filter(element => element instanceof Element && !element.closest?.(OWNED_SELECTOR)));
+
+    const usableRects = candidates
+      .map(element => ({ element, rect: element.getBoundingClientRect() }))
+      .filter(({ rect }) => Number.isFinite(rect.left) && Number.isFinite(rect.top) && rect.width >= 120 && rect.height >= 120)
+      .filter(({ rect }) => rect.right > leftBoundary + 80 && rect.left < viewportWidth - 12 && rect.bottom > 80);
+
+    for (const { element, rect } of usableRects) {
+      const left = Math.max(rect.left, leftBoundary + 32, 12);
+      const right = Math.min(rect.right, viewportWidth - 24);
+      const top = Math.max(rect.top, 72);
+      const bottom = Math.min(rect.bottom, viewportHeight - 32);
+      if (right - left < 80 || bottom - top < 80) continue;
+
+      const testPoints = [
+        { x: Math.round(left + (right - left) * 0.72), y: Math.round(top + (bottom - top) * 0.58) },
+        { x: Math.round(left + (right - left) * 0.55), y: Math.round(top + (bottom - top) * 0.68) },
+        { x: Math.round(left + (right - left) * 0.85), y: Math.round(top + (bottom - top) * 0.42) }
+      ];
+
+      for (const point of testPoints) {
+        const hit = document.elementFromPoint(point.x, point.y);
+        if (hit instanceof Element && isUnsafeNativeMenuDismissalHit(hit)) continue;
+        return { ...point, element };
+      }
+    }
+
+    const x = Math.round(Math.max(leftBoundary + 120, viewportWidth * 0.72));
+    const y = Math.round(Math.max(96, viewportHeight * 0.62));
+    return {
+      x: Math.min(viewportWidth - 24, x),
+      y: Math.min(viewportHeight - 32, y),
+      element: document.body
+    };
+  }
+
+  function isUnsafeNativeMenuDismissalHit(hit) {
+    if (!(hit instanceof Element)) return false;
+    if (hit.closest?.(OWNED_SELECTOR)) return true;
+    if (hit.closest?.("#left-panel, [data-testid='left-panel'], .mx_SpacePanel, [class*='SpacePanel'], #mmlc-desktop-space-list-host, #mmlc-desktop-chat-list-host")) return true;
+    if (hit.closest?.("button, a, input, textarea, select, [role='button'], [role='menuitem'], [role='option'], [contenteditable='true']")) return true;
+    return false;
+  }
 
   function findNativeLeftRailSpaceActivationElement(element) {
     if (!(element instanceof Element)) return null;
@@ -11034,7 +12387,10 @@
 
   async function ensureMiddlePaneExpanded(options = {}) {
     const pane = findMiddlePanePanel();
-    if (!(pane instanceof Element) || !middlePaneNeedsExpansion(pane)) return true;
+    if (!(pane instanceof Element) || !middlePaneNeedsExpansion(pane)) {
+      scheduleDesktopMiddleEdgePositionUpdates([0, 80, 240]);
+      return true;
+    }
 
     const handle = findMiddlePaneExpandHandle(pane);
     const attempts = handle instanceof Element ? 3 : 0;
@@ -11063,6 +12419,7 @@
     if (options.allowStyleFallback === false) return false;
     forceMiddlePaneOpen(pane);
     await delay(80);
+    scheduleDesktopMiddleEdgePositionUpdates([0, 80, 240, 600]);
     return !middlePaneNeedsExpansion(pane);
   }
 

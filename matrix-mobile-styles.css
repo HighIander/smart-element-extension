@@ -1,3 +1,4 @@
+/* SMART ELEMENT PATCH VERIFIED: 42px round centered floating avatar and native Space double-click fixes. */
 :root {
   --mmlc-visual-loading-counter-scale: 1;
   --mmlc-visual-loading-device-width: 100vw;
@@ -2694,11 +2695,13 @@ html.mmlc-desktop-indent-subspaces:not(.mmlc-desktop-space-panel-hidden) .mmlc-d
   box-sizing: border-box;
 }
 
-.mmlc-desktop-minimized-space-unread-badge {
+.mmlc-desktop-minimized-space-unread-badge,
+.mmlc-desktop-minimized-chat-unread-badge {
   top: -6px;
   right: -6px;
   transform: none;
-  z-index: 1;
+  z-index: 2;
+  pointer-events: none;
 }
 
 html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-button .mmlc-desktop-unread-badge,
@@ -3118,4 +3121,499 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mml
   padding: 16px 12px;
   opacity: 0.68;
   font-size: 13px;
+}
+
+/* Smart Element: keep Element's native space rail and room-list pane open.
+   Mobile Element sometimes collapses the SpacePanel and sets #left-panel to an
+   inert 0px flex item. Smart Element depends on both panes staying mounted so
+   cached space/chat navigation and manual refreshes can keep working reliably. */
+html.mmlc-enabled.mmlc-native-navigation-panes-open #matrixchat,
+html.mmlc-enabled.mmlc-native-navigation-panes-open .mx_MatrixChat_wrapper,
+html.mmlc-enabled.mmlc-native-navigation-panes-open .mx_MatrixChat,
+html.mmlc-enabled.mmlc-native-navigation-panes-open [data-group="true"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open [data-group="true"] {
+  flex-flow: row !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open .mx_SpacePanel.collapsed,
+html.mmlc-enabled.mmlc-native-navigation-panes-open nav[aria-label="Spaces"],
+html.mmlc-enabled.mmlc-native-navigation-panes-open [class*="SpacePanel"]:not(:where(#mmlc-toolbar *, #mmlc-panel *, #mmlc-desktop-space-list-host *, #mmlc-desktop-chat-list-host *, #mcs-settings-overlay *)) {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  flex: 0 0 clamp(172px, 28vw, 260px) !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  flex-basis: clamp(172px, 28vw, 260px) !important;
+  width: clamp(172px, 28vw, 260px) !important;
+  min-width: 160px !important;
+  max-width: 300px !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) [data-testid="left-panel"],
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open [data-testid="left-panel"],
+body[data-mmlc-mode="chat"] html.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel,
+body[data-mmlc-mode="thread"] html.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  flex: 0 0 clamp(260px, 42vw, 420px) !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  flex-basis: clamp(260px, 42vw, 420px) !important;
+  width: clamp(260px, 42vw, 420px) !important;
+  min-width: 240px !important;
+  max-width: 460px !important;
+  overflow: visible !important;
+  overflow-x: visible !important;
+  overflow-y: auto !important;
+  transform: none !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel .mx_LeftPanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel .mx_LeftPanel_panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel .mx_LeftPanel_roomListContainer,
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel .mx_RoomListPanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel [aria-label="Chatliste"],
+html.mmlc-enabled.mmlc-native-navigation-panes-open:not(.mmlc-desktop-middle-pane-hidden) #left-panel [aria-label="Room list"],
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel .mx_LeftPanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel .mx_LeftPanel_panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel .mx_LeftPanel_roomListContainer,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel .mx_RoomListPanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel [aria-label="Chatliste"],
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-floating-open #left-panel [aria-label="Room list"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow-x: visible !important;
+  transform: none !important;
+}
+
+/* Smart Element patch: keep native Element panes mounted without blocking the
+   extension's own compact menu states. The anti-collapse repair may add
+   mmlc-native-navigation-panes-open, but hidden Smart Element panes must still
+   remain compact. */
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hidden .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hidden .mx_SpacePanel.collapsed,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hidden nav[aria-label="Spaces"],
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hidden [class*="SpacePanel"]:not(:where(#mmlc-toolbar *, #mmlc-panel *, #mmlc-desktop-space-list-host *, #mmlc-desktop-chat-list-host *, #mcs-settings-overlay *)) {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  flex: 0 0 0 !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  flex-basis: 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host,
+html.mmlc-desktop-middle-pane-hidden.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host,
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed !important;
+  left: 8px !important;
+  top: 12px !important;
+  width: 40px !important;
+  height: 40px !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  z-index: 2147483612 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host > .mmlc-desktop-space-expand-toggle {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed !important;
+  left: 8px !important;
+  top: 12px !important;
+  z-index: 2147483622 !important;
+  pointer-events: auto !important;
+}
+
+/* Direct messages use Element's native room list. The injected Smart Element
+   chat-list host should carry only the blue toggle and must not consume flex
+   height above the native DM rows. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected:not(.mmlc-desktop-native-action) .mx_RoomListPanel {
+  position: relative !important;
+  overflow: visible !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host,
+#mmlc-desktop-chat-list-host.mmlc-desktop-chat-list-host-start {
+  position: absolute !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  height: auto !important;
+  min-height: 0 !important;
+  flex: 0 0 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  z-index: 2147483628 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle,
+#mmlc-desktop-chat-list-host.mmlc-desktop-chat-list-host-start > .mmlc-desktop-middle-toggle {
+  display: inline-flex !important;
+  position: absolute !important;
+  top: 50% !important;
+  right: -16px !important;
+  transform: translateY(-50%) !important;
+  margin: 0 !important;
+  pointer-events: auto !important;
+  z-index: 2147483646 !important;
+}
+
+/* Keep the blue middle-pane button above the adjacent room view and make the
+   left pane overflow-visible so the edge button remains clickable. */
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_LeftPanel_panel,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_LeftPanel_outerWrapper,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_LeftPanel_wrapper,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_LeftPanel,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_LeftPanel_roomListContainer,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host {
+  overflow: visible !important;
+  position: relative !important;
+  z-index: 2147483604 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mmlc-desktop-middle-toggle,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #mmlc-desktop-middle-restore {
+  z-index: 2147483646 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-expanded):not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-expanded):not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] {
+  flex: 0 0 104px !important;
+  flex-basis: 104px !important;
+  width: 104px !important;
+  min-width: 104px !important;
+  max-width: 104px !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-expanded:not(.mmlc-desktop-native-action) .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-expanded:not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] {
+  flex: 0 0 280px !important;
+  flex-basis: 280px !important;
+  width: 280px !important;
+  min-width: 280px !important;
+  max-width: 280px !important;
+}
+
+
+/* Smart Element patch: keep floating pane controls from overlapping and keep edge buttons above adjacent panes. */
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host {
+  left: 8px !important;
+  top: 12px !important;
+  z-index: 2147483638 !important;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-middle-restore {
+  left: 8px !important;
+  top: 62px !important;
+  z-index: 2147483646 !important;
+}
+
+html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-space-panel-hidden) #mmlc-desktop-middle-restore {
+  z-index: 2147483646 !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open #mmlc-desktop-space-list-host {
+  padding-bottom: 148px !important;
+  z-index: 2147483630 !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-list {
+  padding-bottom: 118px !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-sticky-toggle,
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-refresh,
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-settings {
+  position: absolute !important;
+  left: calc(50% - 19px) !important;
+  z-index: 2147483640 !important;
+  margin: 0 !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-sticky-toggle {
+  bottom: 104px !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-refresh {
+  bottom: 58px !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-settings {
+  bottom: 12px !important;
+}
+
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-expand-toggle,
+html.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open .mmlc-desktop-space-maximize-toggle {
+  z-index: 2147483642 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mx_SpacePanel,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) #mmlc-desktop-space-list-host {
+  overflow: visible !important;
+  z-index: 2147483632 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-expand-toggle,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-maximize-toggle {
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-expand-toggle {
+  right: -18px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-maximize-toggle {
+  right: -18px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mmlc-desktop-middle-toggle,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #mmlc-desktop-middle-restore {
+  z-index: 2147483647 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle:not(.mmlc-desktop-middle-sticky-toggle) {
+  right: -18px !important;
+  z-index: 2147483647 !important;
+}
+
+/* Smart Element patch: render the blue middle-pane edge button as a viewport-level control.
+   A high z-index alone was not enough on some Element layouts because the adjacent
+   room view creates a competing stacking/clipping context. The JS keeps the CSS
+   variable aligned with the current right edge of the native chat-list pane. */
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-middle-pane-hidden):not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle:not(.mmlc-desktop-middle-sticky-toggle),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle:not(.mmlc-desktop-middle-sticky-toggle) {
+  position: fixed !important;
+  left: calc(var(--mmlc-desktop-middle-edge-x, 0px) - 18px) !important;
+  right: auto !important;
+  top: 50vh !important;
+  transform: translateY(-50%) !important;
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+  margin: 0 !important;
+  isolation: isolate !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) [data-testid="left-panel"] {
+  overflow: visible !important;
+}
+
+/* Smart Element patch: the chat-list edge button is now rendered as a body-level
+   control, not as a child clipped by Element's left-panel stacking context. */
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #mmlc-desktop-middle-restore.mmlc-desktop-middle-edge-button {
+  display: inline-flex !important;
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  pointer-events: auto !important;
+  margin: 0 !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24) !important;
+  isolation: isolate !important;
+}
+
+html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-toggle:not(.mmlc-desktop-middle-sticky-toggle) {
+  display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-sticky-toggle {
+  display: inline-flex !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host:not(:has(.mmlc-desktop-middle-sticky-toggle)) {
+  padding-bottom: 12px !important;
+}
+
+/* Smart Element patch: keep the minimized Space-pane menu button in the orange palette on hover/focus. */
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host > .mmlc-desktop-space-expand-toggle:hover,
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host > .mmlc-desktop-space-expand-toggle:focus-visible,
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) .mmlc-desktop-space-expand-toggle:hover,
+html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) .mmlc-desktop-space-expand-toggle:focus-visible {
+  background: color-mix(in srgb, #f2b36f 78%, #8a4b08 22%) !important;
+  color: #5f3307 !important;
+  border-color: color-mix(in srgb, #c8731b 74%, transparent) !important;
+  box-shadow: 0 7px 20px rgba(138, 75, 8, 0.34) !important;
+  outline: none !important;
+}
+
+
+/* Smart Element patch: keep the native user avatar above the floating Space menu
+   when the Space pane is collapsed and temporarily opened. Element keeps the
+   user menu in its native SpacePanel while Smart Element renders the floating
+   Space list separately; without an explicit stacking order the floating list can
+   cover or clip the avatar. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) .mx_SpacePanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] {
+  overflow: visible !important;
+  z-index: 2147483641 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] .mx_UserMenu,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu button,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] .mx_UserMenu button,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu [class*="avatar"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] .mx_UserMenu [class*="avatar"] {
+  position: relative !important;
+  z-index: 2147483647 !important;
+  overflow: visible !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-space-list-host {
+  z-index: 2147483630 !important;
+}
+
+
+/* Smart Element patch: the floating Space menu is rendered on <body>, so the
+   native Element user avatar can still be trapped in a lower stacking context.
+   Mirror the avatar as a body-level visual layer above the floating menu. */
+#mmlc-desktop-space-floating-avatar {
+  position: fixed !important;
+  z-index: 2147483647 !important;
+  pointer-events: none !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 42px !important;
+  height: 42px !important;
+  min-width: 42px !important;
+  min-height: 42px !important;
+  max-width: 42px !important;
+  max-height: 42px !important;
+  aspect-ratio: 1 / 1 !important;
+  border-radius: 50% !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+  background: Canvas !important;
+  color: CanvasText !important;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.22) !important;
+  isolation: isolate !important;
+  transform: translateZ(0) !important;
+}
+
+#mmlc-desktop-space-floating-avatar img {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  display: block !important;
+  object-fit: cover !important;
+  border-radius: 50% !important;
+  aspect-ratio: 1 / 1 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu [class*="avatar"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] .mx_UserMenu [class*="avatar"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) .mx_SpacePanel .mx_UserMenu img,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open:not(.mmlc-desktop-native-action) nav[aria-label="Spaces"] .mx_UserMenu img {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
+
+html:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-floating-avatar,
+html.mmlc-desktop-native-action #mmlc-desktop-space-floating-avatar {
+  display: none !important;
+}
+
+
+/* Smart Element patch: Direct Messages and Space chat lists share the same minimized/floating middle-pane state.
+   In DM mode the chat rows are native Element rows, so the Smart Element host must not consume flex height,
+   but it still needs a real full-panel overlay box so the sticky/pin button can be centered and clickable. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host,
+#mmlc-desktop-chat-list-host.mmlc-desktop-chat-list-host-start {
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  min-width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  flex: 0 0 auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  pointer-events: none !important;
+  z-index: 2147483628 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-sticky-toggle,
+#mmlc-desktop-chat-list-host.mmlc-desktop-chat-list-host-start > .mmlc-desktop-middle-sticky-toggle {
+  display: inline-flex !important;
+  position: absolute !important;
+  left: 50% !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: 12px !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483646 !important;
+  pointer-events: auto !important;
+  margin: 0 !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24) !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) [data-testid="left-panel"] {
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  flex: 0 0 48px !important;
+  overflow: hidden !important;
 }
