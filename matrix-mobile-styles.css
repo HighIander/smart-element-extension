@@ -2209,63 +2209,6 @@ html.mmlc-enabled [data-mmlc-thread-overlay-hidden] {
    This mode is deliberately separate from the mobile overlay. It injects compact
    controls into Element's own SpacePanel and RoomListPanel while keeping the
    native three-pane Element layout visible. */
-#mmlc-desktop-eye-host {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 4px 12px 4px;
-  margin: 0;
-  flex: 0 0 auto;
-}
-
-#mmlc-desktop-refresh-eye {
-  position: relative;
-  z-index: 3;
-  min-width: 56px;
-  height: 32px;
-  padding: 0 14px;
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.18);
-  background: color-mix(in srgb, Canvas 92%, ButtonFace 8%);
-  color: CanvasText;
-  box-shadow: 0 2px 7px rgba(0, 0, 0, 0.14);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  user-select: none;
-  touch-action: manipulation;
-}
-
-#mmlc-desktop-refresh-eye:active {
-  transform: translateY(1px);
-}
-
-#mmlc-desktop-refresh-eye svg {
-  width: 24px;
-  height: 24px;
-  fill: currentColor;
-  pointer-events: none;
-}
-
-#mmlc-desktop-refresh-eye.mmlc-desktop-eye-active::after {
-  content: "";
-  position: absolute;
-  width: 34px;
-  height: 2px;
-  border-radius: 999px;
-  background: currentColor;
-  transform: rotate(-24deg);
-}
-
-#mmlc-desktop-refresh-eye.mmlc-desktop-eye-loading svg {
-  animation: mmlc-desktop-eye-spin 0.9s linear infinite;
-}
-
-@keyframes mmlc-desktop-eye-spin {
-  to { transform: rotate(360deg); }
-}
-
 html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel {
   position: relative !important;
   z-index: 2147483504 !important;
@@ -2339,6 +2282,13 @@ html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action #mmlc-desktop-space-list-host,
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action #mmlc-desktop-chat-list-host {
   display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-space-floating-selection-hold.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open #mmlc-desktop-space-list-host {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action .mx_SpacePanel > ul.mx_SpaceTreeLevel,
@@ -2745,11 +2695,11 @@ html.mmlc-desktop-space-panel-expanded .mmlc-desktop-space-button .mmlc-desktop-
 }
 
 
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="primary-filters"],
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [class*="roomListPrimaryFilters"],
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [role="listbox"][aria-label*="Filter" i],
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([data-testid="primary-filters"]),
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([class*="roomListPrimaryFilters"]) {
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="primary-filters"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [class*="roomListPrimaryFilters"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [role="listbox"][aria-label*="Filter" i],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([class*="roomListPrimaryFilters"]) {
   display: none !important;
   height: 0 !important;
   min-height: 0 !important;
@@ -3569,6 +3519,10 @@ html.mmlc-desktop-native-action #mmlc-desktop-space-floating-avatar {
   display: none !important;
 }
 
+html.mmlc-desktop-native-action.mmlc-desktop-space-floating-selection-hold.mmlc-desktop-space-panel-floating-open #mmlc-desktop-space-floating-avatar {
+  display: flex !important;
+}
+
 
 /* Smart Element patch: Direct Messages and Space chat lists share the same minimized/floating middle-pane state.
    In DM mode the chat rows are native Element rows, so the Smart Element host must not consume flex height,
@@ -3616,4 +3570,524 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle
   max-width: 48px !important;
   flex: 0 0 48px !important;
   overflow: hidden !important;
+}
+
+/* Smart Element patch: when the chat list is minimized, temporary opens must
+   paint as an overlay instead of expanding Element's left-panel flex item. */
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] {
+  --mmlc-desktop-chat-overlay-width: var(--mmlc-desktop-chat-overlay-width-root, min(640px, calc(100vw - var(--mmlc-desktop-middle-edge-x, 48px) - 36px)));
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  flex: 0 0 48px !important;
+  flex-basis: 48px !important;
+  overflow: visible !important;
+  position: relative !important;
+  z-index: 2147483637 !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_roomListContainer,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Chatliste"],
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Room list"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_outerWrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_wrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_LeftPanel_roomListContainer,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Room list"] {
+  width: var(--mmlc-desktop-chat-overlay-width, clamp(292px, 28vw, 340px)) !important;
+  min-width: 292px !important;
+  max-width: 340px !important;
+  flex: 0 0 var(--mmlc-desktop-chat-overlay-width, clamp(292px, 28vw, 340px)) !important;
+  flex-basis: var(--mmlc-desktop-chat-overlay-width, clamp(292px, 28vw, 340px)) !important;
+  overflow: visible !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Room list"] {
+  position: fixed !important;
+  left: var(--mmlc-desktop-middle-edge-x, 48px) !important;
+  right: auto !important;
+  top: 0 !important;
+  bottom: 0 !important;
+  height: 100vh !important;
+  max-height: 100vh !important;
+  background: #fff !important;
+  color: #111827 !important;
+  box-shadow: 10px 0 30px rgba(0, 0, 0, 0.18) !important;
+  z-index: 2147483638 !important;
+  pointer-events: auto !important;
+  isolation: isolate !important;
+  box-sizing: border-box !important;
+  overflow: hidden auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Suchen" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Search" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Suchen" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Search" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [class*="Search"]:has(input) {
+  display: flex !important;
+  width: calc(100% - 12px) !important;
+  max-width: calc(100% - 12px) !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  margin-left: 6px !important;
+  margin-right: 6px !important;
+  overflow: visible !important;
+  flex: 0 0 auto !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="primary-filters"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [class*="roomListPrimaryFilters"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [role="listbox"][aria-label*="Filter" i] {
+  display: flex !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  flex: 0 0 auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel > div:has([class*="roomListPrimaryFilters"]) {
+  display: block !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  flex: 0 0 auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) .mx_RoomListPanel [data-testid="room-list-header"] {
+  display: flex !important;
+  height: auto !important;
+  max-height: none !important;
+  overflow: visible !important;
+  flex: 0 0 auto !important;
+}
+
+
+/* Smart Element patch: collapsed-state chat-list overlay sizing and controls. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel [aria-label="Room list"] {
+  top: 8px !important;
+  bottom: 8px !important;
+  height: calc(100vh - 16px) !important;
+  max-height: calc(100vh - 16px) !important;
+  border: 2px solid #000 !important;
+  border-radius: 10px !important;
+  box-shadow: 10px 10px 34px rgba(0, 0, 0, 0.34) !important;
+  background-clip: padding-box !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Suchen" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Search" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Suchen" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Search" i]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [class*="Search"]:has(input) {
+  width: calc(100% - 24px) !important;
+  max-width: calc(100% - 24px) !important;
+  min-width: 0 !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [data-testid="room-list-search"] *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Suchen" i]) *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel form:has(input[placeholder*="Search" i]) *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Suchen" i]) *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel label:has(input[placeholder*="Search" i]) *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) .mx_RoomListPanel [class*="Search"]:has(input) * {
+  max-width: 100% !important;
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) #mmlc-desktop-chat-list-host:not(.mmlc-desktop-chat-list-host-start) {
+  position: relative !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  padding-bottom: 58px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-sticky-toggle {
+  display: inline-flex !important;
+  position: absolute !important;
+  left: 50% !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: 12px !important;
+  transform: translateX(-50%) !important;
+  z-index: 2147483646 !important;
+  pointer-events: auto !important;
+  margin: 0 !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.24) !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) #mmlc-desktop-chat-list-host:not(.mmlc-desktop-chat-list-host-start) > .mmlc-desktop-chat-list {
+  max-height: calc(100% - 58px) !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+  padding-bottom: 10px !important;
+}
+
+
+/* Smart Element patch: make the collapsed-state chat-list overlay wide enough for chat labels
+   and keep it vertically maximized so the list can use the available viewport height. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  width: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  min-width: min(430px, var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px)))) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  flex: 0 0 var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  flex-basis: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  left: var(--mmlc-desktop-middle-edge-x, 48px) !important;
+  right: auto !important;
+  top: 8px !important;
+  bottom: auto !important;
+  width: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  min-width: min(430px, var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px)))) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  height: var(--mmlc-desktop-chat-overlay-height, calc(100vh - 16px)) !important;
+  min-height: min(360px, var(--mmlc-desktop-chat-overlay-height, calc(100vh - 16px))) !important;
+  max-height: calc(100vh - 16px) !important;
+  border: 2px solid #000 !important;
+  border-radius: 10px !important;
+  box-shadow: 10px 10px 34px rgba(0, 0, 0, 0.34) !important;
+  background: #fff !important;
+  background-clip: padding-box !important;
+  color: #111827 !important;
+  z-index: 2147483645 !important;
+  overflow: hidden auto !important;
+  isolation: isolate !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) * {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is(input, textarea, [role="searchbox"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is(input, textarea, [role="searchbox"]) {
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action):not(.mmlc-desktop-start-selected) #mmlc-desktop-chat-list-host:not(.mmlc-desktop-chat-list-host-start) > .mmlc-desktop-chat-list {
+  max-height: calc(100% - 58px) !important;
+  min-height: 0 !important;
+  overflow-y: auto !important;
+}
+
+
+/* Smart Element patch: final collapsed chat-list overlay guard rails.
+   Keep the floating Direct Messages/Space chat list fully inside the viewport,
+   give it enough width for right-side controls, and let search fields shrink
+   before icon buttons are clipped. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] {
+  --mmlc-desktop-chat-overlay-right-gap: 18px;
+  --mmlc-desktop-chat-overlay-top-gap: 10px;
+  --mmlc-desktop-chat-overlay-bottom-gap: 20px;
+  --mmlc-desktop-chat-overlay-width: var(--mmlc-desktop-chat-overlay-width-root, min(900px, calc(100vw - var(--mmlc-desktop-middle-edge-x, 48px) - var(--mmlc-desktop-chat-overlay-right-gap)))) !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  width: var(--mmlc-desktop-chat-overlay-width) !important;
+  min-width: min(520px, var(--mmlc-desktop-chat-overlay-width)) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width) !important;
+  flex: 0 0 var(--mmlc-desktop-chat-overlay-width) !important;
+  flex-basis: var(--mmlc-desktop-chat-overlay-width) !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  position: fixed !important;
+  left: var(--mmlc-desktop-middle-edge-x, 48px) !important;
+  right: auto !important;
+  top: var(--mmlc-desktop-chat-overlay-top-gap, 10px) !important;
+  bottom: var(--mmlc-desktop-chat-overlay-bottom-gap, 20px) !important;
+  width: var(--mmlc-desktop-chat-overlay-width) !important;
+  min-width: min(520px, var(--mmlc-desktop-chat-overlay-width)) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width) !important;
+  height: auto !important;
+  min-height: min(360px, calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 10px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 20px))) !important;
+  max-height: calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 10px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 20px)) !important;
+  border: 2px solid #000 !important;
+  border-radius: 10px !important;
+  box-shadow: 10px 10px 34px rgba(0, 0, 0, 0.34) !important;
+  background: #fff !important;
+  background-clip: padding-box !important;
+  overflow: hidden auto !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) > *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) > * {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is([data-testid="room-list-search"], form:has(input[placeholder*="Suchen" i]), form:has(input[placeholder*="Search" i]), label:has(input[placeholder*="Suchen" i]), label:has(input[placeholder*="Search" i]), [class*="Search"]:has(input), [role="search"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is([data-testid="room-list-search"], form:has(input[placeholder*="Suchen" i]), form:has(input[placeholder*="Search" i]), label:has(input[placeholder*="Suchen" i]), label:has(input[placeholder*="Search" i]), [class*="Search"]:has(input), [role="search"]) {
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  width: auto !important;
+  max-width: 100% !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is([data-testid="room-list-search"], form:has(input[placeholder*="Suchen" i]), form:has(input[placeholder*="Search" i]), label:has(input[placeholder*="Suchen" i]), label:has(input[placeholder*="Search" i]), [class*="Search"]:has(input), [role="search"]) *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is([data-testid="room-list-search"], form:has(input[placeholder*="Suchen" i]), form:has(input[placeholder*="Search" i]), label:has(input[placeholder*="Suchen" i]), label:has(input[placeholder*="Search" i]), [class*="Search"]:has(input), [role="search"]) * {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is(button, [role="button"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is(button, [role="button"]) {
+  flex-shrink: 0 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host {
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > .mmlc-desktop-middle-sticky-toggle {
+  position: absolute !important;
+  left: 50% !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: 12px !important;
+  transform: translateX(-50%) !important;
+}
+
+/* Smart Element patch v1.0.100: collapsed chat-list overlay should use the
+   measured fitted left edge, keep all borders inside the viewport, and avoid
+   the previous oversized fallback width that made the right side look clipped. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] {
+  --mmlc-desktop-chat-overlay-right-gap: 16px;
+  --mmlc-desktop-chat-overlay-top-gap: 8px;
+  --mmlc-desktop-chat-overlay-bottom-gap: 14px;
+  --mmlc-desktop-chat-overlay-width: var(--mmlc-desktop-chat-overlay-width-root, min(440px, calc(100vw - var(--mmlc-desktop-chat-overlay-left, var(--mmlc-desktop-middle-edge-x, 48px)) - var(--mmlc-desktop-chat-overlay-right-gap)))) !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] {
+  --mmlc-desktop-chat-overlay-width: var(--mmlc-desktop-chat-overlay-width-root, min(500px, calc(100vw - var(--mmlc-desktop-chat-overlay-left, var(--mmlc-desktop-middle-edge-x, 48px)) - var(--mmlc-desktop-chat-overlay-right-gap)))) !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  width: var(--mmlc-desktop-chat-overlay-width) !important;
+  min-width: min(320px, var(--mmlc-desktop-chat-overlay-width)) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width) !important;
+  flex: 0 0 var(--mmlc-desktop-chat-overlay-width) !important;
+  flex-basis: var(--mmlc-desktop-chat-overlay-width) !important;
+  box-sizing: border-box !important;
+  contain: none !important;
+  clip-path: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  left: var(--mmlc-desktop-chat-overlay-left, var(--mmlc-desktop-middle-edge-x, 48px)) !important;
+  right: auto !important;
+  top: var(--mmlc-desktop-chat-overlay-top-gap, 8px) !important;
+  bottom: var(--mmlc-desktop-chat-overlay-bottom-gap, 14px) !important;
+  width: var(--mmlc-desktop-chat-overlay-width) !important;
+  min-width: min(320px, var(--mmlc-desktop-chat-overlay-width)) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width) !important;
+  height: auto !important;
+  min-height: min(300px, calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px))) !important;
+  max-height: calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px)) !important;
+  border: 2px solid #000 !important;
+  border-radius: 10px !important;
+  box-shadow: 10px 10px 34px rgba(0, 0, 0, 0.34) !important;
+  background: #fff !important;
+  background-clip: padding-box !important;
+  overflow: hidden auto !important;
+  box-sizing: border-box !important;
+  contain: none !important;
+  clip-path: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) > *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) > * {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is([data-testid="room-list-search"], [role="search"], form:has(input[placeholder*="Suchen" i]), form:has(input[placeholder*="Search" i]), label:has(input[placeholder*="Suchen" i]), label:has(input[placeholder*="Search" i]), [class*="Search"]:has(input)),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is([data-testid="room-list-search"], [role="search"], form:has(input[placeholder*="Suchen" i]), form:has(input[placeholder*="Search" i]), label:has(input[placeholder*="Suchen" i]), label:has(input[placeholder*="Search" i]), [class*="Search"]:has(input)) {
+  display: flex !important;
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+  max-width: calc(100% - 20px) !important;
+  margin-left: 10px !important;
+  margin-right: 10px !important;
+  overflow: hidden !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is(input, textarea, [role="searchbox"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) :is(input, textarea, [role="searchbox"]) {
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Smart Element patch: Direct Messages floating overlay must frame the whole
+   native RoomListPanel. The native listbox also carries aria-label="Chatliste",
+   so the broad overlay selectors above can accidentally promote only the list
+   itself and paint it over search, heading, menu, and compose controls. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Room list"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Room list"] {
+  position: fixed !important;
+  left: var(--mmlc-desktop-chat-overlay-left, var(--mmlc-desktop-middle-edge-x, 48px)) !important;
+  right: auto !important;
+  top: var(--mmlc-desktop-chat-overlay-top-gap, 8px) !important;
+  bottom: var(--mmlc-desktop-chat-overlay-bottom-gap, 14px) !important;
+  width: var(--mmlc-desktop-chat-overlay-width) !important;
+  min-width: min(320px, var(--mmlc-desktop-chat-overlay-width)) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width) !important;
+  height: auto !important;
+  min-height: min(300px, calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px))) !important;
+  max-height: calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px)) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel > [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Chatliste"] > [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Room list"] > [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel > [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Chatliste"] > [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Room list"] > [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Chatliste"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Room list"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Chatliste"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Room list"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Chatliste"] > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Room list"] > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Chatliste"] > div:has([data-testid="primary-filters"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Room list"] > div:has([data-testid="primary-filters"]) {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: relative !important;
+  flex: 0 0 auto !important;
+  width: auto !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: visible !important;
+  z-index: 2 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel > div:has([data-testid="room-list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Chatliste"] > div:has([data-testid="room-list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Room list"] > div:has([data-testid="room-list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel > div:has([data-testid="room-list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Chatliste"] > div:has([data-testid="room-list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Room list"] > div:has([data-testid="room-list"]) {
+  display: flex !important;
+  position: relative !important;
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: hidden !important;
+  z-index: 1 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel [data-testid="room-list"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel [data-virtuoso-scroller="true"][aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel [data-virtuoso-scroller="true"][aria-label="Room list"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel [data-testid="room-list"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel [data-virtuoso-scroller="true"][aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel [data-virtuoso-scroller="true"][aria-label="Room list"] {
+  position: relative !important;
+  left: auto !important;
+  right: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  flex: 1 1 auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  overflow-y: auto !important;
+  z-index: auto !important;
+  isolation: auto !important;
 }

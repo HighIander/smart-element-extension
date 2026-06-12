@@ -8,6 +8,7 @@
   window.__matrixGallerySenderInitialized = true;
 
   const STORAGE_KEY = "matrix_gallery_sender_config";
+  const STORAGE_DESKTOP_HIERARCHY_MODE_KEY = "mmlc_desktop_hierarchy_mode_v1";
   const BUTTON_POSITION_KEY = "mg_button_position";
   const GALLERY_CONTENT_KEY = "de.tkluge.gallery";
   const GALLERY_HISTORY_KEY = "matrix_gallery_sender_gallery_history";
@@ -45,6 +46,7 @@
       mergeThreadsLabel: "Threads im Hauptverlauf bündeln",
       mattermostToolsLabel: "Mattermost-Importer und -Exporter aktivieren",
       matrixMobileLabel: "Matrix-Mobile-Ansicht aktivieren",
+      matrixDesktopHierarchyLabel: "Matrix-Desktop-Hierarchie aktivieren",
       galleryFeatureLabel: "Bildgalerie aktivieren",
       threadViewFeatureLabel: "Thread-Ansicht aktivieren",
       optionalFeaturesHint: "Änderungen werden sofort angewendet, soweit die jeweilige Seite bereits geladen ist. Wenn alle Funktionen deaktiviert sind, lassen sie sich über die Browser-Erweiterungseinstellungen wieder aktivieren.",
@@ -121,6 +123,7 @@
       mergeThreadsLabel: "Merge threads in the main timeline",
       mattermostToolsLabel: "Enable Mattermost importer and exporter",
       matrixMobileLabel: "Enable Matrix mobile layout",
+      matrixDesktopHierarchyLabel: "Enable Matrix desktop hierarchy",
       galleryFeatureLabel: "Enable image gallery",
       threadViewFeatureLabel: "Enable thread view",
       optionalFeaturesHint: "Changes are applied immediately where the respective page is already loaded. If all functions are disabled, re-enable them from the browser extension settings/options page.",
@@ -341,6 +344,8 @@
     enableMatrixMobile: true,
     enableThreadView: true
   };
+  let desktopHierarchyModeActiveForSettings = false;
+  let desktopHierarchySettingsListenerInstalled = false;
 
   injectPageBridge();
 
@@ -407,6 +412,46 @@
     if (mobile) mobile.checked = combinedFeatureConfig.enableMatrixMobile !== false;
   }
 
+  function syncDesktopHierarchySettingsCheckbox() {
+    const desktopHierarchy = document.getElementById("mg-enable-desktop-hierarchy");
+    if (desktopHierarchy) desktopHierarchy.checked = desktopHierarchyModeActiveForSettings === true;
+  }
+
+  async function readDesktopHierarchyModeForSettings() {
+    try {
+      const data = await chrome.storage.local.get(STORAGE_DESKTOP_HIERARCHY_MODE_KEY);
+      return data?.[STORAGE_DESKTOP_HIERARCHY_MODE_KEY]?.active === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function refreshDesktopHierarchySettingsCheckbox() {
+    desktopHierarchyModeActiveForSettings = await readDesktopHierarchyModeForSettings();
+    syncDesktopHierarchySettingsCheckbox();
+  }
+
+  async function saveDesktopHierarchySettingsCheckbox() {
+    const active = document.getElementById("mg-enable-desktop-hierarchy")?.checked === true;
+    desktopHierarchyModeActiveForSettings = active;
+    syncDesktopHierarchySettingsCheckbox();
+    const payload = { active, savedAt: Date.now() };
+    try { localStorage.setItem(STORAGE_DESKTOP_HIERARCHY_MODE_KEY, JSON.stringify(payload)); } catch {}
+    try { await chrome.storage.local.set({ [STORAGE_DESKTOP_HIERARCHY_MODE_KEY]: payload }); } catch {}
+  }
+
+  function installDesktopHierarchySettingsListener() {
+    if (desktopHierarchySettingsListenerInstalled) return;
+    if (!chrome?.storage?.onChanged) return;
+    desktopHierarchySettingsListenerInstalled = true;
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== "local") return;
+      if (!changes?.[STORAGE_DESKTOP_HIERARCHY_MODE_KEY]) return;
+      desktopHierarchyModeActiveForSettings = changes[STORAGE_DESKTOP_HIERARCHY_MODE_KEY].newValue?.active === true;
+      syncDesktopHierarchySettingsCheckbox();
+    });
+  }
+
   function applyCombinedFeatureVisibility() {
     const galleryEnabled = isGalleryEnabled();
     const threadEnabled = isThreadViewFeatureEnabled();
@@ -455,6 +500,7 @@
 
   function boot() {
     installCombinedFeatureSettingsListener();
+    installDesktopHierarchySettingsListener();
     refreshCombinedFeatureConfig();
     createGlobalDropHint();
     createToggleButton();
@@ -1041,6 +1087,11 @@
           <span data-i18n="matrixMobileLabel">Matrix-Mobile-Ansicht aktivieren</span>
         </label>
 
+        <label class="mg-settings-check">
+          <input id="mg-enable-desktop-hierarchy" type="checkbox">
+          <span data-i18n="matrixDesktopHierarchyLabel">Matrix-Desktop-Hierarchie aktivieren</span>
+        </label>
+
         <div class="mg-settings-hint" data-i18n="optionalFeaturesHint">Diese Modul-Schalter werden beim nächsten Laden der jeweiligen Seite vollständig wirksam.</div>
 
         <button id="mg-settings-save" type="button" data-i18n="settingsSave">Speichern</button>
@@ -1108,6 +1159,10 @@
 
     document.getElementById("mg-enable-matrix-mobile").addEventListener("change", () => {
       saveCombinedFeatureCheckboxes();
+    });
+
+    document.getElementById("mg-enable-desktop-hierarchy").addEventListener("change", () => {
+      saveDesktopHierarchySettingsCheckbox();
     });
 
     document.getElementById("mg-clear-thread-target").addEventListener("click", () => {
@@ -2645,6 +2700,7 @@
       ...storedFeatureConfig
     };
     syncCombinedSettingsCheckboxes();
+    await refreshDesktopHierarchySettingsCheckbox();
     setMergedThreadViewEnabled(mergeThreadsInMainView && isThreadViewFeatureEnabled());
     applyCombinedFeatureVisibility();
 
