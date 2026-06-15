@@ -4091,32 +4091,3 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-start-selected.mmlc-desktop-middle
   z-index: auto !important;
   isolation: auto !important;
 }
-
-
-/* Desktop pane alignment and hover-menu placement. */
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-expand-toggle,
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-maximize-toggle {
-  transform: translateY(-50%) !important;
-}
-
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-expand-toggle {
-  top: calc(50% - 17px) !important;
-}
-
-html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-space-panel-hidden):not(.mmlc-desktop-native-action) .mmlc-desktop-space-maximize-toggle {
-  top: calc(50% + 17px) !important;
-}
-
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel .mx_RoomListPanel,
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Chatliste"],
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel nav[aria-label="Room list"],
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] .mx_RoomListPanel,
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Chatliste"],
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] nav[aria-label="Room list"] {
-  left: var(--mmlc-desktop-chat-overlay-left, 52px) !important;
-  right: auto !important;
-  border: 2px solid #000 !important;
-  border-radius: 10px !important;
-  background-clip: padding-box !important;
-  box-sizing: border-box !important;
-}

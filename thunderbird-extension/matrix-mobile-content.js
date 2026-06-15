@@ -1,4 +1,4 @@
-/* SMART ELEMENT PATCH VERIFIED: unread badge polling restored for chat rows/chat-list button, native Space row activation with delayed outside-area menu dismissal, reliable first top-level Space landing via the real native button click path, parent-before-child Space display ordering, DM/Space chat-list collapse sync, and 42px round centered floating avatar. */
+/* SMART ELEMENT PATCH VERIFIED: unread badge polling restored for chat rows/chat-list button and  native Space row-target double-click with delayed outside-area menu dismissal, first top-level landing confirmation with generic native fallback, parent-before-child Space display ordering, DM/Space chat-list collapse sync, 42px round centered floating avatar, and first-top-level Space cleanup-deferred safe-child landing clicks. */
 (async () => {
   "use strict";
 
@@ -1340,43 +1340,6 @@
     desktopMiddleEdgeTrackingTimer = null;
   }
 
-  function desktopVisibleSpacePaneBounds() {
-    const mode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
-    const candidates = mode === "hidden"
-      ? [document.getElementById("mmlc-desktop-space-list-host")]
-      : [document.querySelector(SPACE_PANEL_SELECTOR), document.getElementById("mmlc-desktop-space-list-host")];
-
-    for (const candidate of candidates) {
-      if (!(candidate instanceof HTMLElement)) continue;
-      const rect = candidate.getBoundingClientRect();
-      const style = getComputedStyle(candidate);
-      if (
-        style.display === "none" ||
-        style.visibility === "hidden" ||
-        Number.parseFloat(style.opacity || "1") === 0 ||
-        !Number.isFinite(rect.left) ||
-        !Number.isFinite(rect.right) ||
-        rect.width < 20 ||
-        rect.height < 20 ||
-        rect.right <= 0 ||
-        rect.left >= window.innerWidth
-      ) continue;
-      return rect;
-    }
-
-    return null;
-  }
-
-  function desktopChatOverlayLeftNextToSpacePane() {
-    const bounds = desktopVisibleSpacePaneBounds();
-    if (!bounds) return NaN;
-
-    // Keep a small visual gap so the chat list's black border remains fully
-    // visible while the pane starts immediately beside the visible Space pane.
-    const gap = bounds.width <= 48 ? 6 : 4;
-    return Math.max(8, Math.round(bounds.right + gap));
-  }
-
   function syncDesktopChatOverlaySizeVars(edgeX = NaN) {
     const html = document.documentElement;
     if (!(html instanceof HTMLElement)) return;
@@ -1389,10 +1352,14 @@
       return;
     }
 
-    let overlayLeft = desktopChatOverlayLeftNextToSpacePane();
+    const overlayPanel = document.querySelector("#left-panel .mx_RoomListPanel, #left-panel [aria-label='Chatliste'], #left-panel [aria-label='Room list'], [data-testid='left-panel'] .mx_RoomListPanel, [data-testid='left-panel'] [aria-label='Chatliste'], [data-testid='left-panel'] [aria-label='Room list']");
+    let overlayLeft = Number.isFinite(edgeX) && edgeX > 0 ? edgeX : NaN;
 
-    if (!Number.isFinite(overlayLeft) || overlayLeft <= 0) {
-      overlayLeft = Number.isFinite(edgeX) && edgeX > 0 ? edgeX : NaN;
+    if (overlayPanel instanceof HTMLElement) {
+      const rect = overlayPanel.getBoundingClientRect();
+      if (Number.isFinite(rect.left) && rect.left >= 0 && rect.left < window.innerWidth - 40) {
+        overlayLeft = Math.round(rect.left);
+      }
     }
 
     if (!Number.isFinite(overlayLeft) || overlayLeft <= 0) {
@@ -1515,15 +1482,11 @@
 
     if (hidden && !floatingOpen) {
       button.style.transform = "none";
-      button.style.top = "12px";
-
-      if (spaceMode === "hidden") {
-        const spaceBounds = desktopVisibleSpacePaneBounds();
-        button.style.left = spaceBounds
-          ? `${Math.max(8, Math.round(spaceBounds.right + 6))}px`
-          : "54px";
-      } else if (spaceMode === "expanded") {
+      button.style.top = spaceMode === "hidden" && !desktopSpaceFloatingPaneIsOpen() ? "62px" : "12px";
+      if (spaceMode === "expanded") {
         button.style.left = "264px";
+      } else if (spaceMode === "hidden" && !desktopSpaceFloatingPaneIsOpen()) {
+        button.style.left = "8px";
       } else {
         button.style.left = "88px";
       }
@@ -2641,17 +2604,6 @@
     expandToggle.innerHTML = desktopSpacePaneToggleIconSvg();
     if (mode === "hidden") appendDesktopMinimizedSpaceUnreadBadge(expandToggle);
     protectDesktopNativeButton(expandToggle);
-    expandToggle.addEventListener("mouseenter", () => {
-      if (normalizeDesktopSpacePaneMode(desktopSpacePaneMode) !== "hidden") return;
-      if (desktopSpaceFloatingPaneIsOpen()) return;
-      if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("space-pane-hover");
-
-      desktopSpacePaneTemporaryOpen = true;
-      desktopSpaceFloatingLabelsExpanded = false;
-      syncDesktopPaneModeClasses();
-      renderDesktopHierarchyNativeUiSoon(0);
-    });
-
     expandToggle.addEventListener("click", event => {
       event.preventDefault();
       event.stopPropagation();
@@ -3161,20 +3113,6 @@
       renderDesktopMiddleChatNativeUi();
       renderDesktopHierarchyNativeUiSoon(0);
     });
-    button.addEventListener("mouseenter", () => {
-      if (!(desktopMiddlePaneHidden === true && !desktopMiddleFloatingPaneIsOpen())) return;
-      if (desktopSpaceFloatingPaneIsOpen()) closeDesktopSpaceFloatingPane("chat-list-hover");
-
-      desktopMiddlePaneTemporaryOpen = true;
-      desktopMiddlePaneTemporaryFromSpaceSelection = false;
-      desktopMiddlePaneSpaceLandingHoldUntil = 0;
-      syncDesktopPaneModeClasses();
-      enforceNativeNavigationPanesOpen("desktop-middle-hover-open-floating");
-      ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
-      renderDesktopMiddleChatNativeUi();
-      scheduleDesktopChatListUnreadImmediateUpdate(0, "desktop-middle-hover-open");
-      renderDesktopHierarchyNativeUiSoon(0);
-    });
     return button;
   }
 
@@ -3445,7 +3383,7 @@
     const isTopLevelNativeSpace = targetPath.length <= 1;
     const isFirstTopLevelNativeTarget = isFirstTopLevelNativeSpaceTarget(targetPath, selectedLabel);
     const firstTopClickOptions = isFirstTopLevelNativeTarget
-      ? { cleanup: false, nativeClick: true, delayMs: 820 }
+      ? { cleanup: false, eventTarget: "safe-child", delayMs: 820 }
       : {};
 
     if (!await clickNativeSpace("select", firstTopClickOptions)) return false;
@@ -3465,7 +3403,7 @@
       }
     }
 
-    if (!await clickNativeSpace("overview", isFirstTopLevelNativeTarget ? { cleanup: false, nativeClick: true, delayMs: 1080 } : {})) return false;
+    if (!await clickNativeSpace("overview", isFirstTopLevelNativeTarget ? { cleanup: false, eventTarget: "safe-child", delayMs: 1080 } : {})) return false;
     if (isFirstTopLevelNativeTarget) scheduleCloseNativeSpaceMenusOpenedBySyntheticClick();
 
     // Do not leave the previous DM/start page on the right when the vanilla
@@ -3477,7 +3415,7 @@
     if (isTopLevelNativeSpace) {
       await delay(220);
       if (!spaceOverviewTitleMatchesLabel(selectedLabel)) {
-        if (!await clickNativeSpace("overview-retry", isFirstTopLevelNativeTarget ? { cleanup: false, nativeClick: true, delayMs: 900 } : {})) return false;
+        if (!await clickNativeSpace("overview-retry")) return false;
         await delay(260);
       }
 
@@ -3489,8 +3427,8 @@
       // outside cleanup until after the pair so cleanup clicks cannot race the
       // landing transition.
       if (!spaceOverviewTitleMatchesLabel(selectedLabel) && isFirstTopLevelNativeTarget) {
-        if (!await clickNativeSpace("first-top-select-confirm", { cleanup: false, nativeClick: true, delayMs: 900 })) return false;
-        if (!await clickNativeSpace("first-top-overview-confirm", { cleanup: false, nativeClick: true, delayMs: 1180 })) return false;
+        if (!await clickNativeSpace("first-top-select-confirm", { cleanup: false, eventTarget: "safe-child", delayMs: 900 })) return false;
+        if (!await clickNativeSpace("first-top-overview-confirm", { cleanup: false, eventTarget: "safe-child", delayMs: 1180 })) return false;
         await delay(360);
 
         // Fallback for the topmost first-level Space: in Element's current DOM
@@ -3517,7 +3455,7 @@
           if (!spaceOverviewTitleMatchesLabel(selectedLabel)) {
             await clickNativeSpace("first-top-overview-after-native-fallback", {
               cleanup: false,
-              nativeClick: true,
+              eventTarget: "safe-child",
               delayMs: 900
             });
             await delay(360);
@@ -11515,22 +11453,7 @@
     dispatchMouseLike(eventTarget, "mousedown", clientX, clientY);
     dispatchPointerLike(eventTarget, "pointerup", clientX, clientY);
     dispatchMouseLike(eventTarget, "mouseup", clientX, clientY);
-
-    // The first top-level Space directly below Direct Messages is handled by a
-    // slightly different React path in current Element builds. Dispatching a
-    // manually constructed click on one of its avatar children can update the
-    // Smart Element selection without committing Element's native right-pane
-    // transition. Invoke the real Space button's click method for that target;
-    // all other rows retain the established coordinate-based synthetic click.
-    if (options.nativeClick === true) {
-      try {
-        target.click();
-      } catch {
-        dispatchMouseLike(target, "click", clientX, clientY);
-      }
-    } else {
-      dispatchMouseLike(eventTarget, "click", clientX, clientY);
-    }
+    dispatchMouseLike(eventTarget, "click", clientX, clientY);
 
     dismissVirtualKeyboard("native-space-button-click");
     if (options.cleanup !== false) scheduleCloseNativeSpaceMenusOpenedBySyntheticClick();
