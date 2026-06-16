@@ -59,6 +59,15 @@ h1 {
   margin-top: 1px;
 }
 
+.feature-option small {
+  display: block;
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+}
+
 .status {
   min-height: 22px;
   margin-top: 16px;
@@ -86,6 +95,10 @@ h1 {
     border-color: #334155;
   }
 
+  .feature-option small {
+    color: #94a3b8;
+  }
+
   .status {
     color: #86efac;
   }
@@ -105,9 +118,4 @@ h1 {
 .feature-number-row input {
   width: 96px;
   padding: 6px 8px;
-}
-
-.feature-option-number small {
-  color: #64748b;
-  font-size: 12px;
 }

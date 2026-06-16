@@ -54,6 +54,7 @@
   };
 
   let isMattermostPage = false;
+  let mattermostDetectionInFlight = null;
 
   function combinedSettings() {
     return window.MatrixCombinedSettings || null;
@@ -82,7 +83,7 @@
 
     settings.subscribe(config => {
       combinedFeatureConfig = settings.normalizeConfig(config || {});
-      applyCombinedFeatureVisibility();
+      refreshMattermostPageEligibility();
     });
   }
 
@@ -102,10 +103,48 @@
     document.getElementById("mmx-export-button")?.remove();
   }
 
+  async function refreshMattermostPageEligibility() {
+    if (mattermostDetectionInFlight) return mattermostDetectionInFlight;
+
+    mattermostDetectionInFlight = detectMattermost()
+      .then(detected => {
+        isMattermostPage = detected;
+        applyCombinedFeatureVisibility();
+        return detected;
+      })
+      .finally(() => {
+        mattermostDetectionInFlight = null;
+      });
+
+    return mattermostDetectionInFlight;
+  }
+
+  function installMattermostPageWatcher() {
+    let lastHref = location.href;
+
+    const refreshIfNeeded = () => {
+      if (location.href !== lastHref) {
+        lastHref = location.href;
+        refreshMattermostPageEligibility();
+      } else if (!isMattermostPage) {
+        refreshMattermostPageEligibility();
+      } else {
+        applyCombinedFeatureVisibility();
+      }
+    };
+
+    window.addEventListener("hashchange", refreshIfNeeded, true);
+    window.addEventListener("popstate", refreshIfNeeded, true);
+    setInterval(refreshIfNeeded, 2500);
+  }
+
   function inventoryLoadingHtml() {
     return '' +
-      '<div class="mmx-option-card">' +
-        '<strong>Loading Mattermost teams and channels...</strong>' +
+      '<div class="mmx-option-card mmx-inventory-loading" aria-live="polite">' +
+        '<div class="mmx-loading-title">' +
+          '<span class="mmx-loading-spinner" aria-hidden="true"></span>' +
+          '<strong>Loading Mattermost teams and channels...</strong>' +
+        '</div>' +
         '<div class="mmx-loading-note">Please wait, this can take a minute!</div>' +
       '</div>';
   }
@@ -2066,13 +2105,9 @@
   }
 
   (async () => {
-    isMattermostPage = await detectMattermost();
-    if (!isMattermostPage) return;
-
     installCombinedFeatureSettingsListener();
+    installMattermostPageWatcher();
     await refreshCombinedFeatureConfig();
-    if (isMattermostToolsEnabled()) {
-      createButton();
-    }
+    await refreshMattermostPageEligibility();
   })();
 })();

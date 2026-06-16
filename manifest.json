@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Smart Element",
-  "version": "1.0.103",
+  "version": "1.0.111",
   "description": "Smart Element by Thomas Kluge",
   "permissions": [
     "storage",
@@ -29,7 +29,8 @@
     {
       "resources": [
         "mg-page-bridge.js",
-        "mmi-page-bridge.js"
+        "mmi-page-bridge.js",
+        "assets/partyparrot/*"
       ],
       "matches": [
         "https://app.element.io/*",

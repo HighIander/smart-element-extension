@@ -40,6 +40,8 @@ The gallery module improves image handling in Element Web:
 - horizontally scrollable gallery strips,
 - keyboard navigation in the full-screen viewer,
 - white background for transparent images,
+- bundled partyparrot shortcode support in normal Matrix messages: image files in `assets/partyparrot/` are matched by filename without extension, so `fastparrot.gif` becomes `:fastparrot:` and `party_parrot.png` becomes `:party_parrot:`,
+- animated partyparrot GIFs are uploaded as `image/gif` and rendered through the Matrix media download URL where Element allows it,
 
 ### Mattermost import and export workflow
 
@@ -62,6 +64,7 @@ Importer features include:
 - duplicate-check workflow,
 - thread import handling,
 - emoji text-code conversion where supported,
+- custom emoji asset import into rich Matrix messages, including a bundled partyparrot fallback for common parrot shortcodes,
 
 ### Thread-view improvements
 

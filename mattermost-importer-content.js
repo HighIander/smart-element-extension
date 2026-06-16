@@ -22,6 +22,16 @@
   const PAGE_BRIDGE_SEND_PROGRESS = "matrix-mattermost-importer-send-progress";
   const PAGE_BRIDGE_DUPLICATE_REQUEST = "matrix-mattermost-importer-duplicate-request";
   const PAGE_BRIDGE_DUPLICATE_RESPONSE = "matrix-mattermost-importer-duplicate-response";
+  const PAGE_BRIDGE_CREATE_ROOM_REQUEST = "matrix-mattermost-importer-create-room-request";
+  const PAGE_BRIDGE_CREATE_ROOM_RESPONSE = "matrix-mattermost-importer-create-room-response";
+  const EMOJI_SHORTCODE_REGEX = /(^|[^A-Za-z0-9_+\-]):([A-Za-z0-9_+\-]{2,64}):/g;
+  const BUNDLED_PARTY_PARROT_EMOJI_ASSETS = {
+    parrot: "assets/partyparrot/partyparrot.png",
+    partyparrot: "assets/partyparrot/partyparrot.png",
+    "party_parrot": "assets/partyparrot/partyparrot.png",
+    "party-parrot": "assets/partyparrot/partyparrot.png",
+    "parrot_party": "assets/partyparrot/partyparrot.png"
+  };
   const CHAT_VIEW_CONTAINER_SELECTOR = [
     ".mx_RoomView",
     "[data-testid='room-view']",
@@ -63,7 +73,9 @@
     lastSelectedScopeId: "",
     lastSelectedScopeTitle: "",
     lastSelectedChannelId: "",
-    lastSelectedChannelTitle: ""
+    lastSelectedChannelTitle: "",
+    spaceCreateEncryptedRooms: false,
+    spaceRoomVisibility: "private"
   };
 
   const state = {
@@ -75,9 +87,12 @@
     lazyFolderMode: false,
     manifest: null,
     users: {},
+    emojis: {},
+    emojiAssetCache: new Map(),
     scopes: [],
     selectedScope: null,
     selectedChannel: null,
+    spaceSelectedChannelIds: new Set(),
     postsCache: new Map(),
     pageSession: null,
     loaded: false,
@@ -228,6 +243,8 @@
     state.config = { ...DEFAULT_CONFIG, ...(result[STORAGE_KEY] || {}) };
     state.config.importFromDate = normalizeImportFromDateValue(state.config.importFromDate);
     state.config.rememberExportFolder = true;
+    state.config.spaceCreateEncryptedRooms = state.config.spaceCreateEncryptedRooms === true;
+    state.config.spaceRoomVisibility = state.config.spaceRoomVisibility === "space" ? "space" : "private";
   }
 
   async function saveConfig() {
@@ -415,6 +432,187 @@
     };
 
     return String(value || "").replace(/:[+\-a-zA-Z0-9_]+:/g, token => map[token] || token);
+  }
+
+  function extractEmojiNamesFromText(text) {
+    const names = new Set();
+    const regex = new RegExp(EMOJI_SHORTCODE_REGEX.source, "g");
+    let match;
+
+    while ((match = regex.exec(String(text || ""))) !== null) {
+      names.add(match[2]);
+    }
+
+    return names;
+  }
+
+  function isCommonEmojiShortcodeName(name) {
+    const token = `:${name}:`;
+    return convertCommonEmojiShortcodes(token) !== token;
+  }
+
+  function extensionFromPath(path, mimeType = "") {
+    const match = String(path || "").match(/(\.[A-Za-z0-9]{1,8})(?:[?#].*)?$/);
+    if (match) return match[1].toLowerCase();
+
+    const type = String(mimeType || "").toLowerCase();
+    if (type.includes("gif")) return ".gif";
+    if (type.includes("svg")) return ".svg";
+    if (type.includes("webp")) return ".webp";
+    if (type.includes("jpeg") || type.includes("jpg")) return ".jpg";
+    return ".png";
+  }
+
+  function mimeTypeFromPath(path) {
+    const extension = extensionFromPath(path);
+
+    if (extension === ".gif") return "image/gif";
+    if (extension === ".svg") return "image/svg+xml";
+    if (extension === ".webp") return "image/webp";
+    if (extension === ".jpg" || extension === ".jpeg") return "image/jpeg";
+    return "image/png";
+  }
+
+  function safeFileNameSegment(value) {
+    return String(value || "emoji")
+      .toLowerCase()
+      .replace(/[^a-z0-9_+\-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "emoji";
+  }
+
+  function emojiRecordForName(name) {
+    if (!state.emojis || typeof state.emojis !== "object") {
+      return null;
+    }
+
+    return state.emojis[name] || state.emojis[String(name || "").toLowerCase()] || null;
+  }
+
+  async function makeExportedEmojiAsset(name, emoji) {
+    if (!emoji?.exported || !emoji.relative_path) {
+      return null;
+    }
+
+    const sourceFile = await getExportFile(emoji.relative_path);
+
+    if (!sourceFile) {
+      return null;
+    }
+
+    const type = sourceFile.type || mimeTypeFromPath(emoji.relative_path);
+    const extension = extensionFromPath(emoji.relative_path, type);
+    const fileName = `${safeFileNameSegment(name)}${extension}`;
+    const file = new File([sourceFile], fileName, {
+      type,
+      lastModified: sourceFile.lastModified || Date.now()
+    });
+
+    return {
+      name,
+      source: "mattermost-export",
+      cacheKey: `mattermost-export:${emoji.id || name}:${emoji.relative_path}:${sourceFile.size || 0}`,
+      file,
+      fileMeta: {
+        name: fileName,
+        type,
+        size: file.size || sourceFile.size || 0
+      }
+    };
+  }
+
+  async function makeBundledEmojiAsset(name, assetPath) {
+    const response = await fetch(chrome.runtime.getURL(assetPath));
+
+    if (!response.ok) {
+      throw new Error(`Bundled emoji asset not found: ${assetPath}`);
+    }
+
+    const blob = await response.blob();
+    const type = blob.type || mimeTypeFromPath(assetPath);
+    const extension = extensionFromPath(assetPath, type);
+    const fileName = `${safeFileNameSegment(name)}${extension}`;
+    const file = new File([blob], fileName, {
+      type,
+      lastModified: Date.now()
+    });
+
+    return {
+      name,
+      source: "bundled-partyparrot",
+      cacheKey: `bundled-partyparrot:${assetPath}:${blob.size || 0}`,
+      file,
+      fileMeta: {
+        name: fileName,
+        type,
+        size: file.size || blob.size || 0
+      }
+    };
+  }
+
+  async function resolveEmojiAssetForName(name) {
+    const normalizedName = String(name || "").trim();
+
+    if (!normalizedName || isCommonEmojiShortcodeName(normalizedName)) {
+      return null;
+    }
+
+    const cacheKey = `emoji:${normalizedName}`;
+
+    if (!state.emojiAssetCache.has(cacheKey)) {
+      state.emojiAssetCache.set(cacheKey, (async () => {
+        try {
+          const exportedAsset = await makeExportedEmojiAsset(normalizedName, emojiRecordForName(normalizedName));
+          if (exportedAsset) return exportedAsset;
+
+          const bundledPath = BUNDLED_PARTY_PARROT_EMOJI_ASSETS[normalizedName.toLowerCase()];
+          if (bundledPath) return makeBundledEmojiAsset(normalizedName, bundledPath);
+        } catch (error) {
+          console.warn(`Could not prepare emoji asset :${normalizedName}:`, error);
+        }
+
+        return null;
+      })());
+    }
+
+    return state.emojiAssetCache.get(cacheKey);
+  }
+
+  async function emojiAssetsForMessage(message) {
+    const assets = [];
+    const names = [...extractEmojiNamesFromText(message)].filter(name => {
+      return !isCommonEmojiShortcodeName(name);
+    });
+
+    for (const name of names) {
+      const asset = await resolveEmojiAssetForName(name);
+      if (asset) assets.push(asset);
+    }
+
+    return {
+      names,
+      assets
+    };
+  }
+
+  async function addEmojiAssetsToTextItem(textItem, post) {
+    const emojiInfo = await emojiAssetsForMessage(post?.message || "");
+
+    if (emojiInfo.names.length === 0) {
+      return textItem;
+    }
+
+    return {
+      ...textItem,
+      emojiShortcodes: emojiInfo.names,
+      emojiAssets: emojiInfo.assets,
+      meta: {
+        ...textItem.meta,
+        custom_emoji_shortcodes: emojiInfo.names,
+        custom_emoji_asset_count: emojiInfo.assets.length,
+        custom_emoji_asset_sources: emojiInfo.assets.map(asset => asset.source || "unknown")
+      }
+    };
   }
 
   function htmlToken(tokens, html) {
@@ -632,8 +830,33 @@
     return rect.width > 0 && rect.height > 0;
   }
 
+  function hasCurrentMatrixRoomOrSpaceTarget() {
+    return Boolean(detectCurrentRoomIdOrAlias() && document.body);
+  }
+
+  function visibleSpaceOverviewElements() {
+    return Array.from(document.querySelectorAll(SPACE_OVERVIEW_SELECTOR))
+      .filter(element => isRenderedElement(element) && !element.closest(`#${OVERLAY_ID}, #${BUTTON_ID}, #${MINI_PROGRESS_ID}`));
+  }
+
+  function isElementSpaceViewActive() {
+    if (!hasCurrentMatrixRoomOrSpaceTarget()) return false;
+
+    const currentTarget = detectCurrentRoomIdOrAlias();
+    const sessionTargetMatches = state.pageSession?.currentRoomId === currentTarget ||
+      (Array.isArray(state.pageSession?.currentRoomAliases) && state.pageSession.currentRoomAliases.includes(currentTarget));
+
+    if (state.pageSession?.currentRoomIsSpace === true && sessionTargetMatches) {
+      return true;
+    }
+
+    return visibleSpaceOverviewElements().length > 0;
+  }
+
   function isElementChatViewActive() {
-    if (!detectCurrentRoomIdOrAlias()) return false;
+    if (!hasCurrentMatrixRoomOrSpaceTarget()) return false;
+    if (!document.body) return false;
+    if (isElementSpaceViewActive()) return false;
 
     const roomViews = Array.from(document.querySelectorAll(CHAT_VIEW_CONTAINER_SELECTOR))
       .filter(element => isRenderedElement(element) && !element.closest(`#${OVERLAY_ID}, #${BUTTON_ID}, #${MINI_PROGRESS_ID}`));
@@ -645,12 +868,23 @@
     const visibleChatParts = Array.from(document.querySelectorAll(CHAT_VIEW_CONTENT_SELECTOR))
       .filter(element => isRenderedElement(element) && !element.closest(`#${OVERLAY_ID}, #${BUTTON_ID}, #${MINI_PROGRESS_ID}`));
 
-    if (!visibleChatParts.length) return false;
+    if (!visibleChatParts.length) return true;
 
-    const visibleSpaceOverviews = Array.from(document.querySelectorAll(SPACE_OVERVIEW_SELECTOR))
-      .filter(element => isRenderedElement(element) && !element.closest(`#${OVERLAY_ID}, #${BUTTON_ID}, #${MINI_PROGRESS_ID}`));
+    const visibleSpaceOverviews = visibleSpaceOverviewElements();
 
-    return visibleSpaceOverviews.length === 0;
+    if (visibleSpaceOverviews.length === 0) return true;
+
+    /*
+     * Element's room DOM changes frequently across versions and while the Smart
+     * Element mobile layout promotes panes. A room URL is still the authoritative
+     * signal for where the importer can send, so do not let stale selector
+     * assumptions make the Mattermost importer impossible to open.
+     */
+    return true;
+  }
+
+  function isMatrixImportTargetActive() {
+    return hasCurrentMatrixRoomOrSpaceTarget();
   }
 
   function isSmartElementMobileChatOrThreadMode() {
@@ -664,7 +898,7 @@
   }
 
   function refreshFloatingButtonForCurrentView() {
-    const shouldShow = isMattermostToolsEnabled() && isElementChatViewActive();
+    const shouldShow = isMattermostToolsEnabled() && isMatrixImportTargetActive();
     const button = document.getElementById(BUTTON_ID);
 
     if (shouldShow) {
@@ -693,6 +927,12 @@
 
     window.addEventListener("hashchange", closeOnRoomChange, true);
     window.addEventListener("popstate", closeOnRoomChange, true);
+    new MutationObserver(() => {
+      refreshFloatingButtonForCurrentView();
+    }).observe(document.body || document.documentElement, {
+      childList: true,
+      subtree: true
+    });
     setInterval(() => {
       closeOnRoomChange();
       refreshFloatingButtonForCurrentView();
@@ -700,7 +940,7 @@
   }
 
   function createFloatingButton() {
-    if (!isMattermostToolsEnabled() || !isElementChatViewActive()) return;
+    if (!isMattermostToolsEnabled() || !isMatrixImportTargetActive()) return;
     if (document.getElementById(BUTTON_ID)) {
       return;
     }
@@ -918,9 +1158,12 @@
     state.lazyFolderMode = false;
     state.manifest = null;
     state.users = {};
+    state.emojis = {};
+    state.emojiAssetCache.clear();
     state.scopes = [];
     state.selectedScope = null;
     state.selectedChannel = null;
+    state.spaceSelectedChannelIds.clear();
     state.postsCache.clear();
     state.loaded = false;
   }
@@ -1071,6 +1314,12 @@
       state.users = {};
     }
 
+    try {
+      state.emojis = await readJsonFile((state.manifest && state.manifest.emoji_file) || "emojis.json");
+    } catch {
+      state.emojis = {};
+    }
+
     makeScopes();
     state.selectedScope = state.scopes[0] || null;
     state.selectedChannel = null;
@@ -1207,6 +1456,42 @@
     if (type === "D") return "direct";
     if (type === "G") return "group";
     return type || "unknown";
+  }
+
+  function scopeForChannel(channel) {
+    if (!channel) return null;
+
+    if (channel.type === "D" || channel.type === "G") {
+      return state.scopes.find(scope => scope.type === "dm") || null;
+    }
+
+    if (channel.team_id) {
+      const teamScope = state.scopes.find(scope => scope.type === "team" && scope.id === channel.team_id);
+      if (teamScope) return teamScope;
+    }
+
+    return state.scopes.find(scope => scope.type === "other") || null;
+  }
+
+  function selectedSpaceChannels() {
+    if (!state.loaded) return [];
+
+    const selectedIds = state.spaceSelectedChannelIds;
+    return allChannels().filter(channel => selectedIds.has(channel.id));
+  }
+
+  function spaceImportRoomName(channel, selectedChannels = selectedSpaceChannels()) {
+    const title = channelTitle(channel).trim() || channel.id || "Mattermost channel";
+    const normalizedTitle = normalizeForSuggestion(title);
+    const duplicates = selectedChannels.filter(candidate => normalizeForSuggestion(channelTitle(candidate)) === normalizedTitle);
+
+    if (duplicates.length <= 1) {
+      return title;
+    }
+
+    const scope = scopeForChannel(channel);
+    const scopeTitle = scope?.title ? `${scope.title} - ` : "";
+    return `${scopeTitle}${title}`.trim() || title;
   }
 
   function normalizeForSuggestion(value) {
@@ -1860,7 +2145,10 @@
     if (images.length > 0) {
       const galleryId = createGalleryId(channel, post);
       const gallery = { id: galleryId, count: images.length };
-      const primaryTextItem = makePrimaryTextItemForPost(channel, post, includeOtherFiles);
+      const primaryTextItem = await addEmojiAssetsToTextItem(
+        makePrimaryTextItemForPost(channel, post, includeOtherFiles),
+        post
+      );
 
       items.push({
         ...primaryTextItem,
@@ -1892,12 +2180,18 @@
         }));
       }
     } else if (hasText || otherFiles.length === 0) {
-      items.push(makePrimaryTextItemForPost(channel, post, includeOtherFiles));
+      items.push(await addEmojiAssetsToTextItem(
+        makePrimaryTextItemForPost(channel, post, includeOtherFiles),
+        post
+      ));
     }
 
     if (otherFiles.length > 0) {
       if (!hasText && images.length === 0) {
-        items.push(makePrimaryTextItemForPost(channel, post, includeOtherFiles));
+        items.push(await addEmojiAssetsToTextItem(
+          makePrimaryTextItemForPost(channel, post, includeOtherFiles),
+          post
+        ));
       }
 
       for (const fileInfo of otherFiles) {
@@ -1910,7 +2204,7 @@
     return items;
   }
 
-  function pageBridgeRequest({ type, responseType, requestIdPrefix, room, items = [], duplicateCheck = null, thread = null, timeoutMs = PAGE_BRIDGE_DEFAULT_TIMEOUT_MS }, log) {
+  function pageBridgeRequest({ type, responseType, requestIdPrefix, room, items = [], duplicateCheck = null, thread = null, payload = {}, timeoutMs = PAGE_BRIDGE_DEFAULT_TIMEOUT_MS }, log) {
     const requestId = `${requestIdPrefix}_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
     return new Promise((resolve, reject) => {
@@ -1970,7 +2264,8 @@
         room,
         items,
         duplicateCheck,
-        thread
+        thread,
+        ...payload
       }, window.location.origin);
     });
   }
@@ -1996,6 +2291,21 @@
       duplicateCheck,
       thread,
       timeoutMs: PAGE_BRIDGE_SEND_TIMEOUT_MS
+    }, log);
+  }
+
+  function createRoomInSpaceViaPageBridge(space, options, log) {
+    return pageBridgeRequest({
+      type: PAGE_BRIDGE_CREATE_ROOM_REQUEST,
+      responseType: PAGE_BRIDGE_CREATE_ROOM_RESPONSE,
+      requestIdPrefix: "mmi_create_room",
+      room: space,
+      payload: {
+        roomName: options.roomName || "",
+        encrypted: options.encrypted === true,
+        visibilityMode: options.visibilityMode === "space" ? "space" : "private"
+      },
+      timeoutMs: PAGE_BRIDGE_DEFAULT_TIMEOUT_MS
     }, log);
   }
 
@@ -2169,6 +2479,26 @@
     updateCloseButtonForImportState(root);
   }
 
+  function setSpaceImportControls(root, importing) {
+    const selectedChannels = selectedSpaceChannels();
+    const selectButton = qs("#mmi-select-folder", root);
+    const importButton = qs("#mmi-space-import", root);
+    const cancelButton = qs("#mmi-cancel", root);
+    const inputs = root.querySelectorAll(
+      "#mmi-other-files, #mmi-import-from, #mmi-space-encrypted, #mmi-space-visibility, [data-space-channel-id], [data-scope-type], #mmi-space-select-visible, #mmi-space-clear-visible"
+    );
+
+    if (selectButton) selectButton.disabled = importing;
+    if (importButton) importButton.disabled = importing || !state.loaded || selectedChannels.length === 0;
+    if (cancelButton) cancelButton.disabled = !importing;
+
+    for (const input of inputs) {
+      input.disabled = importing;
+    }
+
+    updateCloseButtonForImportState(root);
+  }
+
   function confirmImportAfterScrollWarning(root, details) {
     /*
      * Duplicate detection is only as complete as the Matrix history that Element
@@ -2237,28 +2567,36 @@
     });
   }
 
-  async function importSelectedChannel(root) {
-    if (state.importing) return;
-    if (!state.selectedChannel) throw new Error("No Mattermost channel selected.");
+  async function importSelectedChannel(root, options = {}) {
+    const manageState = options.manageState !== false;
+    const channel = options.channel || state.selectedChannel;
 
-    const room = detectCurrentRoomIdOrAlias();
+    if (state.importing && manageState) return;
+    if (!channel) throw new Error("No Mattermost channel selected.");
+
+    const room = options.room || detectCurrentRoomIdOrAlias();
     if (!room) throw new Error("Could not detect the current Matrix room from the URL.");
 
-    resetImportLog(root);
-    state.importing = true;
-    state.cancelRequested = false;
-    setImportControls(root, true);
-    updateImportProgress(root, 0, 1, 0, 0, "Preparing import…");
+    if (options.resetLog !== false) resetImportLog(root);
+    if (manageState) {
+      state.importing = true;
+      state.cancelRequested = false;
+      setImportControls(root, true);
+    }
+    updateImportProgress(root, 0, 1, 0, 0, `Preparing import for ${channelTitle(channel)}...`);
 
     try {
-      const includeOtherFiles = qs("#mmi-other-files", root).checked;
-      const importFromDate = normalizeImportFromDateValue(qs("#mmi-import-from", root)?.value || "");
-      state.config.includeOtherFiles = includeOtherFiles;
-      state.config.importFromDate = importFromDate;
-      await saveConfig();
+      const includeOtherFiles = options.includeOtherFiles !== undefined
+        ? options.includeOtherFiles !== false
+        : qs("#mmi-other-files", root)?.checked !== false;
+      const importFromDate = normalizeImportFromDateValue((options.importFromDate ?? qs("#mmi-import-from", root)?.value) || "");
+      if (options.saveOptions !== false) {
+        state.config.includeOtherFiles = includeOtherFiles;
+        state.config.importFromDate = importFromDate;
+        await saveConfig();
+      }
 
-      const channel = state.selectedChannel;
-      rememberSelection(state.selectedScope, channel);
+      if (options.rememberSelection !== false) rememberSelection(state.selectedScope, channel);
       const allPosts = await loadPostsForChannel(channel);
       const filterInfo = filterPostsByImportFromDate(allPosts, importFromDate);
       const posts = filterInfo.posts;
@@ -2267,16 +2605,22 @@
         ? `Import from: ${filterInfo.label} (${filterInfo.ignoredCount} earlier messages ignored)`
         : "";
 
-      updateImportProgress(root, 0, stats.messages, 0, stats.images, "Waiting for duplicate-check warning confirmation...");
+      let confirmed = true;
 
-      const confirmed = await confirmImportAfterScrollWarning(root, {
-        channelTitle: channelTitle(channel),
-        messageCount: stats.messages,
-        imageCount: stats.images,
-        otherFileCount: includeOtherFiles ? stats.otherFiles : 0,
-        missingFileCount: stats.missingFiles,
-        dateFilterText
-      });
+      if (options.confirmScrollWarning !== false) {
+        updateImportProgress(root, 0, stats.messages, 0, stats.images, "Waiting for duplicate-check warning confirmation...");
+
+        confirmed = await confirmImportAfterScrollWarning(root, {
+          channelTitle: channelTitle(channel),
+          messageCount: stats.messages,
+          imageCount: stats.images,
+          otherFileCount: includeOtherFiles ? stats.otherFiles : 0,
+          missingFileCount: stats.missingFiles,
+          dateFilterText
+        });
+      } else {
+        appendLog(root, "Import target is a newly created Matrix room; skipping scroll warning.");
+      }
 
       if (!confirmed) {
         appendLog(root, "Import cancelled before sending.");
@@ -2285,7 +2629,9 @@
         return;
       }
 
-      appendLog(root, "Duplicate-check warning ignored by user. Continuing import.");
+      if (options.confirmScrollWarning !== false) {
+        appendLog(root, "Duplicate-check warning ignored by user. Continuing import.");
+      }
       updateImportProgress(root, 0, stats.messages, 0, stats.images, "Importing...");
       appendLog(root, `Importing ${stats.messages} messages, ${stats.images} images into ${room}`);
       if (filterInfo.active) {
@@ -2519,10 +2865,127 @@
       }
       publishFloatingImportLog(uploadErrorFiles > 0);
     } finally {
+      if (manageState) {
+        state.importing = false;
+        state.cancelRequested = false;
+        removeMiniProgressDialog();
+        setImportControls(root, false);
+      }
+    }
+  }
+
+  function readSpaceRoomOptions(root) {
+    return {
+      encrypted: qs("#mmi-space-encrypted", root)?.checked === true,
+      visibilityMode: qs("#mmi-space-visibility", root)?.value === "space" ? "space" : "private"
+    };
+  }
+
+  async function importSelectedChannelsIntoSpace(root) {
+    if (state.importing) return;
+
+    const space = detectCurrentRoomIdOrAlias();
+    if (!space) throw new Error("Could not detect the current Matrix space from the URL.");
+
+    const channels = selectedSpaceChannels();
+    if (channels.length === 0) throw new Error("Select at least one Mattermost channel.");
+
+    const includeOtherFiles = qs("#mmi-other-files", root)?.checked !== false;
+    const importFromDate = normalizeImportFromDateValue((qs("#mmi-import-from", root)?.value || ""));
+    const roomOptions = readSpaceRoomOptions(root);
+
+    state.config.includeOtherFiles = includeOtherFiles;
+    state.config.importFromDate = importFromDate;
+    state.config.spaceCreateEncryptedRooms = roomOptions.encrypted === true;
+    state.config.spaceRoomVisibility = roomOptions.visibilityMode;
+    await saveConfig();
+
+    resetImportLog(root);
+    state.importing = true;
+    state.cancelRequested = false;
+    setSpaceImportControls(root, true);
+    updateImportProgress(root, 0, channels.length, 0, 0, "Preparing space import...");
+
+    let createdRooms = 0;
+    let failedChannels = 0;
+    const selectedForNames = [...channels];
+
+    try {
+      appendLog(root, `Starting space import for ${channels.length} Mattermost channel(s) into ${space}.`);
+      appendLog(root, `New room access: ${roomOptions.visibilityMode === "space" ? "all space members" : "private/invite only"}. Encryption: ${roomOptions.encrypted ? "on" : "off"}.`);
+
+      for (let index = 0; index < channels.length; index += 1) {
+        const channel = channels[index];
+
+        if (state.cancelRequested) {
+          appendLog(root, "Cancel requested. Stopping before next channel.");
+          break;
+        }
+
+        const roomName = spaceImportRoomName(channel, selectedForNames);
+        updateImportProgress(root, index, channels.length, 0, 0, `Creating Matrix room ${index + 1}/${channels.length}: ${roomName}`);
+        appendLog(root, `Creating Matrix room for ${channelTitle(channel)}: ${roomName}`);
+
+        let createResult = null;
+
+        try {
+          createResult = await createRoomInSpaceViaPageBridge(space, {
+            roomName,
+            encrypted: roomOptions.encrypted,
+            visibilityMode: roomOptions.visibilityMode
+          }, text => appendLog(root, text));
+        } catch (error) {
+          failedChannels += 1;
+          appendLog(root, `Error: could not create Matrix room for ${channelTitle(channel)}: ${errorText(error)}`);
+          publishFloatingImportLog(true);
+          continue;
+        }
+
+        const roomId = createResult.roomId || createResult.room_id || "";
+        if (!roomId) {
+          failedChannels += 1;
+          appendLog(root, `Error: Matrix room creation for ${channelTitle(channel)} did not return a room id.`);
+          publishFloatingImportLog(true);
+          continue;
+        }
+
+        createdRooms += 1;
+        appendLog(root, `Created Matrix room ${roomName}: ${roomId}`);
+
+        try {
+          await importSelectedChannel(root, {
+            channel,
+            room: roomId,
+            includeOtherFiles,
+            importFromDate,
+            confirmScrollWarning: false,
+            manageState: false,
+            resetLog: false,
+            saveOptions: false,
+            rememberSelection: false
+          });
+        } catch (error) {
+          failedChannels += 1;
+          appendLog(root, `Error: import failed for ${channelTitle(channel)} in ${roomId}: ${errorText(error)}`);
+          publishFloatingImportLog(true);
+        }
+      }
+
+      if (state.cancelRequested) {
+        updateImportProgress(root, createdRooms, channels.length, 0, 0, "Cancelled.");
+        appendLog(root, "Space import cancelled.");
+      } else {
+        updateImportProgress(root, channels.length, channels.length, 0, 0, "Done.");
+        appendLog(root, `Space import finished. Created ${createdRooms} room(s), ${failedChannels} channel(s) failed.`);
+      }
+
+      publishFloatingImportLog(failedChannels > 0);
+    } finally {
       state.importing = false;
       state.cancelRequested = false;
       removeMiniProgressDialog();
-      setImportControls(root, false);
+      setSpaceImportControls(root, false);
+      renderSpaceLoadedUi(root);
     }
   }
 
@@ -2680,6 +3143,26 @@
     }).join("") || `<div class="mmi-small">No channels in this group.</div>`;
   }
 
+  function renderSpaceChannels(root) {
+    const container = qs("#mmi-channel-list", root);
+    const channels = channelsForScope(state.selectedScope);
+
+    container.innerHTML = channels.map(channel => {
+      const checked = state.spaceSelectedChannelIds.has(channel.id);
+      const active = checked ? " active" : "";
+
+      return `
+        <label class="mmi-list-button mmi-multi-channel${active}">
+          <input type="checkbox" data-space-channel-id="${escapeHtml(channel.id)}" ${checked ? "checked" : ""}>
+          <span>
+            <span class="mmi-title">${escapeHtml(channelTitle(channel))}</span>
+            <span class="mmi-subtitle">${escapeHtml(channelTypeLabel(channel.type))} · ${channel.post_count || 0} messages</span>
+          </span>
+        </label>
+      `;
+    }).join("") || `<div class="mmi-small">No channels in this group.</div>`;
+  }
+
   async function renderPreview(root) {
     const preview = qs("#mmi-preview", root);
 
@@ -2734,6 +3217,77 @@
     `;
   }
 
+  async function renderSpacePreview(root) {
+    const preview = qs("#mmi-preview", root);
+    const selectedChannels = selectedSpaceChannels();
+
+    if (!state.loaded) {
+      preview.innerHTML = `
+        <div class="mmi-preview-card">
+          <h4>No local export loaded</h4>
+          <div class="mmi-small">Select the export folder. Only manifest.json and users.json are read initially.</div>
+        </div>
+      `;
+      return;
+    }
+
+    if (selectedChannels.length === 0) {
+      preview.innerHTML = `
+        <div class="mmi-preview-card">
+          <h4>No channels selected</h4>
+          <div class="mmi-small">Select one or more Mattermost channels. Each selected channel will become a new Matrix room in the current space.</div>
+        </div>
+      `;
+      return;
+    }
+
+    const selectedKey = selectedChannels.map(channel => channel.id).join("|");
+    preview.innerHTML = `
+      <div class="mmi-preview-card">
+        <h4>${selectedChannels.length} channel(s) selected</h4>
+        <div class="mmi-small">Loading selected channel stats...</div>
+      </div>
+    `;
+
+    let messages = 0;
+    let images = 0;
+    let otherFiles = 0;
+    let missingFiles = 0;
+
+    for (const channel of selectedChannels) {
+      const allPosts = await loadPostsForChannel(channel);
+      const filterInfo = filterPostsByImportFromDate(allPosts);
+      const stats = await countImportStats(filterInfo.posts);
+      messages += stats.messages;
+      images += stats.images;
+      otherFiles += stats.otherFiles;
+      missingFiles += stats.missingFiles;
+    }
+
+    if (selectedKey !== selectedSpaceChannels().map(channel => channel.id).join("|")) return;
+
+    const roomRows = selectedChannels.map(channel => `
+      <div class="mmi-preview-row">
+        <span>${escapeHtml(channelTitle(channel))}</span>
+        <span>${escapeHtml(spaceImportRoomName(channel, selectedChannels))}</span>
+      </div>
+    `).join("");
+
+    preview.innerHTML = `
+      <div class="mmi-preview-card">
+        <h4>${selectedChannels.length} new Matrix room(s)</h4>
+        <div class="mmi-preview-row"><span>Total messages to import</span><strong>${messages}</strong></div>
+        <div class="mmi-preview-row"><span>Images</span><strong>${images}</strong></div>
+        <div class="mmi-preview-row"><span>Other exported files</span><strong>${otherFiles}</strong></div>
+        <div class="mmi-preview-row"><span>Missing files</span><strong>${missingFiles}</strong></div>
+      </div>
+      <div class="mmi-preview-card">
+        <h4>Room mapping</h4>
+        ${roomRows}
+      </div>
+    `;
+  }
+
   function renderLoadedUi(root) {
     renderScopes(root);
     renderChannels(root);
@@ -2743,7 +3297,21 @@
     renderPreview(root).catch(error => appendLog(root, `Preview error: ${error.message || error}`));
   }
 
+  function renderSpaceLoadedUi(root) {
+    renderScopes(root);
+    renderSpaceChannels(root);
+
+    setSpaceImportControls(root, state.importing);
+
+    renderSpacePreview(root).catch(error => appendLog(root, `Preview error: ${error.message || error}`));
+  }
+
   function openModal() {
+    if (isElementSpaceViewActive()) {
+      openSpaceModal();
+      return;
+    }
+
     if (!isElementChatViewActive()) {
       window.alert("Open a Matrix chat room before starting a Mattermost import.");
       refreshFloatingButtonForCurrentView();
@@ -2930,6 +3498,220 @@
           appendLog(overlay, `Reused stored export folder: ${state.rootName}`);
           if (suggestion) appendLog(overlay, suggestionDescription(suggestion));
           renderLoadedUi(overlay);
+        })
+        .catch(error => {
+          appendLog(overlay, `Could not reuse stored export folder: ${error.message || error}`);
+        });
+    }
+  }
+
+  function openSpaceModal() {
+    const existing = document.getElementById(OVERLAY_ID);
+
+    if (state.importing) {
+      if (existing) {
+        closeFullDialog();
+      } else {
+        ensureMiniProgressDialog();
+      }
+      return;
+    }
+
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    state.pendingContextSuggestion = false;
+    state.manualSelectionAfterOpen = false;
+    requestPageSession();
+
+    const overlay = document.createElement("div");
+    overlay.id = OVERLAY_ID;
+    overlay.className = "mmi-overlay";
+
+    overlay.innerHTML = `
+      <div class="mmi-modal" role="dialog" aria-modal="true">
+        <div class="mmi-header">
+          <div>
+            <h2>Import local Mattermost export into new Matrix rooms in this space</h2>
+            <div class="mmi-small">Current Matrix space: ${escapeHtml(detectCurrentRoomIdOrAlias() || "not detected")}</div>
+            <div class="mmi-small" id="mmi-session">Waiting for live Element MatrixClient...</div>
+            <div class="mmi-warning">Each selected Mattermost channel creates one new Matrix room in the current space, then imports with the same per-channel routine as the room importer.</div>
+          </div>
+          <div class="mmi-header-actions">
+            <button class="mmi-settings" id="mmi-settings" title="Smart Element settings" aria-label="Smart Element settings" type="button">⚙</button>
+            <button class="mmi-close" id="mmi-close" title="Close" aria-label="Close">×</button>
+          </div>
+        </div>
+
+        <div class="mmi-controls mmi-space-controls">
+          <button id="mmi-select-folder">Select export folder metadata</button>
+          <div class="mmi-small" id="mmi-folder-hint">${escapeHtml(exportFolderHintText())}</div>
+          <label><input id="mmi-other-files" type="checkbox" ${state.config.includeOtherFiles ? "checked" : ""}> Import non-image files if present</label>
+          <label>Import from <input id="mmi-import-from" type="date" value="${escapeHtml(state.config.importFromDate)}"></label>
+          <label><input id="mmi-space-encrypted" type="checkbox" ${state.config.spaceCreateEncryptedRooms ? "checked" : ""}> Encrypt new rooms</label>
+          <label>Room access
+            <select id="mmi-space-visibility">
+              <option value="private" ${state.config.spaceRoomVisibility !== "space" ? "selected" : ""}>Private</option>
+              <option value="space" ${state.config.spaceRoomVisibility === "space" ? "selected" : ""}>All space members</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="mmi-body">
+          <div class="mmi-pane">
+            <h3>Teams / DMs</h3>
+            <div id="mmi-scope-list"></div>
+          </div>
+
+          <div class="mmi-pane">
+            <div class="mmi-pane-heading">
+              <h3>Channels</h3>
+              <span>
+                <button class="mmi-mini-action" id="mmi-space-select-visible" type="button">All</button>
+                <button class="mmi-mini-action" id="mmi-space-clear-visible" type="button">None</button>
+              </span>
+            </div>
+            <div id="mmi-channel-list"></div>
+          </div>
+
+          <div class="mmi-pane">
+            <h3>Preview</h3>
+            <div id="mmi-preview"></div>
+            <h3>Log</h3>
+            <div id="mmi-log" class="mmi-log"></div>
+          </div>
+        </div>
+
+        <div class="mmi-footer">
+          <div class="mmi-footer-progress">
+            <div class="mmi-progress" id="mmi-status">Ready.</div>
+            <div class="mmi-progressbar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div class="mmi-progressbar-fill" id="mmi-progress-fill"></div>
+            </div>
+            <div class="mmi-progress-text" id="mmi-progress-text">0% · 0/0 messages · 0/0 images</div>
+          </div>
+          <div class="mmi-footer-actions">
+            <button class="mmi-cancel-button" id="mmi-cancel" disabled>Cancel upload</button>
+            <button class="mmi-primary-button" id="mmi-space-import" ${state.loaded && selectedSpaceChannels().length > 0 ? "" : "disabled"}>Create rooms and import selected channels</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    const existingLog = qs("#mmi-log", overlay);
+    if (existingLog && state.importLogLines.length > 0) {
+      existingLog.textContent = state.importLogLines.join("\n");
+      existingLog.scrollTop = existingLog.scrollHeight;
+    }
+    updateSessionUiIfOpen();
+
+    qs("#mmi-close", overlay).addEventListener("click", () => closeFullDialog());
+    qs("#mmi-settings", overlay).addEventListener("click", openCombinedSettingsDialog);
+
+    qs("#mmi-import-from", overlay).addEventListener("change", async event => {
+      state.config.importFromDate = normalizeImportFromDateValue(event.target.value);
+      event.target.value = state.config.importFromDate;
+      await saveConfig();
+      renderSpaceLoadedUi(overlay);
+    });
+
+    qs("#mmi-space-encrypted", overlay).addEventListener("change", async event => {
+      state.config.spaceCreateEncryptedRooms = event.target.checked === true;
+      await saveConfig();
+      renderSpaceLoadedUi(overlay);
+    });
+
+    qs("#mmi-space-visibility", overlay).addEventListener("change", async event => {
+      state.config.spaceRoomVisibility = event.target.value === "space" ? "space" : "private";
+      await saveConfig();
+      renderSpaceLoadedUi(overlay);
+    });
+
+    qs("#mmi-select-folder", overlay).addEventListener("click", async () => {
+      try {
+        qs("#mmi-status", overlay).textContent = "Opening local export folder...";
+
+        state.config.rememberExportFolder = true;
+        await saveConfig();
+
+        await selectExportFolderLazily();
+        await loadExportFromSelectedFolder();
+
+        qs("#mmi-folder-hint", overlay).textContent = exportFolderHintText();
+        appendLog(overlay, `Loaded metadata only: ${state.rootName}`);
+        appendLog(overlay, "No post chunks or assets have been read until preview/import.");
+        renderSpaceLoadedUi(overlay);
+      } catch (error) {
+        qs("#mmi-status", overlay).textContent = "Error.";
+        appendLog(overlay, `Lazy folder load error: ${error.message || error}`);
+        appendLog(overlay, "Fallback is possible but enumerates all files and is not recommended for very large exports.");
+      }
+    });
+
+    qs("#mmi-space-import", overlay).addEventListener("click", async () => {
+      try {
+        await importSelectedChannelsIntoSpace(overlay);
+      } catch (error) {
+        qs("#mmi-status", overlay).textContent = "Error.";
+        appendLog(overlay, `Space import error: ${error.message || error}`);
+        publishFloatingImportLog(true);
+      }
+    });
+
+    qs("#mmi-cancel", overlay).addEventListener("click", () => {
+      requestImportCancel(overlay);
+    });
+
+    qs("#mmi-space-select-visible", overlay).addEventListener("click", () => {
+      for (const channel of channelsForScope(state.selectedScope)) {
+        state.spaceSelectedChannelIds.add(channel.id);
+      }
+      renderSpaceLoadedUi(overlay);
+    });
+
+    qs("#mmi-space-clear-visible", overlay).addEventListener("click", () => {
+      for (const channel of channelsForScope(state.selectedScope)) {
+        state.spaceSelectedChannelIds.delete(channel.id);
+      }
+      renderSpaceLoadedUi(overlay);
+    });
+
+    overlay.addEventListener("click", event => {
+      const scopeButton = event.target.closest("[data-scope-type][data-scope-id]");
+      if (!scopeButton) return;
+
+      const type = scopeButton.getAttribute("data-scope-type");
+      const id = scopeButton.getAttribute("data-scope-id");
+      state.selectedScope = state.scopes.find(scope => scope.type === type && scope.id === id) || null;
+      renderSpaceLoadedUi(overlay);
+    });
+
+    overlay.addEventListener("change", event => {
+      const channelInput = event.target.closest("[data-space-channel-id]");
+      if (!channelInput) return;
+
+      const channelId = channelInput.getAttribute("data-space-channel-id");
+      if (channelInput.checked) {
+        state.spaceSelectedChannelIds.add(channelId);
+      } else {
+        state.spaceSelectedChannelIds.delete(channelId);
+      }
+      renderSpaceLoadedUi(overlay);
+    });
+
+    renderSpaceLoadedUi(overlay);
+
+    if (!state.loaded && state.config.rememberExportFolder) {
+      useRememberedExportFolderIfAvailable()
+        .then(loaded => {
+          if (!loaded) return;
+
+          qs("#mmi-folder-hint", overlay).textContent = exportFolderHintText();
+          appendLog(overlay, `Reused stored export folder: ${state.rootName}`);
+          renderSpaceLoadedUi(overlay);
         })
         .catch(error => {
           appendLog(overlay, `Could not reuse stored export folder: ${error.message || error}`);

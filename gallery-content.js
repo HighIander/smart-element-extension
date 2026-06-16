@@ -49,6 +49,7 @@
       matrixDesktopHierarchyLabel: "Matrix-Desktop-Hierarchie aktivieren",
       galleryFeatureLabel: "Bildgalerie aktivieren",
       threadViewFeatureLabel: "Thread-Ansicht aktivieren",
+      chatRenderingOverlayLabel: "Chat-Rendering-Overlay anzeigen",
       optionalFeaturesHint: "Änderungen werden sofort angewendet, soweit die jeweilige Seite bereits geladen ist. Wenn alle Funktionen deaktiviert sind, lassen sie sich über die Browser-Erweiterungseinstellungen wieder aktivieren.",
       settingsSave: "Speichern",
       threadReplyLabel: "Thread-Antwort",
@@ -126,6 +127,7 @@
       matrixDesktopHierarchyLabel: "Enable Matrix desktop hierarchy",
       galleryFeatureLabel: "Enable image gallery",
       threadViewFeatureLabel: "Enable thread view",
+      chatRenderingOverlayLabel: "Show chat rendering overlay",
       optionalFeaturesHint: "Changes are applied immediately where the respective page is already loaded. If all functions are disabled, re-enable them from the browser extension settings/options page.",
       settingsSave: "Save",
       threadReplyLabel: "Thread reply",
@@ -342,7 +344,8 @@
     enableGallery: true,
     enableMattermostTools: true,
     enableMatrixMobile: true,
-    enableThreadView: true
+    enableThreadView: true,
+    showChatRenderingOverlay: true
   };
   let desktopHierarchyModeActiveForSettings = false;
   let desktopHierarchySettingsListenerInstalled = false;
@@ -407,9 +410,11 @@
     const gallery = document.getElementById("mg-enable-gallery");
     const mattermost = document.getElementById("mg-enable-mattermost-tools");
     const mobile = document.getElementById("mg-enable-matrix-mobile");
+    const renderingOverlay = document.getElementById("mg-show-chat-rendering-overlay");
     if (gallery) gallery.checked = combinedFeatureConfig.enableGallery !== false;
     if (mattermost) mattermost.checked = combinedFeatureConfig.enableMattermostTools !== false;
     if (mobile) mobile.checked = combinedFeatureConfig.enableMatrixMobile !== false;
+    if (renderingOverlay) renderingOverlay.checked = combinedFeatureConfig.showChatRenderingOverlay !== false;
   }
 
   function syncDesktopHierarchySettingsCheckbox() {
@@ -484,7 +489,8 @@
     const patch = {
       enableGallery: document.getElementById("mg-enable-gallery")?.checked !== false,
       enableMattermostTools: document.getElementById("mg-enable-mattermost-tools")?.checked !== false,
-      enableMatrixMobile: document.getElementById("mg-enable-matrix-mobile")?.checked !== false
+      enableMatrixMobile: document.getElementById("mg-enable-matrix-mobile")?.checked !== false,
+      showChatRenderingOverlay: document.getElementById("mg-show-chat-rendering-overlay")?.checked !== false
     };
 
     combinedFeatureConfig = { ...combinedFeatureConfig, ...patch };
@@ -1092,6 +1098,11 @@
           <span data-i18n="matrixDesktopHierarchyLabel">Matrix-Desktop-Hierarchie aktivieren</span>
         </label>
 
+        <label class="mg-settings-check">
+          <input id="mg-show-chat-rendering-overlay" type="checkbox">
+          <span data-i18n="chatRenderingOverlayLabel">Chat-Rendering-Overlay anzeigen</span>
+        </label>
+
         <div class="mg-settings-hint" data-i18n="optionalFeaturesHint">Diese Modul-Schalter werden beim nächsten Laden der jeweiligen Seite vollständig wirksam.</div>
 
         <button id="mg-settings-save" type="button" data-i18n="settingsSave">Speichern</button>
@@ -1158,6 +1169,10 @@
     });
 
     document.getElementById("mg-enable-matrix-mobile").addEventListener("change", () => {
+      saveCombinedFeatureCheckboxes();
+    });
+
+    document.getElementById("mg-show-chat-rendering-overlay").addEventListener("change", () => {
       saveCombinedFeatureCheckboxes();
     });
 
@@ -2692,7 +2707,8 @@
           enableGallery: value.enableGallery !== false,
           enableMattermostTools: value.enableMattermostTools !== false,
           enableMatrixMobile: value.enableMatrixMobile !== false,
-          enableThreadView: value.enableThreadView !== false
+          enableThreadView: value.enableThreadView !== false,
+          showChatRenderingOverlay: value.showChatRenderingOverlay !== false
         };
 
     combinedFeatureConfig = {
@@ -2729,6 +2745,7 @@
         enableMatrixMobile: storedFeatureConfig.enableMatrixMobile !== false,
         enableThreadView: storedFeatureConfig.enableThreadView !== false,
         selectorBackgroundRefreshSeconds: storedFeatureConfig.selectorBackgroundRefreshSeconds,
+        showChatRenderingOverlay: storedFeatureConfig.showChatRenderingOverlay !== false,
         language: uiLanguage
       }
     });

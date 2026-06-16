@@ -9,6 +9,8 @@
   const SEND_PROGRESS = "matrix-mattermost-importer-send-progress";
   const DUPLICATE_REQUEST = "matrix-mattermost-importer-duplicate-request";
   const DUPLICATE_RESPONSE = "matrix-mattermost-importer-duplicate-response";
+  const CREATE_ROOM_REQUEST = "matrix-mattermost-importer-create-room-request";
+  const CREATE_ROOM_RESPONSE = "matrix-mattermost-importer-create-room-response";
   const GALLERY_CONTENT_KEY = "de.tkluge.gallery";
   const MATTERMOST_CONTENT_KEY = "de.tkluge.mattermost_import";
   const DUPLICATE_HISTORY_PAGE_SIZE = 100;
@@ -20,10 +22,26 @@
   const UPLOAD_PROGRESS_HEARTBEAT_MS = 30000;
   const UPLOAD_RETRY_COUNT = 5;
   const SEND_RETRY_COUNT = 5;
+  const EXTENSION_BASE_URL = (() => {
+    try {
+      const scriptUrl = document.currentScript && document.currentScript.src;
+      return scriptUrl ? new URL(".", scriptUrl).href : "";
+    } catch {
+      return "";
+    }
+  })();
+  const PARTY_PARROT_ASSET_DIR = "assets/partyparrot/";
+  const PARTY_PARROT_ASSET_EXTENSIONS = ["gif", "png", "webp", "jpg", "jpeg", "svg"];
+  const PARTY_PARROT_FALLBACK_ALIASES = new Set(["partyparrot", "party_parrot", "party-parrot", "parrot", "parrot_party"]);
+  const PARTY_PARROT_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAACJUlEQVR42u2aO04DMRCGcw0kBIiSCmouQAMFRW6BUtFyBOjT0FAhcQjuQERJwQE4gpGRjCazfoxn/ZjdnZH+aldxvs+zdh5erbS0tLS0tLS0OtXByZmJZZHQs5TBhZ6FjBjIxe4umslL4EDbfG/eBvlav/xHvISS4JMTwYF/3K3Nz+Z1kMlJyIW34CH4lAiREjjwMQEQEgZLECGACx+SEILHEkTsDmPhsQQIau7f9wKvhbbLrgK48C72NXzgezFmMF43AaVm38G7pAqP2a0LSs9+CN53rXsXlJz9mAA8DkVAEwkl4UsIaN4FrQRQH4HZCOAsgs0FlIandIG3I54P/9JcQi0BqU6A1+y9TgAUMXkBWIIv7j47BpbgUnVX4Ag43954kysB3uPGCUnwyWguIAROFRGLeAFUeK4E0Y/A6fY2W0CuhNQiWG0hTAmw8FwBVAkYXNQ2WFuAhYZrgCgBDn6MAGoXdBMQkwAF1OyCrvAhARi+ZheoAEkCnASfgBqPAeW/xC4/iUkR0O1H0ZCAkh+KxMy+T4IEAV3/Fzh6uCoqQfzsYwlWQEkJYhe+FhLEr/opAWMl5MB32ffdoObj0nAlhESEwLvBhwRYeBh3HxRAkYAzSXgowRaWQBUhCjwXHovwSYjJEHlMjgMPE5MAI/Kg5Fh4+FrHT9efXHARR1+o0NQ3LP5ILBV+lqe7Y/CLOtK+GGjKJ75F1CKhU9/ytLS0tOZYv6g8ehS/n/iDAAAAAElFTkSuQmCC";
 
   let lastSession = null;
   let installed = false;
   const duplicateIndexes = new Map();
+  const emojiUploadCache = new Map();
+  const partyParrotAssetCache = new Map();
+  const partyParrotPatchedClients = new WeakSet();
+  const partyParrotUploadCache = new WeakMap();
 
   function cleanUrl(value) {
     if (typeof value !== "string") return "";
@@ -281,6 +299,27 @@
     return [...aliases];
   }
 
+  function roomType(room) {
+    if (!room) return "";
+
+    try {
+      return room.currentState?.getStateEvents?.("m.room.create", "")?.getContent?.()?.type || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function isSpaceRoom(room) {
+    if (!room) return false;
+    if (roomType(room) === "m.space") return true;
+
+    try {
+      return (room.currentState?.getStateEvents?.("m.space.child") || []).length > 0;
+    } catch {
+      return false;
+    }
+  }
+
   function parentSpaceNames(client, room) {
     if (!client || !room) return [];
 
@@ -324,6 +363,8 @@
       currentRoomId: room?.roomId || roomIdOrAlias || "",
       currentRoomName: roomName(room),
       currentRoomAliases: roomAliases(room),
+      currentRoomType: roomType(room),
+      currentRoomIsSpace: isSpaceRoom(room),
       spaceNames: parentSpaceNames(client, room)
     };
   }
@@ -342,6 +383,8 @@
       }, window.location.origin);
       return;
     }
+
+    patchPartyParrotComposerClient(client);
 
     lastSession = {
       ...(sessionFromClient(client) || {}),
@@ -376,6 +419,600 @@
 
     const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
     return `<span data-mg-gallery="${escapeHtml(encoded)}" style="display:none"></span>`;
+  }
+
+  function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function emojiUploadCacheKey(asset) {
+    const meta = asset?.fileMeta || {};
+    const file = asset?.file || {};
+
+    return asset?.cacheKey ||
+      `${asset?.name || "emoji"}:${meta.name || file.name || ""}:${meta.type || file.type || ""}:${meta.size || file.size || 0}`;
+  }
+
+  function emojiHtml(name, src) {
+    const escapedName = escapeHtml(name);
+    const escapedUrl = escapeHtml(src);
+
+    return `<img data-mx-emoticon width="32" height="32" src="${escapedUrl}" alt=":${escapedName}:" title=":${escapedName}:">`;
+  }
+
+  function mediaDownloadUrlForMxc(client, mxcUrl) {
+    if (!mxcUrl) {
+      return "";
+    }
+
+    try {
+      if (typeof client?.mxcUrlToHttp === "function") {
+        const url = client.mxcUrlToHttp(mxcUrl, undefined, undefined, undefined, false, true, true) ||
+          client.mxcUrlToHttp(mxcUrl, undefined, undefined, undefined, false, true, false) ||
+          client.mxcUrlToHttp(mxcUrl);
+
+        if (url && !String(url).includes("/thumbnail/")) {
+          return String(url);
+        }
+      }
+    } catch {}
+
+    const match = String(mxcUrl || "").match(/^mxc:\/\/([^/]+)\/(.+)$/);
+
+    if (!match) {
+      return "";
+    }
+
+    const session = sessionFromClient(client) || {};
+    const baseUrl = cleanUrl(session.homeserver || client?.baseUrl || client?.opts?.baseUrl || client?.clientOpts?.baseUrl || "");
+
+    if (!baseUrl) {
+      return "";
+    }
+
+    return `${baseUrl}/_matrix/client/v1/media/download/${encodeURIComponent(match[1])}/${encodeURIComponent(match[2])}`;
+  }
+
+  function emojiRenderSrc(client, mxcUrl, asset = null) {
+    const type = String(asset?.fileMeta?.type || asset?.file?.type || "").toLowerCase();
+
+    if (type === "image/gif") {
+      const downloadUrl = mediaDownloadUrlForMxc(client, mxcUrl);
+      if (downloadUrl) {
+        return downloadUrl;
+      }
+    }
+
+    return mxcUrl;
+  }
+
+  function countEmojiShortcodeMatches(html, name) {
+    const escapedToken = escapeHtml(`:${name}:`);
+    const tokenPattern = new RegExp(escapeRegExp(escapedToken), "g");
+    const parts = String(html || "").split(/(<[^>]*>)/g);
+    let protectedDepth = 0;
+    let count = 0;
+
+    for (const part of parts) {
+      if (!part) {
+        continue;
+      }
+
+      if (part.startsWith("<")) {
+        const tagMatch = part.match(/^<\s*(\/?)\s*([a-zA-Z0-9]+)/);
+        const tagName = tagMatch ? tagMatch[2].toLowerCase() : "";
+        const closing = Boolean(tagMatch && tagMatch[1]);
+        const selfClosing = /\/\s*>$/.test(part);
+
+        if ((tagName === "code" || tagName === "pre") && closing) {
+          protectedDepth = Math.max(0, protectedDepth - 1);
+        } else if ((tagName === "code" || tagName === "pre") && !selfClosing) {
+          protectedDepth += 1;
+        }
+
+        continue;
+      }
+
+      if (protectedDepth === 0) {
+        count += (part.match(tokenPattern) || []).length;
+      }
+    }
+
+    return count;
+  }
+
+  function replaceEmojiShortcodeHtml(html, name, src) {
+    const escapedToken = escapeHtml(`:${name}:`);
+    const tokenPattern = new RegExp(escapeRegExp(escapedToken), "g");
+    const replacement = emojiHtml(name, src);
+    const parts = String(html || "").split(/(<[^>]*>)/g);
+    let protectedDepth = 0;
+
+    return parts.map(part => {
+      if (!part) {
+        return part;
+      }
+
+      if (part.startsWith("<")) {
+        const tagMatch = part.match(/^<\s*(\/?)\s*([a-zA-Z0-9]+)/);
+        const tagName = tagMatch ? tagMatch[2].toLowerCase() : "";
+        const closing = Boolean(tagMatch && tagMatch[1]);
+        const selfClosing = /\/\s*>$/.test(part);
+
+        if ((tagName === "code" || tagName === "pre") && closing) {
+          protectedDepth = Math.max(0, protectedDepth - 1);
+        } else if ((tagName === "code" || tagName === "pre") && !selfClosing) {
+          protectedDepth += 1;
+        }
+
+        return part;
+      }
+
+      return protectedDepth > 0 ? part : part.replace(tokenPattern, replacement);
+    }).join("");
+  }
+
+  async function uploadEmojiAsset(client, asset, requestId) {
+    if (!asset?.file) {
+      return "";
+    }
+
+    const cacheKey = `emoji:${emojiUploadCacheKey(asset)}`;
+
+    if (!emojiUploadCache.has(cacheKey)) {
+      emojiUploadCache.set(cacheKey, (async () => {
+        const meta = asset.fileMeta || {};
+        const uploadMeta = {
+          name: meta.name || asset.file.name || `${asset.name || "emoji"}.png`,
+          type: meta.type || asset.file.type || "image/png",
+          size: meta.size || asset.file.size || 0
+        };
+
+        postProgress(requestId, `Lade Emoji hoch: :${asset.name || "emoji"}:`);
+        const mxcUrl = await uploadContentWithRetries(client, asset.file, uploadMeta, requestId);
+        postProgress(requestId, `Emoji hochgeladen: :${asset.name || "emoji"}: -> ${mxcUrl || "no mxc url"}`);
+        return mxcUrl;
+      })().catch(error => {
+        emojiUploadCache.delete(cacheKey);
+        throw error;
+      }));
+    }
+
+    return emojiUploadCache.get(cacheKey);
+  }
+
+  async function applyEmojiAssetsToFormattedBody(client, item, formattedBody, requestId) {
+    const emojiAssets = Array.isArray(item?.emojiAssets) ? item.emojiAssets : [];
+    const emojiShortcodes = Array.isArray(item?.emojiShortcodes) ? item.emojiShortcodes : [];
+
+    if (!formattedBody) {
+      return formattedBody;
+    }
+
+    if (emojiShortcodes.length > 0) {
+      postProgress(
+        requestId,
+        `Custom emoji shortcode(s) detected: ${emojiShortcodes.map(name => `:${name}:`).join(", ")}; available asset(s): ${emojiAssets.length}.`
+      );
+    }
+
+    if (emojiShortcodes.length > 0 && emojiAssets.length === 0) {
+      postProgress(requestId, "No uploadable custom emoji asset was available; keeping shortcode text.");
+      return formattedBody;
+    }
+
+    if (emojiAssets.length === 0) {
+      return formattedBody;
+    }
+
+    let html = String(formattedBody);
+
+    for (const asset of emojiAssets) {
+      try {
+        const mxcUrl = await uploadEmojiAsset(client, asset, requestId);
+        if (mxcUrl) {
+          const renderSrc = emojiRenderSrc(client, mxcUrl, asset);
+          const beforeCount = countEmojiShortcodeMatches(html, asset.name || "");
+          html = replaceEmojiShortcodeHtml(html, asset.name || "", renderSrc);
+          const afterCount = countEmojiShortcodeMatches(html, asset.name || "");
+
+          if (beforeCount > afterCount) {
+            postProgress(requestId, `Emoji ersetzt: :${asset.name || "emoji"}: (${beforeCount - afterCount} occurrence(s)).`);
+          } else {
+            postProgress(requestId, `Emoji upload succeeded for :${asset.name || "emoji"}:, but the shortcode was not found in formatted HTML.`);
+          }
+        }
+      } catch (error) {
+        postProgress(
+          requestId,
+          `Warning: custom emoji :${asset?.name || "emoji"}: could not be uploaded; keeping shortcode text. ${errorMessage(error)}`
+        );
+      }
+    }
+
+    return html;
+  }
+
+  function fallbackPartyParrotFile(name = "partyparrot") {
+    const binary = atob(PARTY_PARROT_PNG_BASE64);
+    const bytes = new Uint8Array(binary.length);
+
+    for (let index = 0; index < binary.length; index++) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+
+    return new File([bytes], `${safePartyParrotAssetName(name)}.png`, {
+      type: "image/png",
+      lastModified: Date.now()
+    });
+  }
+
+  function plainBodyToMatrixHtml(body) {
+    return escapeHtml(String(body || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n"))
+      .replace(/\n/g, "<br>");
+  }
+
+  function shortcodeNamesInHtml(html) {
+    const names = new Set();
+    const regex = /(^|[^A-Za-z0-9_+\-]):([A-Za-z0-9_+\-]{2,64}):/g;
+    const parts = String(html || "").split(/(<[^>]*>)/g);
+    let protectedDepth = 0;
+
+    for (const part of parts) {
+      if (!part) {
+        continue;
+      }
+
+      if (part.startsWith("<")) {
+        const tagMatch = part.match(/^<\s*(\/?)\s*([a-zA-Z0-9]+)/);
+        const tagName = tagMatch ? tagMatch[2].toLowerCase() : "";
+        const closing = Boolean(tagMatch && tagMatch[1]);
+        const selfClosing = /\/\s*>$/.test(part);
+
+        if ((tagName === "code" || tagName === "pre") && closing) {
+          protectedDepth = Math.max(0, protectedDepth - 1);
+        } else if ((tagName === "code" || tagName === "pre") && !selfClosing) {
+          protectedDepth += 1;
+        }
+
+        continue;
+      }
+
+      if (protectedDepth > 0) {
+        continue;
+      }
+
+      let match;
+      regex.lastIndex = 0;
+      while ((match = regex.exec(part)) !== null) {
+        names.add(match[2]);
+      }
+    }
+
+    return [...names];
+  }
+
+  function safePartyParrotAssetName(value) {
+    return String(value || "partyparrot")
+      .trim()
+      .replace(/[^A-Za-z0-9_+\-]/g, "")
+      .slice(0, 80) || "partyparrot";
+  }
+
+  function mimeTypeForPartyParrotExtension(extension) {
+    if (extension === "gif") return "image/gif";
+    if (extension === "png") return "image/png";
+    if (extension === "webp") return "image/webp";
+    if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+    if (extension === "svg") return "image/svg+xml";
+    return "application/octet-stream";
+  }
+
+  function partyParrotAssetUrl(fileName) {
+    if (!EXTENSION_BASE_URL) {
+      return "";
+    }
+
+    return new URL(`${PARTY_PARROT_ASSET_DIR}${encodeURIComponent(fileName)}`, EXTENSION_BASE_URL).href;
+  }
+
+  async function fetchPartyParrotAsset(name) {
+    const safeName = safePartyParrotAssetName(name);
+    const lowerName = safeName.toLowerCase();
+    const nameCandidates = [...new Set([safeName, lowerName])];
+
+    for (const candidate of nameCandidates) {
+      for (const extension of PARTY_PARROT_ASSET_EXTENSIONS) {
+        const fileName = `${candidate}.${extension}`;
+        const url = partyParrotAssetUrl(fileName);
+
+        if (!url) {
+          continue;
+        }
+
+        try {
+          const response = await fetch(url);
+
+          if (!response.ok) {
+            continue;
+          }
+
+          const blob = await response.blob();
+          const type = blob.type || mimeTypeForPartyParrotExtension(extension);
+          const file = new File([blob], fileName, {
+            type,
+            lastModified: Date.now()
+          });
+
+          return {
+            name,
+            file,
+            fileMeta: {
+              name: fileName,
+              type,
+              size: file.size || blob.size || 0
+            },
+            cacheKey: `partyparrot:${fileName}:${file.size || blob.size || 0}`,
+            source: url
+          };
+        } catch {
+          // Missing web-accessible assets are expected while probing extensions.
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async function partyParrotAssetForShortcode(name) {
+    const safeName = safePartyParrotAssetName(name);
+    const cacheKey = safeName.toLowerCase();
+
+    if (!partyParrotAssetCache.has(cacheKey)) {
+      partyParrotAssetCache.set(cacheKey, (async () => {
+        const asset = await fetchPartyParrotAsset(safeName);
+
+        if (asset) {
+          return asset;
+        }
+
+        if (PARTY_PARROT_FALLBACK_ALIASES.has(cacheKey)) {
+          const file = fallbackPartyParrotFile(safeName);
+          return {
+            name: safeName,
+            file,
+            fileMeta: {
+              name: file.name,
+              type: file.type,
+              size: file.size || 0
+            },
+            cacheKey: `partyparrot:fallback:${file.name}:${file.size || 0}`,
+            source: "built-in-fallback"
+          };
+        }
+
+        return null;
+      })());
+    }
+
+    return partyParrotAssetCache.get(cacheKey);
+  }
+
+  function isTextRoomMessageContent(content) {
+    if (!content || typeof content !== "object") {
+      return false;
+    }
+
+    const msgtype = String(content.msgtype || "");
+
+    return (
+      (msgtype === "m.text" || msgtype === "m.notice" || msgtype === "m.emote" || !msgtype) &&
+      (typeof content.body === "string" || typeof content.formatted_body === "string")
+    );
+  }
+
+  function partyParrotUploadMapForClient(client) {
+    if (!partyParrotUploadCache.has(client)) {
+      partyParrotUploadCache.set(client, new Map());
+    }
+
+    return partyParrotUploadCache.get(client);
+  }
+
+  async function uploadPartyParrotAsset(client, asset) {
+    if (!asset?.file) {
+      return "";
+    }
+
+    const uploadMap = partyParrotUploadMapForClient(client);
+    const cacheKey = asset.cacheKey || `partyparrot:${asset.file.name}:${asset.file.size || 0}`;
+
+    if (!uploadMap.has(cacheKey)) {
+      uploadMap.set(cacheKey, (async () => {
+        const file = asset.file;
+        const meta = asset.fileMeta || {};
+        const mxcUrl = await uploadContentWithRetries(client, file, {
+          name: meta.name || file.name,
+          type: meta.type || file.type || "image/png",
+          size: meta.size || file.size || 0
+        }, "partyparrot-composer");
+
+        console.info(`[Smart Element] Uploaded partyparrot emoji :${asset.name}:`, {
+          mxcUrl,
+          source: asset.source || "",
+          type: meta.type || file.type || ""
+        });
+        return mxcUrl;
+      })().catch(error => {
+        uploadMap.delete(cacheKey);
+        throw error;
+      }));
+    }
+
+    return uploadMap.get(cacheKey);
+  }
+
+  async function enhancePartyParrotContent(client, content) {
+    if (!isTextRoomMessageContent(content)) {
+      return content;
+    }
+
+    const sourceHtml = content.formatted_body
+      ? String(content.formatted_body)
+      : plainBodyToMatrixHtml(content.body || "");
+    const shortcodes = shortcodeNamesInHtml(sourceHtml);
+
+    if (shortcodes.length === 0) {
+      return content;
+    }
+
+    let formattedBody = sourceHtml;
+    let replacementCount = 0;
+    const replacedShortcodes = [];
+
+    for (const shortcode of shortcodes) {
+      const asset = await partyParrotAssetForShortcode(shortcode);
+
+      if (!asset) {
+        continue;
+      }
+
+      let mxcUrl = "";
+
+      try {
+        mxcUrl = await uploadPartyParrotAsset(client, asset);
+      } catch (error) {
+        console.warn(`[Smart Element] Could not upload partyparrot emoji :${shortcode}:; sending shortcode text.`, error);
+        continue;
+      }
+
+      if (!mxcUrl) {
+        continue;
+      }
+
+      const renderSrc = emojiRenderSrc(client, mxcUrl, asset);
+      const beforeCount = countEmojiShortcodeMatches(formattedBody, shortcode);
+      formattedBody = replaceEmojiShortcodeHtml(formattedBody, shortcode, renderSrc);
+      const afterCount = countEmojiShortcodeMatches(formattedBody, shortcode);
+      const changed = Math.max(0, beforeCount - afterCount);
+
+      if (changed > 0) {
+        replacementCount += changed;
+        replacedShortcodes.push(shortcode);
+        if (String(asset?.fileMeta?.type || "").toLowerCase() === "image/gif") {
+          console.info(`[Smart Element] GIF emoji :${shortcode}: render source:`, renderSrc.startsWith("mxc://") ? "mxc" : "download", renderSrc);
+        }
+      }
+    }
+
+    if (replacementCount === 0) {
+      return content;
+    }
+
+    console.info(
+      `[Smart Element] Replaced ${replacementCount} partyparrot shortcode(s) in outgoing Matrix message.`,
+      { shortcodes: replacedShortcodes }
+    );
+
+    return {
+      ...content,
+      format: "org.matrix.custom.html",
+      formatted_body: formattedBody
+    };
+  }
+
+  function sendMessageContentArgIndex(args) {
+    if (isTextRoomMessageContent(args[1])) return 1;
+    if (isTextRoomMessageContent(args[2])) return 2;
+    return -1;
+  }
+
+  function sendEventContentArgIndex(args) {
+    const eventTypeIndex = args.findIndex(arg => arg === "m.room.message");
+
+    if (eventTypeIndex === -1) {
+      return -1;
+    }
+
+    for (let index = eventTypeIndex + 1; index < args.length; index++) {
+      if (isTextRoomMessageContent(args[index])) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  function sendHtmlMessageBodyIndexes(args) {
+    if (typeof args[1] === "string" && typeof args[2] === "string") {
+      return { bodyIndex: 1, htmlIndex: 2 };
+    }
+
+    if (typeof args[2] === "string" && typeof args[3] === "string") {
+      return { bodyIndex: 2, htmlIndex: 3 };
+    }
+
+    return null;
+  }
+
+  function patchPartyParrotComposerClient(client) {
+    if (!client || partyParrotPatchedClients.has(client)) {
+      return;
+    }
+
+    partyParrotPatchedClients.add(client);
+
+    if (typeof client.sendMessage === "function") {
+      const originalSendMessage = client.sendMessage;
+
+      client.sendMessage = async function smartElementSendMessageWithPartyParrot(...args) {
+        const contentIndex = sendMessageContentArgIndex(args);
+        if (contentIndex !== -1) {
+          const activeClient = isUsableMatrixClient(this) ? this : client;
+          args[contentIndex] = await enhancePartyParrotContent(activeClient, args[contentIndex]);
+        }
+
+        return originalSendMessage.apply(this, args);
+      };
+    }
+
+    if (typeof client.sendEvent === "function") {
+      const originalSendEvent = client.sendEvent;
+
+      client.sendEvent = async function smartElementSendEventWithPartyParrot(...args) {
+        const contentIndex = sendEventContentArgIndex(args);
+        if (contentIndex !== -1) {
+          const activeClient = isUsableMatrixClient(this) ? this : client;
+          args[contentIndex] = await enhancePartyParrotContent(activeClient, args[contentIndex]);
+        }
+
+        return originalSendEvent.apply(this, args);
+      };
+    }
+
+    if (typeof client.sendHtmlMessage === "function") {
+      const originalSendHtmlMessage = client.sendHtmlMessage;
+
+      client.sendHtmlMessage = async function smartElementSendHtmlMessageWithPartyParrot(...args) {
+        const indexes = sendHtmlMessageBodyIndexes(args);
+        if (indexes) {
+          const activeClient = isUsableMatrixClient(this) ? this : client;
+          const enhanced = await enhancePartyParrotContent(activeClient, {
+            msgtype: "m.text",
+            body: args[indexes.bodyIndex],
+            format: "org.matrix.custom.html",
+            formatted_body: args[indexes.htmlIndex]
+          });
+
+          args[indexes.bodyIndex] = enhanced.body || args[indexes.bodyIndex];
+          args[indexes.htmlIndex] = enhanced.formatted_body || args[indexes.htmlIndex];
+        }
+
+        return originalSendHtmlMessage.apply(this, args);
+      };
+    }
+
+    console.info("[Smart Element] Partyparrot composer support enabled for Matrix client.");
   }
 
   function postProgress(requestId, message) {
@@ -834,6 +1471,150 @@
     return http.authedRequest(method, path, query || {}, data, opts);
   }
 
+  function serverNameFromMatrixId(value) {
+    const match = String(value || "").match(/^[!#@][^:]+:(.+)$/);
+    return match ? match[1] : "";
+  }
+
+  function serverNameFromHomeserver(value) {
+    try {
+      return new URL(String(value || "")).host || "";
+    } catch {
+      return "";
+    }
+  }
+
+  function uniqueStrings(values) {
+    const seen = new Set();
+    const result = [];
+
+    for (const value of values) {
+      const text = String(value || "").trim();
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      result.push(text);
+    }
+
+    return result;
+  }
+
+  function viaServersForRooms(client, ...roomIds) {
+    const session = sessionFromClient(client) || {};
+    return uniqueStrings([
+      ...roomIds.map(serverNameFromMatrixId),
+      serverNameFromMatrixId(session.userId),
+      serverNameFromHomeserver(session.homeserver),
+      location.host
+    ]);
+  }
+
+  async function createMatrixRoom(client, options, requestId) {
+    const http = client?.http || client?._http;
+
+    if (typeof client?.createRoom === "function") {
+      return withRateLimitRetry("creating Matrix room", requestId, () => client.createRoom(options));
+    }
+
+    if (http && typeof http.authedRequest === "function") {
+      return withRateLimitRetry("creating Matrix room", requestId, () => authedRequest(http, "POST", "/_matrix/client/v3/createRoom", {}, options));
+    }
+
+    throw new Error("MatrixClient has no usable createRoom method");
+  }
+
+  async function sendStateEvent(client, roomId, eventType, stateKey, content, requestId) {
+    const http = client?.http || client?._http;
+
+    if (typeof client?.sendStateEvent === "function") {
+      return withRateLimitRetry(`sending ${eventType} state`, requestId, () => client.sendStateEvent(roomId, eventType, content, stateKey));
+    }
+
+    if (http && typeof http.authedRequest === "function") {
+      const path = `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/state/${encodeURIComponent(eventType)}/${encodeURIComponent(stateKey || "")}`;
+      return withRateLimitRetry(`sending ${eventType} state`, requestId, () => authedRequest(http, "PUT", path, {}, content));
+    }
+
+    throw new Error("MatrixClient has no usable state event method");
+  }
+
+  async function createRoomInSpace(payload) {
+    const client = findClient();
+
+    if (!client) {
+      throw new Error("No live MatrixClient found in Element page context");
+    }
+
+    const requestId = payload.requestId;
+    const spaceId = await resolveRoom(client, payload.room);
+    const roomName = String(payload.roomName || "Mattermost channel").trim() || "Mattermost channel";
+    const encrypted = payload.encrypted === true;
+    const visibilityMode = payload.visibilityMode === "space" ? "space" : "private";
+    const initialState = [];
+
+    if (visibilityMode === "space") {
+      initialState.push({
+        type: "m.room.join_rules",
+        state_key: "",
+        content: {
+          join_rule: "restricted",
+          allow: [
+            {
+              type: "m.room_membership",
+              room_id: spaceId
+            }
+          ]
+        }
+      });
+    }
+
+    if (encrypted) {
+      initialState.push({
+        type: "m.room.encryption",
+        state_key: "",
+        content: {
+          algorithm: "m.megolm.v1.aes-sha2"
+        }
+      });
+    }
+
+    postProgress(requestId, `Creating Matrix room: ${roomName}`);
+
+    const result = await createMatrixRoom(client, {
+      name: roomName,
+      visibility: "private",
+      preset: "private_chat",
+      initial_state: initialState
+    }, requestId);
+
+    const roomId = result?.room_id || result?.roomId || "";
+    if (!roomId) {
+      throw new Error("Matrix room creation did not return a room id");
+    }
+
+    const via = viaServersForRooms(client, roomId, spaceId);
+    const childContent = {
+      via,
+      suggested: visibilityMode === "space"
+    };
+    const parentContent = {
+      via,
+      canonical: true
+    };
+
+    postProgress(requestId, `Attaching ${roomName} to current space`);
+    await sendStateEvent(client, spaceId, "m.space.child", roomId, childContent, requestId);
+    await sendStateEvent(client, roomId, "m.space.parent", spaceId, parentContent, requestId);
+
+    return {
+      ok: true,
+      roomId,
+      roomName,
+      spaceId,
+      encrypted,
+      visibilityMode
+    };
+  }
+
   async function sendRoomMessageViaHttp(client, roomId, content, txnId) {
     const http = client?.http || client?._http;
 
@@ -1287,11 +2068,15 @@
   async function sendTextItem(client, roomId, item, requestId, threadContext) {
     postProgress(requestId, `Sende Text: ${item.shortLabel || item.meta?.post_id || "Mattermost message"}`);
 
+    const formattedBody = item.formatted_body
+      ? await applyEmojiAssetsToFormattedBody(client, item, item.formatted_body, requestId)
+      : "";
+
     const content = {
       msgtype: item.msgtype || "m.text",
       body: item.body || "",
-      format: item.formatted_body ? "org.matrix.custom.html" : undefined,
-      formatted_body: item.formatted_body || undefined
+      format: formattedBody ? "org.matrix.custom.html" : undefined,
+      formatted_body: formattedBody || undefined
     };
 
     if (!content.formatted_body) {
@@ -1563,6 +2348,30 @@
             window.postMessage({
               source: SOURCE,
               type: DUPLICATE_RESPONSE,
+              requestId,
+              ok: false,
+              error: error?.message || String(error)
+            }, window.location.origin);
+          });
+      }
+
+      if (event.data.type === CREATE_ROOM_REQUEST) {
+        const requestId = event.data.requestId;
+
+        createRoomInSpace(event.data)
+          .then(result => {
+            window.postMessage({
+              source: SOURCE,
+              type: CREATE_ROOM_RESPONSE,
+              requestId,
+              ok: true,
+              result
+            }, window.location.origin);
+          })
+          .catch(error => {
+            window.postMessage({
+              source: SOURCE,
+              type: CREATE_ROOM_RESPONSE,
               requestId,
               ok: false,
               error: error?.message || String(error)

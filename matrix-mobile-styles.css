@@ -3159,6 +3159,34 @@ html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-middle-pane-flo
   transform: none !important;
 }
 
+@media (max-width: 1280px) {
+  html.mmlc-enabled.mmlc-mode-chat .mx_EventTile_msgOption:has(.mx_ReadReceiptGroup),
+  html.mmlc-enabled.mmlc-mode-chat [class*="EventTile_msgOption"]:has([class*="ReadReceiptGroup"]),
+  html.mmlc-enabled.mmlc-mode-chat .mx_ReadReceiptGroup,
+  html.mmlc-enabled.mmlc-mode-chat [class*="ReadReceiptGroup"],
+  html.mmlc-enabled.mmlc-mode-chat [aria-label="Lesebestätigungen"],
+  html.mmlc-enabled.mmlc-mode-chat [aria-label="Read receipts"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    pointer-events: none !important;
+  }
+
+  html.mmlc-enabled.mmlc-mode-chat .mx_RoomView_timeline_rr_enabled,
+  html.mmlc-enabled.mmlc-mode-chat [class*="RoomView_timeline_rr_enabled"],
+  html.mmlc-enabled.mmlc-mode-chat .mx_RoomView_MessageList,
+  html.mmlc-enabled.mmlc-mode-chat [class*="RoomView_MessageList"] {
+    padding-right: 0 !important;
+    margin-right: 0 !important;
+  }
+}
+
 /* Smart Element patch: keep native Element panes mounted without blocking the
    extension's own compact menu states. The anti-collapse repair may add
    mmlc-native-navigation-panes-open, but hidden Smart Element panes must still
@@ -3178,6 +3206,27 @@ html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hid
   width: 0 !important;
   min-width: 0 !important;
   max-width: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+  transform: none !important;
+}
+
+/* Native parse/action phases must use Element's real SpacePanel geometry. The
+   compact hidden rail is only a Smart Element presentation state; keeping it at
+   zero width during native Space clicks lets Element swallow the first top-level
+   Space selection and leaves the previous right pane active. */
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hidden:is(.mmlc-native-parse-layout, .mmlc-desktop-native-action) .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hidden:is(.mmlc-native-parse-layout, .mmlc-desktop-native-action) .mx_SpacePanel.collapsed,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-space-panel-hidden:is(.mmlc-native-parse-layout, .mmlc-desktop-native-action) nav[aria-label="Spaces"] {
+  flex: 0 0 clamp(172px, 28vw, 260px) !important;
+  flex-grow: 0 !important;
+  flex-shrink: 0 !important;
+  flex-basis: clamp(172px, 28vw, 260px) !important;
+  width: clamp(172px, 28vw, 260px) !important;
+  min-width: 160px !important;
+  max-width: 300px !important;
   margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
@@ -4119,4 +4168,278 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-mi
   border-radius: 10px !important;
   background-clip: padding-box !important;
   box-sizing: border-box !important;
+}
+
+/* Small-window room view: remove Element's read-receipt gutter without changing
+   native pane geometry. */
+@media (max-width: 1280px) {
+  html.mmlc-desktop-hierarchy-mode .mx_EventTile_msgOption:has(.mx_ReadReceiptGroup),
+  html.mmlc-desktop-hierarchy-mode [class*="EventTile_msgOption"]:has([class*="ReadReceiptGroup"]),
+  html.mmlc-desktop-hierarchy-mode .mx_ReadReceiptGroup,
+  html.mmlc-desktop-hierarchy-mode [class*="ReadReceiptGroup"],
+  html.mmlc-desktop-hierarchy-mode [aria-label="Lesebest\00e4 tigungen"],
+  html.mmlc-desktop-hierarchy-mode [aria-label="Read receipts"] {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    pointer-events: none !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode .mx_RoomView_timeline_rr_enabled,
+  html.mmlc-desktop-hierarchy-mode [class*="RoomView_timeline_rr_enabled"],
+  html.mmlc-desktop-hierarchy-mode .mx_RoomView_MessageList,
+  html.mmlc-desktop-hierarchy-mode [class*="RoomView_MessageList"] {
+    padding-right: 0 !important;
+    margin-right: 0 !important;
+  }
+}
+
+@media (max-width: 0px) {
+  html.mmlc-enabled:has(.mx_RoomView) #matrixchat,
+  html.mmlc-enabled:has(.mx_RoomView) .mx_MatrixChat_wrapper,
+  html.mmlc-enabled:has(.mx_RoomView) .mx_MatrixChat,
+  html.mmlc-enabled:has(.mx_RoomView) [data-group="true"] {
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    overflow: hidden !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) .mx_SpacePanel[data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open],
+  html.mmlc-enabled:has(.mx_RoomView) nav[aria-label="Spaces"][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open],
+  html.mmlc-enabled:has(.mx_RoomView) [class*="SpacePanel"][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open]:not(:where(#mmlc-toolbar *, #mmlc-panel *, #mmlc-desktop-space-list-host *, #mmlc-desktop-chat-list-host *, #mcs-settings-overlay *)),
+  html.mmlc-enabled:has(.mx_RoomView) #left-panel[data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open],
+  html.mmlc-enabled:has(.mx_RoomView) [data-testid="left-panel"][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: auto !important;
+    flex: 0 0 1px !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    flex-basis: 1px !important;
+    width: 1px !important;
+    min-width: 1px !important;
+    max-width: 1px !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+    transform: none !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) .mx_SpacePanel[data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open] > *,
+  html.mmlc-enabled:has(.mx_RoomView) nav[aria-label="Spaces"][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open] > *,
+  html.mmlc-enabled:has(.mx_RoomView) #left-panel[data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open] :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+  html.mmlc-enabled:has(.mx_RoomView) [data-testid="left-panel"][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open][data-mmlc-navigation-panes-open] :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+    min-width: 0 !important;
+    width: 1px !important;
+    max-width: 1px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+    transform: none !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) [data-group="true"] > :not(.mx_SpacePanel):not(#left-panel):not([data-testid="left-panel"]) {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) :is(.mx_RoomView, .mx_RoomView_body, .mx_MainSplit, .mx_RoomView_timeline, .mx_TimelinePanel, .mx_MessagePanel, .mx_RoomView_messagePanel, .mx_RoomView_messageListWrapper, .mx_RoomView_MessageList, .mx_ScrollPanel, .mx_AutoHideScrollbar) {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) :is(.mx_RoomView_timeline_rr_enabled, [class*="RoomView_timeline_rr_enabled"]) {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) :is(.mx_EventTile_msgOption, [class*="EventTile_msgOption"], .mx_ReadReceiptGroup, [class*="ReadReceiptGroup"], [aria-label="LesebestÃ¤tigungen"], [aria-label="Read receipts"]) {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    pointer-events: none !important;
+    overflow: hidden !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) .mx_EventTile,
+  html.mmlc-enabled:has(.mx_RoomView) [class*="EventTile"] {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  html.mmlc-enabled:has(.mx_RoomView) :is(.mx_Separator, [data-separator-type], [role="separator"][aria-orientation="vertical"]) {
+    display: none !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden !important;
+  }
+}
+
+/* Disabled: this block forced native desktop-hierarchy panes to 1px and could
+   leave the actual room view outside the visible layout. */
+@media (max-width: 0px) {
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) #matrixchat,
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) .mx_MatrixChat_wrapper,
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) .mx_MatrixChat,
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) [data-group="true"] {
+    min-width: 0 !important;
+    max-width: 100vw !important;
+    overflow: hidden !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden:has(.mx_RoomView):not(.mmlc-desktop-native-action) .mx_SpacePanel,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden:has(.mx_RoomView):not(.mmlc-desktop-native-action) .mx_SpacePanel.collapsed,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden:has(.mx_RoomView):not(.mmlc-desktop-native-action) nav[aria-label="Spaces"],
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-hidden:has(.mx_RoomView):not(.mmlc-desktop-native-action) [class*="SpacePanel"]:not(:where(#mmlc-toolbar *, #mmlc-panel *, #mmlc-desktop-space-list-host *, #mmlc-desktop-chat-list-host *, #mcs-settings-overlay *)) {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    flex: 0 0 1px !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    flex-basis: 1px !important;
+    width: 1px !important;
+    min-width: 1px !important;
+    max-width: 1px !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+    transform: none !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) #left-panel,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) [data-testid="left-panel"],
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel_panel,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel_outerWrapper,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel_wrapper,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_LeftPanel_roomListContainer,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) .mx_RoomListPanel,
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    position: relative !important;
+    flex: 0 0 1px !important;
+    flex-grow: 0 !important;
+    flex-shrink: 0 !important;
+    flex-basis: 1px !important;
+    width: 1px !important;
+    min-width: 1px !important;
+    max-width: 1px !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: hidden !important;
+    overflow-x: hidden !important;
+    overflow-y: hidden !important;
+    transform: none !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) #mmlc-desktop-chat-list-host > :not(.mmlc-desktop-middle-toggle),
+  html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden:has(.mx_RoomView):not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-native-action) #left-panel :is([data-testid="room-list-search"], [data-testid="room-list-header"], [data-testid="primary-filters"], [data-testid="room-list"], .mx_RoomTile, [class*="RoomTile"]) {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) [data-group="true"] > :not(.mx_SpacePanel):not(#left-panel):not([data-testid="left-panel"]) {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) :is(.mx_RoomView, .mx_RoomView_body, .mx_MainSplit, .mx_RoomView_timeline, .mx_TimelinePanel, .mx_MessagePanel, .mx_RoomView_messagePanel, .mx_RoomView_messageListWrapper, .mx_RoomView_MessageList, .mx_ScrollPanel, .mx_AutoHideScrollbar) {
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) :is(.mx_RoomView_timeline_rr_enabled, [class*="RoomView_timeline_rr_enabled"]) {
+    margin-right: 0 !important;
+    padding-right: 0 !important;
+  }
+
+  html.mmlc-desktop-hierarchy-mode:has(.mx_RoomView):not(.mmlc-desktop-native-action) :is(.mx_EventTile_msgOption, [class*="EventTile_msgOption"], .mx_ReadReceiptGroup, [class*="ReadReceiptGroup"], [aria-label="LesebestÃ¤tigungen"], [aria-label="Read receipts"]) {
+    display: none !important;
+    visibility: hidden !important;
+    opacity: 0 !important;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    max-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    pointer-events: none !important;
+    overflow: hidden !important;
+  }
 }

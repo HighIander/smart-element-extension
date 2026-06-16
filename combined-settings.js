@@ -29,6 +29,7 @@
   const DEFAULT_SELECTOR_REFRESH_SECONDS = 60;
   const MIN_SELECTOR_REFRESH_SECONDS = 0;
   const MAX_SELECTOR_REFRESH_SECONDS = 3600;
+  const DEFAULT_SHOW_CHAT_RENDERING_OVERLAY = true;
 
   const HOST_ID = "mcs-settings-host";
   const OVERLAY_ID = "mcs-settings-overlay";
@@ -115,6 +116,8 @@
       ? Math.max(MIN_SELECTOR_REFRESH_SECONDS, Math.min(MAX_SELECTOR_REFRESH_SECONDS, Math.round(refreshRaw)))
       : DEFAULT_SELECTOR_REFRESH_SECONDS;
 
+    normalized.showChatRenderingOverlay = raw.showChatRenderingOverlay !== false;
+
     return normalized;
   }
 
@@ -195,7 +198,8 @@
       enableMattermostTools: next.enableMattermostTools !== false,
       enableMatrixMobile: next.enableMatrixMobile !== false,
       enableThreadView: next.enableThreadView !== false,
-      selectorBackgroundRefreshSeconds: next.selectorBackgroundRefreshSeconds
+      selectorBackgroundRefreshSeconds: next.selectorBackgroundRefreshSeconds,
+      showChatRenderingOverlay: next.showChatRenderingOverlay !== false
     };
 
     // Mirror the small feature subset into the legacy object for compatibility
@@ -522,6 +526,13 @@
               </span>
               <span class="mcs-settings-subhint">Set to 0 to disable periodic background updates. Default: 60 seconds.</span>
             </label>
+            <label class="mcs-settings-option">
+              <input type="checkbox" data-mcs-setting="showChatRenderingOverlay" ${config.showChatRenderingOverlay !== false ? "checked" : ""}>
+              <span>
+                <span>Show chat rendering overlay</span>
+                <span class="mcs-settings-subhint">Shows the temporary "Rendering Smart Elements" overlay while opening chats.</span>
+              </span>
+            </label>
           </div>
           <div class="mcs-settings-hint">
             Changes are applied immediately where the current page already has the corresponding content script loaded.
@@ -549,6 +560,9 @@
 
     const refreshInput = overlay.querySelector("[data-mcs-setting='selectorBackgroundRefreshSeconds']");
     if (refreshInput) refreshInput.value = String(config.selectorBackgroundRefreshSeconds);
+
+    const renderingOverlayInput = overlay.querySelector("[data-mcs-setting='showChatRenderingOverlay']");
+    if (renderingOverlayInput) renderingOverlayInput.checked = config.showChatRenderingOverlay !== false;
   }
 
   function bindDialogEvents(overlay, state) {
@@ -620,6 +634,16 @@
         renderSettingsDialog(state, { forceFullRender: false });
       }
     }, false);
+
+    const renderingOverlayInput = overlay.querySelector("[data-mcs-setting='showChatRenderingOverlay']");
+    renderingOverlayInput?.addEventListener("change", async event => {
+      stopEverywhere(event);
+      const next = await setConfigPatch({ showChatRenderingOverlay: Boolean(event.target.checked) });
+      if (activeDialogState === state && !state.closedExplicitly) {
+        state.config = next;
+        renderSettingsDialog(state, { forceFullRender: false });
+      }
+    }, false);
   }
 
   function escapeHtml(value) {
@@ -639,6 +663,7 @@
     FEATURE_LABELS: { ...FEATURE_LABELS },
     DEFAULT_FEATURES: { ...DEFAULT_FEATURES },
     DEFAULT_SELECTOR_REFRESH_SECONDS,
+    DEFAULT_SHOW_CHAT_RENDERING_OVERLAY,
     normalizeConfig,
     getConfig,
     setConfigPatch,

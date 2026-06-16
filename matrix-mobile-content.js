@@ -92,6 +92,7 @@
   ].join(", ");
   const CLICKABLE_SELECTOR = "button, a, [role='button'], [role='treeitem'], [role='listitem'], [role='option'], [tabindex]";
   const MODES = new Set(["normal", "spaces", "rooms", "chat", "thread"]);
+  const SMALL_CHAT_WINDOW_MAX_WIDTH = 1280;
   const CHAT_LOADING_DETAIL_TEXT = "Fetching chats from the remote Matrix server...";
   const CHAT_OPENING_TITLE_TEXT = "Opening chat.";
   const CHAT_OPENING_DETAIL_TEXT = "Rendering Smart Elements";
@@ -164,7 +165,8 @@
     enableMattermostTools: true,
     enableMatrixMobile: true,
     enableThreadView: true,
-    selectorBackgroundRefreshSeconds: 60
+    selectorBackgroundRefreshSeconds: 60,
+    showChatRenderingOverlay: true
   };
   let mobileRuntimeStarted = false;
   let mobileRuntimeListenersInstalled = false;
@@ -199,6 +201,8 @@
   let desktopMiddleEdgeTrackingTimer = null;
   let desktopSpaceFloatingOpenedAt = 0;
   let desktopMiddleFloatingOpenedAt = 0;
+  let desktopNativeMenuDismissPreserveSpacePaneUntil = 0;
+  let desktopNativeMenuDismissPreserveMiddlePaneUntil = 0;
   let desktopSpaceDisplayMode = "full";
   let desktopHierarchyObserver = null;
   let desktopEyePlacementObserver = null;
@@ -229,6 +233,7 @@
   let originalViewportMetaContent = undefined;
   let viewportMetaCreatedByMobileRuntime = false;
   let nativeParseLayoutDepth = 0;
+  let nativeParseDesktopNativeActionAdded = false;
   let nativeParseViewportOriginalContent = undefined;
   let nativeParseViewportCreated = false;
   let nativeParsePreViewportWidth = 0;
@@ -263,6 +268,15 @@
     return combinedFeatureConfig.enableMatrixMobile !== false;
   }
 
+  function isSmallChatWindow() {
+    const width = Number(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0);
+    return width <= SMALL_CHAT_WINDOW_MAX_WIDTH;
+  }
+
+  function shouldCompactNativePanesForSmallChatWindow() {
+    return false;
+  }
+
   function isDesktopViewportForNativeEyeButton() {
     const width = Number(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0);
     const ua = String(navigator.userAgent || "");
@@ -294,6 +308,10 @@
     return combinedFeatureConfig.enableThreadView !== false;
   }
 
+  function isChatRenderingOverlayEnabled() {
+    return combinedFeatureConfig.showChatRenderingOverlay !== false;
+  }
+
   async function refreshCombinedFeatureConfig() {
     try {
       const settings = combinedSettings();
@@ -305,6 +323,7 @@
     }
 
     applyCombinedFeatureVisibility();
+    if (!isChatRenderingOverlayEnabled()) showChatOpeningOverlay(false);
     return combinedFeatureConfig;
   }
 
@@ -317,6 +336,7 @@
       combinedFeatureConfig = settings.normalizeConfig(config || {});
       installPermanentMobileWarningSuppression();
       applyCombinedFeatureVisibility();
+      if (!isChatRenderingOverlayEnabled()) showChatOpeningOverlay(false);
       if (isMobileLayoutEnabled()) {
         disableDesktopHierarchyNativeMode({ keepButton: false, preserveActive: true });
         initializeMobileRuntime();
@@ -1390,6 +1410,9 @@
     }
 
     let overlayLeft = desktopChatOverlayLeftNextToSpacePane();
+    const keepNextToFloatingSpace = desktopSpaceFloatingSelectionHoldIsActive() &&
+      Number.isFinite(overlayLeft) &&
+      overlayLeft > 0;
 
     if (!Number.isFinite(overlayLeft) || overlayLeft <= 0) {
       overlayLeft = Number.isFinite(edgeX) && edgeX > 0 ? edgeX : NaN;
@@ -1450,8 +1473,10 @@
     const maxDesiredWidth = startSelected ? 560 : 520;
     const naturalWidth = naturalTextWidth + chromeWidth;
     const desiredWidth = Math.min(maxDesiredWidth, Math.max(minDesiredWidth, naturalWidth));
-    const fittedLeft = Math.max(leftGap, Math.min(baseLeft, viewportWidth - desiredWidth - rightGap));
-    const availableWidth = Math.max(300, viewportWidth - fittedLeft - rightGap);
+    const fittedLeft = keepNextToFloatingSpace
+      ? baseLeft
+      : Math.max(leftGap, Math.min(baseLeft, viewportWidth - desiredWidth - rightGap));
+    const availableWidth = Math.max(keepNextToFloatingSpace ? 240 : 300, viewportWidth - fittedLeft - rightGap);
     const overlayWidth = Math.round(Math.min(desiredWidth, availableWidth));
     const overlayHeight = Math.round(Math.max(240, viewportHeight - topAndBottomGap));
 
@@ -1627,6 +1652,53 @@
     return true;
   }
 
+  function beginDesktopNativeMenuDismissPanePreserve(durationMs = 1400) {
+    const until = Date.now() + Math.max(260, Math.min(4000, Number(durationMs) || 1400));
+
+    if (desktopSpaceFloatingPaneIsOpen()) {
+      desktopNativeMenuDismissPreserveSpacePaneUntil = Math.max(desktopNativeMenuDismissPreserveSpacePaneUntil || 0, until);
+      desktopSpacePaneTemporaryOpen = true;
+      desktopSpaceFloatingSelectionHold = true;
+    }
+
+    if (desktopMiddleFloatingPaneIsOpen()) {
+      desktopNativeMenuDismissPreserveMiddlePaneUntil = Math.max(desktopNativeMenuDismissPreserveMiddlePaneUntil || 0, until);
+      desktopMiddlePaneTemporaryOpen = true;
+    }
+
+    syncDesktopPaneModeClasses();
+  }
+
+  function desktopNativeMenuDismissShouldPreserveSpacePane() {
+    return desktopSpaceFloatingPaneIsOpen() && Date.now() < (desktopNativeMenuDismissPreserveSpacePaneUntil || 0);
+  }
+
+  function desktopNativeMenuDismissShouldPreserveMiddlePane() {
+    return desktopMiddleFloatingPaneIsOpen() && Date.now() < (desktopNativeMenuDismissPreserveMiddlePaneUntil || 0);
+  }
+
+  function reassertDesktopPanesAfterNativeMenuDismiss(reason = "native-menu-dismiss-preserve") {
+    let changed = false;
+
+    if (desktopNativeMenuDismissShouldPreserveSpacePane()) {
+      desktopSpacePaneTemporaryOpen = true;
+      desktopSpaceFloatingSelectionHold = true;
+      changed = true;
+    }
+
+    if (desktopNativeMenuDismissShouldPreserveMiddlePane()) {
+      desktopMiddlePaneTemporaryOpen = true;
+      changed = true;
+    }
+
+    if (!changed) return false;
+    syncDesktopPaneModeClasses();
+    renderDesktopMiddleChatNativeUi();
+    renderDesktopHierarchyNativeUiSoon(0);
+    scheduleDesktopMiddleEdgePositionUpdates([0, 80, 220]);
+    return true;
+  }
+
   function closeDesktopSpaceFloatingPane(reason = "desktop-space-floating-close") {
     if (!desktopSpaceFloatingPaneIsOpen()) {
       if (desktopSpaceFloatingSelectionHold === true) {
@@ -1701,10 +1773,20 @@
     return x < bounds.left - margin || x > bounds.right + margin;
   }
 
+  function eventMovedRightOutsideFloatingBounds(event, elements, marginPx = 10) {
+    const x = Number(event?.clientX);
+    if (!Number.isFinite(x)) return false;
+    const bounds = horizontalBoundsForElements(elements);
+    if (!bounds) return false;
+    const margin = Math.max(0, Number(marginPx) || 0);
+    return x > bounds.right + margin;
+  }
+
   function handleDesktopSpaceFloatingGlobalPointerMove(event) {
     if (!desktopSpaceFloatingPaneIsOpen()) return;
     if (Date.now() - desktopSpaceFloatingOpenedAt < 220) return;
     if (event?.isTrusted === false) return;
+    if (desktopNativeMenuDismissShouldPreserveSpacePane()) return;
     const host = document.getElementById("mmlc-desktop-space-list-host");
     const popover = document.getElementById("mmlc-desktop-space-settings-popover");
     if (!eventMovedHorizontallyOutsideFloatingBounds(event, [host, popover], 14)) return;
@@ -1715,6 +1797,7 @@
   function handleDesktopSpaceFloatingMouseLeave(event) {
     if (!desktopSpaceFloatingPaneIsOpen()) return;
     if (Date.now() - desktopSpaceFloatingOpenedAt < 220) return;
+    if (desktopNativeMenuDismissShouldPreserveSpacePane()) return;
     if (desktopSpaceFloatingSelectionHoldIsActive()) return;
     if (desktopSpaceFloatingStillContainsRelatedTarget(event)) return;
     // Element frequently re-parents/re-renders the floating Space menu while the
@@ -1729,6 +1812,7 @@
   function handleDesktopSpaceFloatingOutsidePointerDown(event) {
     if (!desktopSpaceFloatingPaneIsOpen()) return;
     if (event?.isTrusted === false) return;
+    if (desktopNativeMenuDismissShouldPreserveSpacePane()) return;
     const target = event.target;
     if (target instanceof Element && target.closest("#mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover")) return;
     clearDesktopSpaceFloatingSelectionHold();
@@ -1801,20 +1885,27 @@
   function handleDesktopMiddleFloatingGlobalPointerMove(event) {
     if (!desktopMiddleFloatingPaneIsOpen()) return;
     if (Date.now() - desktopMiddleFloatingOpenedAt < 220) return;
+    if (event?.isTrusted === false) return;
 
+    if (desktopNativeMenuDismissShouldPreserveMiddlePane()) return;
     if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
     const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
     const host = document.getElementById("mmlc-desktop-chat-list-host");
     const restore = document.getElementById("mmlc-desktop-middle-restore");
-    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
-    closeDesktopMiddleFloatingPane("pointer-move-horizontal");
+    if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
+    closeDesktopMiddleFloatingPane("pointer-move-right");
   }
 
   function handleDesktopMiddleFloatingMouseLeave(event) {
     if (!desktopMiddleFloatingPaneIsOpen()) return;
     if (Date.now() - desktopMiddleFloatingOpenedAt < 220) return;
 
+    if (desktopNativeMenuDismissShouldPreserveMiddlePane()) return;
     if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) {
+      const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
+      const host = document.getElementById("mmlc-desktop-chat-list-host");
+      const restore = document.getElementById("mmlc-desktop-middle-restore");
+      if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
       const delayMs = Math.max(80, Math.min(10000, desktopMiddlePaneSpaceLandingHoldUntil - Date.now() + 80));
       window.setTimeout(() => {
         if (!desktopMiddleFloatingPaneIsOpen()) return;
@@ -1827,13 +1918,14 @@
     const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
     const host = document.getElementById("mmlc-desktop-chat-list-host");
     const restore = document.getElementById("mmlc-desktop-middle-restore");
-    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
-    closeDesktopMiddleFloatingPane("mouse-leave-horizontal");
+    if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
+    closeDesktopMiddleFloatingPane("mouse-leave-right");
   }
 
   function handleDesktopMiddleFloatingOutsidePointerDown(event) {
     if (!desktopMiddleFloatingPaneIsOpen()) return;
     if (event?.isTrusted === false) return;
+    if (desktopNativeMenuDismissShouldPreserveMiddlePane()) return;
     if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
     const target = event.target;
     if (target instanceof Element && target.closest("#left-panel, [data-testid='left-panel'], #mmlc-desktop-chat-list-host, #mmlc-desktop-middle-restore, #mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover")) return;
@@ -1842,6 +1934,7 @@
 
   function handleDesktopMiddleFloatingNativeRoomClick(event) {
     if (!desktopMiddleFloatingPaneIsOpen()) return;
+    if (event?.isTrusted === false) return;
     const target = event.target;
     if (!(target instanceof Element) || target.closest(OWNED_SELECTOR)) return;
     const roomTarget = target.closest([
@@ -1860,7 +1953,10 @@
   }
 
   function handleDesktopMiddleFloatingKeyDown(event) {
-    if (event.key === "Escape") closeDesktopMiddleFloatingPane("escape");
+    // The floating chat/DM list intentionally stays open until the user selects
+    // a chat, moves the pointer out to the right, or performs a trusted outside
+    // pointer click. Escape is ignored here so native-menu cleanup and keyboard
+    // focus changes cannot collapse the list unexpectedly.
   }
 
   function removeDesktopSpaceFloatingAvatar() {
@@ -2644,11 +2740,11 @@
     expandToggle.addEventListener("mouseenter", () => {
       if (normalizeDesktopSpacePaneMode(desktopSpacePaneMode) !== "hidden") return;
       if (desktopSpaceFloatingPaneIsOpen()) return;
-      if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("space-pane-hover");
 
       desktopSpacePaneTemporaryOpen = true;
       desktopSpaceFloatingLabelsExpanded = false;
       syncDesktopPaneModeClasses();
+      scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("desktop-space-pane-hover-open");
       renderDesktopHierarchyNativeUiSoon(0);
     });
 
@@ -2656,7 +2752,6 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
-      if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("space-pane-toggle");
       const currentMode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
       if (nativeNavigationPanesMustRemainOpen() && currentMode === "hidden") {
         desktopSpacePaneTemporaryOpen = false;
@@ -2672,6 +2767,7 @@
         if (!desktopSpacePaneTemporaryOpen) {
           desktopSpacePaneTemporaryOpen = true;
           syncDesktopPaneModeClasses();
+          scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("desktop-space-pane-toggle-open");
           renderDesktopHierarchyNativeUiSoon(0);
           return;
         }
@@ -2704,7 +2800,6 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
-      if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("space-pane-maximize");
       const currentMode = normalizeDesktopSpacePaneMode(desktopSpacePaneMode);
       if (nativeNavigationPanesMustRemainOpen() && currentMode === "hidden") {
         desktopSpacePaneTemporaryOpen = false;
@@ -2720,6 +2815,7 @@
         desktopSpacePaneTemporaryOpen = true;
         desktopSpaceFloatingLabelsExpanded = true;
         syncDesktopPaneModeClasses();
+        scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("desktop-space-pane-maximize-open");
         persistDesktopHierarchySettings();
         renderDesktopHierarchyNativeUiSoon(0);
         return;
@@ -2889,11 +2985,10 @@
         syncDesktopPaneModeClasses();
       }
 
-      if (item.joined === false) {
-        joinDesktopUnjoinedItem(item).catch(error => console.warn("Could not join desktop hierarchy space.", error));
-      } else {
-        selectDesktopSpaceNode(item).catch(error => console.warn("Could not select desktop hierarchy space.", error));
-      }
+      const action = item.joined === false
+        ? joinDesktopUnjoinedItem(item)
+        : selectDesktopSpaceNode(item);
+      action.catch(error => console.warn(item.joined === false ? "Could not join desktop hierarchy space." : "Could not select desktop hierarchy space.", error));
       if (keepSpacePaneOpen) scheduleDesktopSpaceFloatingSelectionHoldReassertions("space-click-after-select");
     });
 
@@ -3014,9 +3109,9 @@
     }
     scheduleDesktopChatListUnreadImmediateUpdate(0, "desktop-chat-list-rendered");
     const liveUnreadForRenderedChats = collectNativeRoomListUnreadMap();
-    const rawChats = cachedListItemsWithFallback(chatsCacheKey(path, label), label);
-    const chats = rawChats
-      .filter(item => item?.type === "room")
+    const chatListKey = chatsCacheKey(path, label);
+    const rawChats = cachedListItemsWithFallback(chatListKey, label);
+    const chats = directRoomItemsForChatList(rawChats, chatListKey)
       .filter(item => desktopShowUnjoinedChats || item.joined !== false)
       .map(item => {
         const itemPath = Array.isArray(item.path) && item.path.length ? item.path : dedupePathSegments([...path, { label: item.label, type: "room" }]);
@@ -3159,20 +3254,6 @@
       persistDesktopHierarchySettings();
       enforceNativeNavigationPanesOpen("desktop-middle-toggle-hide");
       renderDesktopMiddleChatNativeUi();
-      renderDesktopHierarchyNativeUiSoon(0);
-    });
-    button.addEventListener("mouseenter", () => {
-      if (!(desktopMiddlePaneHidden === true && !desktopMiddleFloatingPaneIsOpen())) return;
-      if (desktopSpaceFloatingPaneIsOpen()) closeDesktopSpaceFloatingPane("chat-list-hover");
-
-      desktopMiddlePaneTemporaryOpen = true;
-      desktopMiddlePaneTemporaryFromSpaceSelection = false;
-      desktopMiddlePaneSpaceLandingHoldUntil = 0;
-      syncDesktopPaneModeClasses();
-      enforceNativeNavigationPanesOpen("desktop-middle-hover-open-floating");
-      ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
-      renderDesktopMiddleChatNativeUi();
-      scheduleDesktopChatListUnreadImmediateUpdate(0, "desktop-middle-hover-open");
       renderDesktopHierarchyNativeUiSoon(0);
     });
     return button;
@@ -3372,7 +3453,10 @@
 
     desktopSelectedSpaceLandingTimer = window.setTimeout(() => {
       desktopSelectedSpaceLandingTimer = null;
-      openDesktopSelectedSpaceLandingScreen(selectedLabel, pathSnapshot, run, options, item)
+      withDesktopHierarchyNativeAction(
+        () => openDesktopSelectedSpaceLandingScreen(selectedLabel, pathSnapshot, run, options, item),
+        { reason: "desktop-space-landing-simple" }
+      )
         .catch(error => console.warn("Smart Element could not show the native Space landing screen.", error));
     }, Number(options.delayMs || 80));
   }
@@ -3637,6 +3721,7 @@
       desktopMiddlePaneTemporaryOpen = true;
       desktopMiddlePaneTemporaryFromSpaceSelection = true;
       syncDesktopPaneModeClasses();
+      scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("desktop-spacebar-chatlist-open");
     } else {
       desktopMiddlePaneTemporaryOpen = false;
       desktopMiddlePaneTemporaryFromSpaceSelection = false;
@@ -4784,8 +4869,16 @@
     nativeParsePreViewportWidth = preParseVisual.width;
     nativeParsePreViewportHeight = preParseVisual.height;
 
-    document.documentElement.classList.add("mmlc-native-parse-layout");
-    document.documentElement.dataset.mmlcNativeParseReason = String(options.reason || "parse");
+    const html = document.documentElement;
+    if (options.desktopNativeAction !== false &&
+        desktopHierarchyModeActive &&
+        !html.classList.contains("mmlc-desktop-native-action")) {
+      html.classList.add("mmlc-desktop-native-action");
+      nativeParseDesktopNativeActionAdded = true;
+    }
+
+    html.classList.add("mmlc-native-parse-layout");
+    html.dataset.mmlcNativeParseReason = String(options.reason || "parse");
 
     // Android portrait often makes Element choose a narrow/mobile layout where
     // the native left, middle, and right panes are either collapsed or not
@@ -4833,8 +4926,9 @@
   }
 
   function deactivateNativeElementParseLayout() {
-    document.documentElement.classList.remove("mmlc-native-parse-layout");
-    document.documentElement.removeAttribute("data-mmlc-native-parse-reason");
+    const html = document.documentElement;
+    html.classList.remove("mmlc-native-parse-layout");
+    html.removeAttribute("data-mmlc-native-parse-reason");
 
     const viewport = document.querySelector('meta[name="viewport"]');
     if (viewport) {
@@ -4853,6 +4947,10 @@
     nativeParsePreViewportWidth = 0;
     nativeParsePreViewportHeight = 0;
     resetPanelVisualLoadingMetrics();
+    if (nativeParseDesktopNativeActionAdded) {
+      html.classList.remove("mmlc-desktop-native-action");
+      nativeParseDesktopNativeActionAdded = false;
+    }
     dispatchNativeParseResize();
   }
 
@@ -4942,6 +5040,17 @@
       element.style.visibility = "visible";
       element.style.opacity = "1";
       element.style.flexShrink = "0";
+      if (element.classList.contains("mx_SpacePanel") || element.matches("nav[aria-label='Spaces']")) {
+        element.style.flex = "0 0 260px";
+        element.style.width = "260px";
+        element.style.minWidth = "160px";
+        element.style.maxWidth = "300px";
+        element.style.overflow = "visible";
+      } else {
+        element.style.width = element.style.width || "100%";
+        element.style.maxWidth = element.style.maxWidth || "100%";
+        element.style.overflow = element.style.overflow || "visible";
+      }
     }
 
     for (const element of queryNativeParseElements(leftSelectors)) {
@@ -5435,10 +5544,18 @@
     });
   }
 
+  function restoreRememberedMobileChatPaneProperty(element, property) {
+    if (!(element instanceof HTMLElement)) return;
+    const styles = nativeMobileChatPaneForcedStyles.get(element);
+    if (!styles || !(property in styles)) return;
+    try { element.style[property] = styles[property]; } catch {}
+  }
+
   function restoreMobileChatNativePaneConstraints() {
     for (const [element, styles] of nativeMobileChatPaneForcedStyles.entries()) {
       if (!(element instanceof HTMLElement)) continue;
       element.removeAttribute("data-mmlc-mobile-chat-pane-constrained");
+      element.removeAttribute("data-mmlc-mobile-chat-pane-compact");
       for (const [property, value] of Object.entries(styles)) {
         try { element.style[property] = value; } catch {}
       }
@@ -5454,9 +5571,9 @@
   }
 
   function constrainNativeSpacePanelForMobileChat(reason = "mobile-chat") {
-    // Keep the native space rail expanded rather than reducing it to an icon
-    // strip; the Smart Element hierarchy relies on the full native pane staying
-    // present and interactive.
+    // Keep the native space rail mounted and interactive for unread polling and
+    // navigation repair. Small chat/thread viewports compact it to a nonzero
+    // 1px rail in forceNativeSpacePanelOpen().
     return forceNativeSpacePanelOpen(reason || "mobile-chat");
   }
 
@@ -5541,22 +5658,26 @@
     panel.style.visibility = "visible";
     panel.style.opacity = "1";
     panel.style.pointerEvents = "auto";
+    const compactMobileChatPane = shouldCompactNativePanesForSmallChatWindow();
     const desktopMode = isDesktopHierarchyNativeModeUsable() ? normalizeDesktopSpacePaneMode(desktopSpacePaneMode) : "expanded";
-    const width = desktopMode === "hidden"
+    const width = compactMobileChatPane
+      ? 1
+      : desktopMode === "hidden"
       ? 0
       : desktopMode === "icons"
         ? 104
         : nativeNavigationPaneOpenWidth("space");
+    panel.toggleAttribute("data-mmlc-mobile-chat-pane-compact", compactMobileChatPane);
     panel.style.flex = `0 0 ${width}px`;
     panel.style.flexGrow = "0";
     panel.style.flexShrink = "0";
     panel.style.flexBasis = `${width}px`;
     panel.style.width = `${width}px`;
-    panel.style.minWidth = desktopMode === "hidden" ? "0px" : desktopMode === "icons" ? "104px" : "160px";
-    panel.style.maxWidth = desktopMode === "hidden" ? "0px" : desktopMode === "icons" ? "104px" : "300px";
+    panel.style.minWidth = compactMobileChatPane ? "1px" : desktopMode === "hidden" ? "0px" : desktopMode === "icons" ? "104px" : "160px";
+    panel.style.maxWidth = compactMobileChatPane ? "1px" : desktopMode === "hidden" ? "0px" : desktopMode === "icons" ? "104px" : "300px";
     panel.style.margin = desktopMode === "hidden" ? "0" : panel.style.margin;
     panel.style.padding = desktopMode === "hidden" ? "0" : panel.style.padding;
-    panel.style.overflow = "visible";
+    panel.style.overflow = compactMobileChatPane ? "hidden" : "visible";
 
     if (desktopMode !== "hidden") {
       for (const child of panel.querySelectorAll(":scope > *, .mx_SpaceTreeLevel, .mx_SpaceButton, [class*='SpaceButton']")) {
@@ -5566,6 +5687,15 @@
         child.style.visibility = "visible";
         child.style.opacity = "1";
         child.style.pointerEvents = "auto";
+        if (compactMobileChatPane) {
+          child.setAttribute("data-mmlc-mobile-chat-pane-compact", "true");
+          child.style.maxWidth = "1px";
+          child.style.overflow = "hidden";
+        } else if (child.hasAttribute("data-mmlc-mobile-chat-pane-compact")) {
+          child.removeAttribute("data-mmlc-mobile-chat-pane-compact");
+          restoreRememberedMobileChatPaneProperty(child, "maxWidth");
+          restoreRememberedMobileChatPaneProperty(child, "overflow");
+        }
       }
     }
 
@@ -5580,12 +5710,14 @@
       && isDesktopHierarchyNativeModeUsable()
       && desktopMiddlePaneHidden === true
       && !desktopMiddleFloatingPaneIsOpen();
-    const width = smartMiddleIntentionallyHidden ? 48 : nativeNavigationPaneOpenWidth("middle");
+    const compactMobileChatPane = !smartMiddleIntentionallyHidden && shouldCompactNativePanesForSmallChatWindow();
+    const width = smartMiddleIntentionallyHidden ? 48 : compactMobileChatPane ? 1 : nativeNavigationPaneOpenWidth("middle");
     rememberMobileChatNativePaneStyle(panel);
     panel.dataset.mmlcNavigationPanesOpen = String(reason || "keep-panes-open");
     panel.removeAttribute("inert");
     panel.removeAttribute("data-mmlc-mobile-chat-pane-constrained");
     panel.removeAttribute("data-mmlc-native-return-left-minimized");
+    panel.toggleAttribute("data-mmlc-mobile-chat-pane-compact", compactMobileChatPane);
     panel.style.display = "flex";
     panel.style.visibility = "visible";
     panel.style.opacity = "1";
@@ -5595,11 +5727,11 @@
     panel.style.flexShrink = "0";
     panel.style.flexBasis = `${width}px`;
     panel.style.width = `${width}px`;
-    panel.style.minWidth = smartMiddleIntentionallyHidden ? "48px" : "240px";
-    panel.style.maxWidth = smartMiddleIntentionallyHidden ? "48px" : "460px";
-    panel.style.overflow = smartMiddleIntentionallyHidden ? "hidden" : "visible";
-    panel.style.overflowX = smartMiddleIntentionallyHidden ? "hidden" : "visible";
-    panel.style.overflowY = smartMiddleIntentionallyHidden ? "hidden" : "auto";
+    panel.style.minWidth = compactMobileChatPane ? "1px" : smartMiddleIntentionallyHidden ? "48px" : "240px";
+    panel.style.maxWidth = compactMobileChatPane ? "1px" : smartMiddleIntentionallyHidden ? "48px" : "460px";
+    panel.style.overflow = (compactMobileChatPane || smartMiddleIntentionallyHidden) ? "hidden" : "visible";
+    panel.style.overflowX = (compactMobileChatPane || smartMiddleIntentionallyHidden) ? "hidden" : "visible";
+    panel.style.overflowY = compactMobileChatPane ? "hidden" : smartMiddleIntentionallyHidden ? "hidden" : "auto";
 
     for (const child of panel.querySelectorAll(":scope > *, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel")) {
       if (!(child instanceof HTMLElement) || child.closest(OWNED_SELECTOR)) continue;
@@ -5609,8 +5741,14 @@
       child.style.visibility = "visible";
       child.style.opacity = "1";
       child.style.pointerEvents = "auto";
-      child.style.maxWidth = smartMiddleIntentionallyHidden ? "48px" : "100%";
-      child.style.overflowX = smartMiddleIntentionallyHidden ? "hidden" : "visible";
+      if (compactMobileChatPane) child.setAttribute("data-mmlc-mobile-chat-pane-compact", "true");
+      else if (child.hasAttribute("data-mmlc-mobile-chat-pane-compact")) {
+        child.removeAttribute("data-mmlc-mobile-chat-pane-compact");
+        restoreRememberedMobileChatPaneProperty(child, "overflowY");
+      }
+      child.style.maxWidth = compactMobileChatPane ? "1px" : smartMiddleIntentionallyHidden ? "48px" : "100%";
+      child.style.overflowX = (compactMobileChatPane || smartMiddleIntentionallyHidden) ? "hidden" : "visible";
+      if (compactMobileChatPane) child.style.overflowY = "hidden";
     }
 
     return true;
@@ -7436,7 +7574,7 @@
     // to Smart Element's A-Z or user-defined order. Keep the parsed Element order
     // exactly as seen in the native home list, and disable drag sorting for this
     // panel so cached manual orders cannot reshuffle it later.
-    const enrichedChats = enrichChatItemsWithUnread(chatItems);
+    const enrichedChats = enrichChatItemsWithUnread(directRoomItemsForChatList(chatItems, listKey));
     const items = [...enrichedChats, makeCreateTile("chat")];
 
     renderList(items, {
@@ -7560,7 +7698,7 @@
 
   function renderChatsList(chatItems, token) {
     const listKey = chatsCacheKey(currentSpacePathForPanel(currentSpaceLabel), currentSpaceLabel);
-    const enrichedChats = enrichChatItemsWithUnread(chatItems);
+    const enrichedChats = enrichChatItemsWithUnread(directRoomItemsForChatList(chatItems, listKey));
     const sortedChats = sortPanelItems(enrichedChats, listKey);
     const items = [...sortedChats, makeCreateTile("chat")];
 
@@ -8131,22 +8269,18 @@
       statesByChatKey.set(cleanKey, mergeSameUnreadStates(statesByChatKey.get(cleanKey), state));
     };
 
-    const chats = cachedListItemsWithFallback(context.listKey, context.label)
-      .filter(item => item?.type === "room");
+    const chats = directRoomItemsForChatList(
+      cachedListItemsWithFallback(context.listKey, context.label),
+      context.listKey
+    );
     for (const item of chats) {
       const itemWithPath = Array.isArray(item.path) && item.path.length ? item : { ...item, path: context.path };
       mergeChatState(itemWithPath.label, unreadForDesktopChatButtonItem(itemWithPath, liveUnreadMap));
     }
 
-    // While Element's native room list is rendered, include its live counters
-    // directly as a fallback.  Merge by chat label/key so the blue collapsed
-    // chat-list button is not double-counted when cache and native DOM both
-    // know the same unread counter.
-    if (liveUnreadMap instanceof Map) {
-      for (const [key, state] of liveUnreadMap.entries()) mergeChatState(key, state);
-    }
-
-    return sumUnreadStates(Array.from(statesByChatKey.values()));
+    const chatUnread = sumUnreadStates(Array.from(statesByChatKey.values()));
+    if (context.listKey === homeChatsCacheKey()) return mergeSameUnreadStates(startPageUnreadState(), chatUnread);
+    return chatUnread;
   }
 
   function desktopMinimizedSpaceMenuUnreadState() {
@@ -8556,10 +8690,40 @@
 
   function directChatUnreadForSpaceKey(key) {
     if (!key) return normalizeUnreadState(null);
-    const cachedSpaceUnread = unreadSpaceCache.get(key);
-    const chats = cachedListItems(`chats:${key}`).filter(item => item?.type === "room");
+    const listKey = `chats:${key}`;
+    const chats = directRoomItemsForChatList(cachedListItems(listKey), listKey);
     const chatUnread = sumUnreadStates(chats.map(item => item.unread || cachedUnreadForRoomItem(item)));
-    return mergeSameUnreadStates(cachedSpaceUnread, chatUnread);
+    if (key === "startseite") return mergeSameUnreadStates(unreadSpaceCache.get(key), chatUnread);
+    return chatUnread;
+  }
+
+  function directRoomItemsForChatList(items, listKey) {
+    return (items || []).filter(item => item?.type === "room" && roomItemBelongsToChatListKey(item, listKey));
+  }
+
+  function roomItemBelongsToChatListKey(item, listKey) {
+    const listSpaceKey = chatListSpaceKey(listKey);
+    if (!listSpaceKey) return true;
+
+    const itemSpaceKey = roomItemSpaceKey(item);
+    return !itemSpaceKey || itemSpaceKey === listSpaceKey;
+  }
+
+  function chatListSpaceKey(listKey) {
+    const value = String(listKey || "");
+    return value.startsWith("chats:") ? value.slice("chats:".length) : "";
+  }
+
+  function roomItemSpaceKey(item) {
+    if (!Array.isArray(item?.path) || !item.path.length) return "";
+
+    const spacePath = pathSegmentsFromSpacePath(item.path)
+      .filter(segment => segment && segment.type !== "room");
+    const hasSelectableSpace = spacePath.some(segment => segment && segment.type !== "root" && normalizeSpaces(segment.label || ""));
+    if (!hasSelectableSpace) return "";
+
+    const last = lastSelectableSpacePathSegment(spacePath);
+    return hierarchyCachePathKey(spacePath, last?.label || "");
   }
 
   function desktopLocalUnreadForSpaceItem(item) {
@@ -8814,7 +8978,8 @@
     const clean = normalizeSpaces(label || "").toLowerCase();
     if (!clean) return null;
     const key = hierarchyCachePathKey(currentSpacePathForPanel(currentSpaceLabel), currentSpaceLabel);
-    const chats = cachedListItems(`chats:${key}`);
+    const listKey = `chats:${key}`;
+    const chats = directRoomItemsForChatList(cachedListItems(listKey), listKey);
     const match = chats.find(item => normalizeSpaces(item?.label || "").toLowerCase() === clean);
     return match?.unread || cachedUnreadForRoomItem({ label, path: currentSpacePathForPanel(currentSpaceLabel) });
   }
@@ -8824,7 +8989,7 @@
     if (!clean) return null;
 
     const context = desktopSelectedChatListContext();
-    const chats = context?.listKey ? cachedListItems(context.listKey) : [];
+    const chats = context?.listKey ? directRoomItemsForChatList(cachedListItems(context.listKey), context.listKey) : [];
     const match = chats.find(item => normalizeSpaces(item?.label || "").toLowerCase() === clean);
     if (match) return match.unread || cachedUnreadForRoomItem(match);
 
@@ -8874,7 +9039,7 @@
         const roomKey = roomUnreadCacheKey(item);
         if (roomKey && unread.hasUnread) unreadRoomCache.set(roomKey, unread);
         else if (roomKey) unreadRoomCache.delete(roomKey);
-        if (unread.hasUnread) unreadValues.push(unread);
+        if (unread.hasUnread && roomItemBelongsToChatListKey(item, listKey)) unreadValues.push(unread);
       }
       const aggregate = sumUnreadStates(unreadValues);
       if (aggregate.hasUnread) unreadSpaceCache.set(spaceKey, aggregate);
@@ -9400,6 +9565,11 @@
   }
 
   function showChatOpeningOverlay(visible, options = {}) {
+    if (visible && !isChatRenderingOverlayEnabled()) {
+      showChatOpeningOverlay(false);
+      return;
+    }
+
     const overlay = visible ? ensureChatOpeningOverlay() : document.getElementById("mmlc-chat-opening-overlay");
     if (!overlay) return;
 
@@ -11160,6 +11330,7 @@
 
     const started = Date.now();
     let clicked = false;
+    const firstTopLevelTarget = isFirstTopLevelNativeSpaceTarget(targetPath, clean);
 
     while (Date.now() - started < maxWaitMs) {
       forceNativeElementParsePanes(forceOptions);
@@ -11177,15 +11348,29 @@
 
         const activation = findNativeLeftRailSpaceActivationElement(item.element);
         if (activation instanceof Element) {
-          clickElementAtCenter(activation);
-          dispatchKeyboardLike(activation, "keydown", "Enter", "Enter");
-          dispatchKeyboardLike(activation, "keyup", "Enter", "Enter");
-          clicked = true;
-          await delay(340);
+          if (firstTopLevelTarget) {
+            const button = nativeSpaceRailButtonForElement(item.element, clean) || item.element;
+            clickNativeSpaceButtonWithoutMenu(button, { cleanup: false, nativeClick: true });
+            clicked = true;
+            await delay(720);
 
-          if (!spaceOverviewTitleMatchesLabel(clean) && !spaceOverviewMatchesCurrentSpace({ allowContainedRow: false })) {
+            if (!spaceOverviewTitleMatchesLabel(clean) && !spaceOverviewMatchesCurrentSpace({ allowContainedRow: false })) {
+              clickNativeSpaceButtonWithoutMenu(button, { cleanup: false, nativeClick: true });
+              await delay(960);
+            }
+
+            scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("first-top-level-select-cleanup");
+          } else {
             clickElementAtCenter(activation);
-            await delay(560);
+            dispatchKeyboardLike(activation, "keydown", "Enter", "Enter");
+            dispatchKeyboardLike(activation, "keyup", "Enter", "Enter");
+            clicked = true;
+            await delay(340);
+
+            if (!spaceOverviewTitleMatchesLabel(clean) && !spaceOverviewMatchesCurrentSpace({ allowContainedRow: false })) {
+              clickElementAtCenter(activation);
+              await delay(560);
+            }
           }
 
           if (!options.avoidSubtreeExpansion) await expandSelectedSpaceSubtree(item.element);
@@ -11561,7 +11746,7 @@
     return target;
   }
 
-  function scheduleCloseNativeSpaceMenusOpenedBySyntheticClick() {
+  function scheduleCloseNativeSpaceMenusOpenedBySyntheticClick(reason = "native-space-click-cleanup") {
     // Do not use Escape here: in Smart Element's floating-pane mode Escape also
     // closes the temporary chat-list pane.  Instead, imitate a normal user
     // cleanup click on an empty part of the message pane after each synthetic
@@ -11571,16 +11756,22 @@
     // selection, which can leave the previous DM/start page visible on the
     // right.  Delayed outside clicks still close Radix/Element popovers but no
     // longer race the Space landing update.
-    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-120"), 120);
-    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-280"), 280);
-    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-520"), 520);
-    window.setTimeout(() => clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-click-cleanup-880"), 880);
+    beginDesktopNativeMenuDismissPanePreserve(1500);
+    for (const delayMs of [120, 280, 520, 880]) {
+      window.setTimeout(() => {
+        beginDesktopNativeMenuDismissPanePreserve(900);
+        clickOpenMessageAreaToDismissNativeSpaceMenus(`${reason}-${delayMs}`);
+        reassertDesktopPanesAfterNativeMenuDismiss(`${reason}-${delayMs}`);
+      }, delayMs);
+    }
   }
 
   function closeNativeSpaceMenusOpenedBySyntheticClick() {
     // Kept as a compatibility wrapper for older call sites; intentionally closes
     // native popovers by outside-clicking the right pane rather than by Escape.
+    beginDesktopNativeMenuDismissPanePreserve(900);
     clickOpenMessageAreaToDismissNativeSpaceMenus("native-space-menu-close-wrapper");
+    reassertDesktopPanesAfterNativeMenuDismiss("native-space-menu-close-wrapper");
   }
 
   function clickOpenMessageAreaToDismissNativeSpaceMenus(reason = "native-space-menu-outside-click") {
@@ -13281,11 +13472,6 @@
     let rows = collectDirectSpaceOverviewRowsForCurrentSpace(pane);
     if (!rows.length) return [];
 
-    if (!rows.some(row => row.type === "room")) {
-      const descendantRooms = collectDescendantSpaceOverviewRoomsForCurrentSpace(pane);
-      if (descendantRooms.length) rows = descendantRooms;
-    }
-
     return enrichChatItemsWithMiddlePaneUnread(rows
       .filter(row => row.type === "room")
       .map(row => spaceOverviewRowToChatItem(row)))
@@ -13315,26 +13501,6 @@
       source: "space-overview",
       path: enrichOverviewRowPath(row, tileElement || rowElement)
     };
-  }
-
-  function collectDescendantSpaceOverviewRoomsForCurrentSpace(pane) {
-    const rows = collectSpaceOverviewRows(pane);
-    if (!rows.length) return [];
-
-    const label = normalizeSpaces(currentSpaceLabel || getCurrentSpaceLabel()).toLowerCase();
-    let scopeStart = -1;
-    let scopeLevel = -1;
-
-    if (label && !spaceOverviewTitleMatchesCurrentSpace(pane, label)) {
-      scopeStart = bestSpaceOverviewParentIndex(rows, label);
-      if (scopeStart >= 0) scopeLevel = rows[scopeStart].level;
-    }
-
-    const scopedRows = scopeStart >= 0
-      ? rows.slice(scopeStart + 1).filter(row => row.level > scopeLevel)
-      : rows;
-
-    return scopedRows.filter(row => row.type === "room");
   }
 
   function findSpaceOverviewPane() {

@@ -180,6 +180,30 @@
   color: #687076;
 }
 
+.mmx-loading-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mmx-loading-spinner {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  border: 2px solid #d8e7ff;
+  border-top-color: #166de0;
+  border-right-color: #166de0;
+  border-radius: 999px;
+  animation: mmx-spin 0.72s linear infinite;
+}
+
+@keyframes mmx-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .mmx-option-line {
   display: flex;
   align-items: center;
