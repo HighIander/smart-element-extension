@@ -2981,7 +2981,6 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mml
 }
 
 .mmlc-desktop-chat-header {
-  display: none !important;
   flex: 0 0 auto;
   min-height: 44px;
   padding: 8px 10px;
@@ -2991,6 +2990,44 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mml
   gap: 8px;
   border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
   box-sizing: border-box;
+}
+
+#mmlc-desktop-create-menu {
+  position: fixed;
+  z-index: 2147483610;
+  min-width: 220px;
+  max-width: min(280px, calc(100vw - 16px));
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 8px;
+  background: Canvas;
+  color: CanvasText;
+  box-shadow: 0 14px 36px rgba(0, 0, 0, 0.24);
+  box-sizing: border-box;
+}
+
+.mmlc-desktop-create-menu-item {
+  width: 100%;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  text-align: left;
+  font: 600 13px/1.25 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: 0;
+  box-sizing: border-box;
+}
+
+.mmlc-desktop-create-menu-item:hover,
+.mmlc-desktop-create-menu-item:focus-visible {
+  background: color-mix(in srgb, Highlight 14%, transparent);
+  outline: none;
 }
 
 .mmlc-desktop-chat-more {

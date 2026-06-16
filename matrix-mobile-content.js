@@ -3092,6 +3092,7 @@
     updateDesktopMiddleFloatingCloseHandlers();
 
     if (isStart || (desktopMiddlePaneHidden && !middleFloatingOpen)) {
+      removeDesktopHierarchyComposeOverride();
       // Direct Messages use Element's own native room list. The Smart Element
       // host still stays mounted so the shared blue collapse/restore edge button
       // and the sticky/pin button are available in exactly the same temporary
@@ -3101,6 +3102,8 @@
       updateNativeStartPageHeadingLabel();
       return;
     }
+
+    syncDesktopHierarchyComposeOverride(label);
 
     const renderUnreadChanged = syncDesktopUnreadCachesFromElementDom();
     if (renderUnreadChanged) {
@@ -3154,6 +3157,186 @@
     list.appendChild(footer);
     dispatchDesktopRoomContentRefresh("desktop-chat-list-rendered");
     updateNativeStartPageHeadingLabel();
+  }
+
+  function removeDesktopHierarchyComposeOverride() {
+    document.querySelectorAll("[data-mmlc-desktop-compose-overridden='true']").forEach(button => {
+      const originalTitle = button.getAttribute("data-mmlc-desktop-compose-original-title");
+      const originalAriaLabel = button.getAttribute("data-mmlc-desktop-compose-original-aria-label");
+      if (originalTitle !== null) {
+        if (originalTitle) button.setAttribute("title", originalTitle);
+        else button.removeAttribute("title");
+      }
+      if (originalAriaLabel !== null) {
+        if (originalAriaLabel) button.setAttribute("aria-label", originalAriaLabel);
+        else button.removeAttribute("aria-label");
+      }
+      button.removeAttribute("data-mmlc-desktop-compose-overridden");
+      button.removeAttribute("data-mmlc-desktop-compose-space");
+      button.removeAttribute("data-mmlc-desktop-compose-original-title");
+      button.removeAttribute("data-mmlc-desktop-compose-original-aria-label");
+      button.removeEventListener("click", handleDesktopHierarchyNativeComposeClick, true);
+      button.removeEventListener("pointerdown", handleDesktopHierarchyNativeComposePointerDown, true);
+    });
+    closeDesktopHierarchyCreateMenu();
+  }
+
+  function syncDesktopHierarchyComposeOverride(spaceLabel = currentSpaceLabel) {
+    const label = normalizeSpaces(spaceLabel || "");
+    if (!label || /^(startseite|home|direct messages|direktnachrichten)$/i.test(label)) {
+      removeDesktopHierarchyComposeOverride();
+      return;
+    }
+
+    const button = findNativeRoomListComposeButton();
+    if (!(button instanceof HTMLElement)) return;
+
+    for (const stale of document.querySelectorAll("[data-mmlc-desktop-compose-overridden='true']")) {
+      if (stale !== button) {
+        stale.removeEventListener("click", handleDesktopHierarchyNativeComposeClick, true);
+        stale.removeEventListener("pointerdown", handleDesktopHierarchyNativeComposePointerDown, true);
+        stale.removeAttribute("data-mmlc-desktop-compose-overridden");
+      }
+    }
+
+    if (button.dataset.mmlcDesktopComposeOverridden !== "true") {
+      button.dataset.mmlcDesktopComposeOriginalTitle = button.getAttribute("title") || "";
+      button.dataset.mmlcDesktopComposeOriginalAriaLabel = button.getAttribute("aria-label") || "";
+      button.addEventListener("pointerdown", handleDesktopHierarchyNativeComposePointerDown, true);
+      button.addEventListener("click", handleDesktopHierarchyNativeComposeClick, true);
+    }
+
+    button.dataset.mmlcDesktopComposeOverridden = "true";
+    button.dataset.mmlcDesktopComposeSpace = label;
+    button.title = "Create in selected space";
+    button.setAttribute("aria-label", "Create in selected space");
+    button.setAttribute("aria-haspopup", "menu");
+  }
+
+  function findNativeRoomListComposeButton() {
+    const header = document.querySelector("[data-testid='room-list-header']");
+    if (!(header instanceof Element) || header.closest(OWNED_SELECTOR)) return null;
+
+    const candidates = uniqueElements(Array.from(header.querySelectorAll("button, [role='button']")))
+      .filter(control => control instanceof HTMLElement && !control.closest(OWNED_SELECTOR) && isRendered(control))
+      .map(control => ({ control, score: nativeRoomListComposeButtonScore(control, header) }))
+      .filter(entry => entry.score > 0)
+      .sort((a, b) => b.score - a.score);
+
+    return candidates[0]?.control || null;
+  }
+
+  function nativeRoomListComposeButtonScore(control, header) {
+    const text = normalizeSpaces([
+      getElementLabel(control),
+      control.getAttribute("aria-label"),
+      control.getAttribute("title"),
+      visibleText(control),
+      elementSignature(control)
+    ].filter(Boolean).join(" ")).toLowerCase();
+    if (!text) return 0;
+    if (/chatoptionen|chat options|space-optionen|space options|filter|suchen|search|men[üu]|menue|menu/.test(text)) return 0;
+
+    let score = 0;
+    if (/\b(new conversation|compose|new chat|new room|start chat)\b|verfassen|neue unterhaltung/.test(text)) score += 200;
+    if (/pencil|edit|compose|newconversation|new-conversation/.test(text)) score += 100;
+    if (control.getAttribute("aria-haspopup") === "menu") score += 25;
+    if (header.contains(control)) score += 20;
+    const rect = control.getBoundingClientRect();
+    if (Number.isFinite(rect.right) && rect.right > window.innerWidth * 0.12) score += 5;
+    return score;
+  }
+
+  function handleDesktopHierarchyNativeComposePointerDown(event) {
+    if (!isDesktopHierarchyNativeModeUsable()) return;
+    const button = event.currentTarget;
+    if (!(button instanceof Element) || button.dataset.mmlcDesktopComposeOverridden !== "true") return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+  }
+
+  function handleDesktopHierarchyNativeComposeClick(event) {
+    if (!isDesktopHierarchyNativeModeUsable()) return;
+    const button = event.currentTarget;
+    if (!(button instanceof HTMLElement) || button.dataset.mmlcDesktopComposeOverridden !== "true") return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    toggleDesktopHierarchyCreateMenu(button);
+  }
+
+  function toggleDesktopHierarchyCreateMenu(anchor) {
+    const existing = document.getElementById("mmlc-desktop-create-menu");
+    if (existing) {
+      existing.remove();
+      return;
+    }
+
+    const menu = document.createElement("div");
+    menu.id = "mmlc-desktop-create-menu";
+    menu.className = "mmlc-desktop-native";
+    menu.setAttribute("role", "menu");
+
+    const group = makeDesktopHierarchyCreateMenuItem("New group chat room", "group-room");
+    const subspace = makeDesktopHierarchyCreateMenuItem("New subspace", "subspace");
+    menu.append(group, subspace);
+
+    const rect = anchor.getBoundingClientRect();
+    menu.style.top = `${Math.max(8, rect.bottom + 6)}px`;
+    menu.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - 248))}px`;
+
+    document.body.appendChild(menu);
+    setTimeout(() => {
+      document.addEventListener("pointerdown", handleDesktopHierarchyCreateMenuOutsidePointerDown, true);
+      document.addEventListener("keydown", handleDesktopHierarchyCreateMenuKeyDown, true);
+    }, 0);
+  }
+
+  function makeDesktopHierarchyCreateMenuItem(label, action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mmlc-desktop-create-menu-item";
+    button.setAttribute("role", "menuitem");
+    button.dataset.mmlcDesktopCreateAction = action;
+    button.textContent = label;
+    protectDesktopNativeButton(button);
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      closeDesktopHierarchyCreateMenu();
+      runDesktopHierarchyCreateAction(action).catch(error => {
+        console.warn("Smart Element desktop create action failed.", error);
+      });
+    });
+    return button;
+  }
+
+  function closeDesktopHierarchyCreateMenu() {
+    document.getElementById("mmlc-desktop-create-menu")?.remove();
+    document.removeEventListener("pointerdown", handleDesktopHierarchyCreateMenuOutsidePointerDown, true);
+    document.removeEventListener("keydown", handleDesktopHierarchyCreateMenuKeyDown, true);
+  }
+
+  function handleDesktopHierarchyCreateMenuOutsidePointerDown(event) {
+    const target = event.target;
+    if (target instanceof Element && target.closest("#mmlc-desktop-create-menu, [data-mmlc-desktop-compose-overridden='true']")) return;
+    closeDesktopHierarchyCreateMenu();
+  }
+
+  function handleDesktopHierarchyCreateMenuKeyDown(event) {
+    if (event.key === "Escape") closeDesktopHierarchyCreateMenu();
+  }
+
+  async function runDesktopHierarchyCreateAction(action) {
+    if (action === "group-room") {
+      await openCreateFlow("group-room");
+      return;
+    }
+    if (action === "subspace") {
+      await openCreateFlow("subspace");
+    }
   }
 
   function renderDesktopMiddlePaneRestoreButton() {
@@ -5255,6 +5438,8 @@
     const exactSelectors = [
       "button[aria-label='Menü für Spaces öffnen']",
       "[role='button'][aria-label='Menü für Spaces öffnen']",
+      "button[aria-label='Menue fuer Spaces oeffnen']",
+      "[role='button'][aria-label='Menue fuer Spaces oeffnen']",
       "button[aria-label='Open spaces menu']",
       "[role='button'][aria-label='Open spaces menu']",
       "button[aria-label='Open space menu']",
@@ -5288,10 +5473,10 @@
     if (!label) return 0;
 
     let score = 0;
-    if (/^menü für spaces öffnen$/.test(label)) score += 220;
+    if (/^men[üu]e? f[üu]r spaces (öffnen|oeffnen|offnen)$/.test(label)) score += 220;
     if (/^open spaces? menu$/.test(label)) score += 220;
-    if (/menü.*spaces|spaces.*menü|spaces?.*menu|menu.*spaces?/.test(label)) score += 140;
-    if (/space/.test(label) && /open|show|öffnen|anzeigen/.test(label)) score += 80;
+    if (/men[üu]e?.*spaces|spaces.*men[üu]e?|spaces?.*menu|menu.*spaces?/.test(label)) score += 140;
+    if (/space/.test(label) && /open|show|öffnen|oeffnen|offnen|anzeigen/.test(label)) score += 80;
     if (/collapse|hide|minimi[sz]e|verberg|einklapp/.test(label) && /left|room|chat|pane|panel|liste|seitenleiste/.test(label)) score += 80;
     if (header instanceof Element && header.contains(control)) score += 60;
     if (leftPanel instanceof Element && leftPanel.contains(control)) score += 20;
@@ -5311,9 +5496,9 @@
 
     // These are known to open dialogs/menus unrelated to collapsing the native
     // room-list pane. Never use them for Smart Element's restore sequence.
-    if (/chatoptionen|weitere optionen|benachrichtigungsoptionen|filterliste|suchen|search|quick settings|schnelleinstellungen|threads?|benutzermen|user menu|space-optionen|^optionen$|settings|einstellungen|notifications?/.test(label)) return false;
+    if (/chatoptionen|chat options|weitere optionen|more options|benachrichtigungsoptionen|notification options|filterliste|filter list|suchen|search|quick settings|schnelleinstellungen|threads?|benutzermen|user menu|space-optionen|space options|^optionen$|^options$|settings|einstellungen|notifications?/.test(label)) return false;
 
-    return /menü für spaces öffnen|open spaces? menu|spaces?.*menu|menu.*spaces?|collapse|hide|minimi[sz]e|verberg|einklapp/.test(label);
+    return /men[üu]e? f[üu]r spaces (öffnen|oeffnen|offnen)|open spaces? menu|spaces?.*menu|menu.*spaces?|collapse|hide|minimi[sz]e|verberg|einklapp/.test(label);
   }
 
   function isNativeLeftPaneMinimized() {
@@ -10804,6 +10989,7 @@
     const labels = {
       space: "New space",
       subspace: "New subspace",
+      "group-room": "New group chat room",
       chat: "New chat"
     };
 
@@ -10820,6 +11006,7 @@
     const labels = {
       space: "space",
       subspace: "subspace",
+      "group-room": "group chat room",
       chat: "chat"
     };
     const label = labels[kind] || "item";
@@ -10830,7 +11017,11 @@
       await ensureCurrentSpaceOverview();
     }
 
-    const control = findNativeCreateControl(kind);
+    const control = kind === "subspace"
+      ? await findNativeSubspaceCreateControl()
+      : kind === "group-room"
+        ? await findNativeGroupRoomCreateControl()
+        : findNativeCreateControl(kind);
     if (!(control instanceof Element)) {
       renderPanelStatus(`Could not find Element's new ${label} control.`);
       return;
@@ -10841,10 +11032,138 @@
     clickElement(control);
   }
 
+  async function findNativeGroupRoomCreateControl() {
+    const mounted = findNativeCreateMenuItem("group-room");
+    if (mounted instanceof Element) return mounted;
+
+    const compose = findNativeRoomListComposeButton() || findNativeCreateControl("chat");
+    if (!(compose instanceof Element)) return null;
+
+    clickNativeComposeButtonBypassingDesktopOverride(compose);
+    const opened = await waitForNativeCreateMenuItem("group-room", 1200);
+    return opened instanceof Element ? opened : null;
+  }
+
+  function clickNativeComposeButtonBypassingDesktopOverride(compose) {
+    const wasOverridden = compose instanceof HTMLElement && compose.dataset.mmlcDesktopComposeOverridden === "true";
+    const spaceLabel = wasOverridden ? compose.dataset.mmlcDesktopComposeSpace || currentSpaceLabel : currentSpaceLabel;
+
+    if (wasOverridden) {
+      compose.removeEventListener("click", handleDesktopHierarchyNativeComposeClick, true);
+      compose.removeEventListener("pointerdown", handleDesktopHierarchyNativeComposePointerDown, true);
+      compose.removeAttribute("data-mmlc-desktop-compose-overridden");
+    }
+
+    clickElement(compose);
+
+    if (wasOverridden) {
+      setTimeout(() => syncDesktopHierarchyComposeOverride(spaceLabel), 0);
+    }
+  }
+
+  async function findNativeSubspaceCreateControl() {
+    const mounted = findNativeCreateMenuItem("subspace");
+    if (mounted instanceof Element) return mounted;
+
+    const addButton = findSpaceOverviewAddButton();
+    if (!(addButton instanceof Element)) return findNativeCreateControl("subspace");
+
+    clickElement(addButton);
+    const opened = await waitForNativeCreateMenuItem("subspace", 1200);
+    return opened instanceof Element ? opened : findNativeCreateControl("subspace");
+  }
+
+  async function waitForNativeCreateMenuItem(kind, timeoutMs = 1000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      const item = findNativeCreateMenuItem(kind);
+      if (item instanceof Element) return item;
+      await delay(60);
+    }
+    return null;
+  }
+
+  function findNativeCreateMenuItem(kind) {
+    const pattern = nativeCreateMenuItemPattern(kind);
+    if (!pattern) return null;
+
+    const roots = uniqueElements(Array.from(document.querySelectorAll([
+      ".mx_ContextualMenu",
+      "[role='menu']",
+      "[class*='ContextualMenu']",
+      "[data-radix-menu-content]"
+    ].join(",")))).filter(root => root instanceof Element && !root.closest(OWNED_SELECTOR));
+
+    const candidates = uniqueElements(roots.flatMap(root => Array.from(root.querySelectorAll("[role='menuitem'], button, [role='button'], li"))));
+    return candidates
+      .filter(candidate => candidate instanceof Element && !candidate.closest(OWNED_SELECTOR) && isRendered(candidate))
+      .map(candidate => ({
+        candidate,
+        text: normalizeSpaces([
+          getElementLabel(candidate),
+          visibleText(candidate),
+          candidate.getAttribute("aria-label"),
+          candidate.getAttribute("title")
+        ].filter(Boolean).join(" "))
+      }))
+      .filter(entry => pattern.test(entry.text))
+      .sort((a, b) => nativeCreateMenuItemScore(b.candidate, b.text, kind) - nativeCreateMenuItemScore(a.candidate, a.text, kind))[0]?.candidate || null;
+  }
+
+  function nativeCreateMenuItemPattern(kind) {
+    if (kind === "group-room") {
+      return /\b(new|create|start|add).{0,28}(room|group|group chat|chat room)\b|\b(room|group|group chat|chat room).{0,28}(new|create|start|add)\b|neue gruppe|gruppe erstellen|gruppenchat|gruppenraum|raum erstellen|neuer raum/i;
+    }
+    if (kind === "subspace") {
+      return /\b(new|create|add).{0,28}(subspace|sub-space|space)\b|\b(subspace|sub-space|space).{0,28}(new|create|add)\b|space hinzuf|unterbereich|subspace hinzuf|neuen space|space erstellen/i;
+    }
+    return null;
+  }
+
+  function nativeCreateMenuItemScore(control, text, kind) {
+    let score = control.matches("[role='menuitem']") ? 100 : 0;
+    const lower = String(text || "").toLowerCase();
+    if (kind === "group-room" && /\b(new room|create room|neue gruppe|gruppe erstellen)\b/.test(lower)) score += 80;
+    if (kind === "subspace" && /\b(space hinzuf|add space|new subspace|create subspace|unterbereich)\b/.test(lower)) score += 80;
+    if (/existing|vorhanden/.test(lower)) score -= 60;
+    return score;
+  }
+
+  function findSpaceOverviewAddButton() {
+    const pane = findSpaceOverviewPane();
+    if (!(pane instanceof Element)) return null;
+    const candidates = uniqueElements(Array.from(pane.querySelectorAll("button, [role='button'], [aria-haspopup='true']")))
+      .filter(candidate => candidate instanceof Element && !candidate.closest(OWNED_SELECTOR) && isRendered(candidate))
+      .map(candidate => ({
+        candidate,
+        text: normalizeSpaces([
+          getElementLabel(candidate),
+          visibleText(candidate),
+          candidate.getAttribute("aria-label"),
+          candidate.getAttribute("title")
+        ].filter(Boolean).join(" "))
+      }))
+      .filter(entry => /\b(add|create|new)\b|hinzuf|erstellen|neu/i.test(entry.text))
+      .sort((a, b) => spaceOverviewAddButtonScore(b.candidate, b.text) - spaceOverviewAddButtonScore(a.candidate, a.text));
+    return candidates[0]?.candidate || null;
+  }
+
+  function spaceOverviewAddButtonScore(control, text) {
+    const lower = String(text || "").toLowerCase();
+    let score = 0;
+    if (/^(add|hinzuf[üu]gen|hinzufuegen)$/.test(lower)) score += 140;
+    if (/\b(add|hinzuf[üu]gen|hinzufuegen)\b/.test(lower)) score += 100;
+    if (control.getAttribute("aria-haspopup") === "true") score += 30;
+    if (control.closest(".mx_SpaceHierarchy_listHeader_buttons, [class*='SpaceHierarchy_listHeader_buttons']")) score += 40;
+    if (/remove|entfernen|mark|vorgeschlagen/.test(lower)) score -= 200;
+    return score;
+  }
+
   function findNativeCreateControl(kind) {
     const patterns = {
       space: /\b(new|create|add|plus).{0,24}(space|spaces)\b|\b(space|spaces).{0,24}(new|create|add)\b|neuen space|space erstellen/i,
-      subspace: /\b(new|create|add|plus).{0,24}(subspace|sub-space|space)\b|\b(subspace|sub-space|space).{0,24}(new|create|add)\b|unterbereich|neuen space|space erstellen/i,
+      subspace: /\b(new|create|add|plus).{0,24}(subspace|sub-space|space)\b|\b(subspace|sub-space|space).{0,24}(new|create|add)\b|unterbereich|space hinzuf|neuen space|space erstellen/i,
+      "group-room": /\b(new|create|start|add).{0,24}(room|group|group chat|chat room)\b|\b(room|group|group chat|chat room).{0,24}(new|create|start|add)\b|neue gruppe|gruppe erstellen|raum erstellen/i,
       chat: /\b(new|create|start|compose|add|plus).{0,24}(chat|room|message|conversation|direct|dm)\b|\b(chat|room|message|conversation|direct|dm).{0,24}(new|create|start|compose|add)\b|verfassen/i
     };
 
@@ -14467,7 +14786,7 @@
     if (/^(klicke|click).{0,40}(thema|topic).{0,40}(lesen|read)$/i.test(normalizeSpaces(label))) return false;
     if (isAvatarOnlyLabel(label) || isGenericNavigationLabel(label)) return false;
     if (looksLikeUtilityControl(row) || looksLikeRoomListUtilityControl(row, label)) return false;
-    if (/^(chats und spaces|chats and spaces|hinzufuegen|entfernen|ansicht|view|konferenzen|conference|conferences)$/i.test(label)) return false;
+    if (/^(chats und spaces|chats and spaces|hinzufuegen|hinzufügen|entfernen|remove|ansicht|view|konferenzen|conference|conferences)$/i.test(label)) return false;
 
     const text = visibleText(row);
     return hasAvatarElement(row) ||
