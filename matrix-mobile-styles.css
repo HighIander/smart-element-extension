@@ -2219,6 +2219,12 @@ html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel
   overflow: visible !important;
 }
 
+html.mmlc-desktop-middle-pane-resizing,
+html.mmlc-desktop-middle-pane-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-space-panel-expanded:not(.mmlc-desktop-native-action) .mx_SpacePanel {
   width: 280px !important;
   min-width: 280px !important;
@@ -3267,13 +3273,13 @@ body[data-mmlc-mode="thread"] html.mmlc-native-navigation-panes-open:not(.mmlc-d
   visibility: visible !important;
   opacity: 1 !important;
   pointer-events: auto !important;
-  flex: 0 0 clamp(260px, 42vw, 420px) !important;
+  flex: 0 0 var(--mmlc-desktop-middle-pane-width, clamp(260px, 42vw, 420px)) !important;
   flex-grow: 0 !important;
   flex-shrink: 0 !important;
-  flex-basis: clamp(260px, 42vw, 420px) !important;
-  width: clamp(260px, 42vw, 420px) !important;
-  min-width: 240px !important;
-  max-width: 460px !important;
+  flex-basis: var(--mmlc-desktop-middle-pane-width, clamp(260px, 42vw, 420px)) !important;
+  width: var(--mmlc-desktop-middle-pane-width, clamp(260px, 42vw, 420px)) !important;
+  min-width: 220px !important;
+  max-width: max(220px, min(720px, calc(100vw - 280px))) !important;
   overflow: visible !important;
   overflow-x: visible !important;
   overflow-y: auto !important;

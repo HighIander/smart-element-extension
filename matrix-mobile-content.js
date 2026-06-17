@@ -24,6 +24,10 @@
   const STORAGE_DESKTOP_EYE_POSITION_KEY = "mmlc_desktop_eye_position_v1";
   const STORAGE_DESKTOP_HIERARCHY_MODE_KEY = "mmlc_desktop_hierarchy_mode_v1";
   const STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY = "mmlc_desktop_hierarchy_settings_v1";
+  const DESKTOP_MIDDLE_PANE_MIN_WIDTH = 220;
+  const DESKTOP_MIDDLE_PANE_DEFAULT_WIDTH = 320;
+  const DESKTOP_MIDDLE_PANE_MAX_WIDTH = 720;
+  const DESKTOP_MIDDLE_PANE_ROOM_MIN_WIDTH = 280;
 
   // Prevent Element's mobile-guide redirect as early as possible. This is
   // intentionally independent of Smart Element's own mobile-layout option so
@@ -192,6 +196,7 @@
   let desktopSpaceFloatingMouseLeaveTarget = null;
   let desktopSpaceFloatingSelectionHold = false;
   let desktopMiddlePaneHidden = false;
+  let desktopMiddlePaneWidth = NaN;
   let desktopMiddlePaneTemporaryOpen = false;
   let desktopMiddlePaneTemporaryFromSpaceSelection = false;
   let desktopMiddlePaneSpaceLandingHoldUntil = 0;
@@ -203,6 +208,8 @@
   let desktopMiddlePaneSpaceSelectionReleaseTimer = null;
   let desktopMiddleFloatingCloseHandlersInstalled = false;
   let desktopMiddleFloatingMouseLeaveTarget = null;
+  let desktopMiddlePaneResizeListenersInstalled = false;
+  let desktopMiddlePaneResizeDrag = null;
   let desktopMiddleEdgePositionFrame = null;
   let desktopMiddleEdgeResizeObserver = null;
   let desktopMiddleEdgeResizeObservedElements = new Set();
@@ -363,8 +370,19 @@
 
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName !== "local") return;
-      if (!changes?.[STORAGE_DESKTOP_HIERARCHY_MODE_KEY]) return;
-      const nextActive = changes[STORAGE_DESKTOP_HIERARCHY_MODE_KEY].newValue?.active === true;
+      const settingsChange = changes?.[STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY];
+      if (settingsChange) {
+        applyDesktopHierarchySettings(settingsChange.newValue || {}, { preserveSelection: true });
+        if (isDesktopHierarchyNativeModeUsable()) {
+          syncDesktopPaneModeClasses();
+          enforceNativeNavigationPanesOpen("desktop-settings-storage");
+          renderDesktopHierarchyNativeUiSoon(0);
+        }
+      }
+
+      const modeChange = changes?.[STORAGE_DESKTOP_HIERARCHY_MODE_KEY];
+      if (!modeChange) return;
+      const nextActive = modeChange.newValue?.active === true;
       if (desktopHierarchyModeActive === nextActive) return;
 
       desktopHierarchyModeActive = nextActive;
@@ -964,14 +982,7 @@
         applyPersistentViewState(data[STORAGE_VIEW_STATE_KEY], { persist: false });
       }
       desktopHierarchyModeActive = data?.[STORAGE_DESKTOP_HIERARCHY_MODE_KEY]?.active === true;
-      const desktopSettings = data?.[STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY] || {};
-      desktopHierarchyIndentSubspaces = desktopSettings.indentSubspaces !== false;
-      desktopSpaceLabelsExpanded = desktopSettings.labelsExpanded === true;
-      desktopSpacePaneMode = normalizeDesktopSpacePaneMode(desktopSettings.spacePaneMode || (desktopSpaceLabelsExpanded ? "expanded" : "icons"));
-      desktopSpaceLabelsExpanded = desktopSpacePaneMode === "expanded";
-      desktopSpaceFloatingLabelsExpanded = desktopSettings.spaceFloatingLabelsExpanded !== false;
-      desktopMiddlePaneHidden = desktopSettings.middlePaneHidden === true;
-      desktopSpaceDisplayMode = desktopSettings.spaceDisplayMode === "current" ? "current" : "full";
+      applyDesktopHierarchySettings(data?.[STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY] || {}, { preserveSelection: true });
       restoreDesktopSelectionFromLoadedState({ allowCachedRoomMatch: false });
     } catch {}
   }
@@ -1237,6 +1248,7 @@
       spacePaneMode: normalizeDesktopSpacePaneMode(desktopSpacePaneMode),
       spaceFloatingLabelsExpanded: desktopSpaceFloatingLabelsExpanded !== false,
       middlePaneHidden: desktopMiddlePaneHidden === true,
+      middlePaneWidth: currentDesktopMiddlePaneWidth(),
       spaceDisplayMode: desktopSpaceDisplayMode === "current" ? "current" : "full",
       savedAt: Date.now()
     };
@@ -1244,8 +1256,112 @@
     try { await chrome.storage.local.set({ [STORAGE_DESKTOP_HIERARCHY_SETTINGS_KEY]: payload }); } catch {}
   }
 
+  function applyDesktopHierarchySettings(settings = {}) {
+    const desktopSettings = settings || {};
+    desktopHierarchyIndentSubspaces = desktopSettings.indentSubspaces !== false;
+    desktopSpaceLabelsExpanded = desktopSettings.labelsExpanded === true;
+    desktopSpacePaneMode = normalizeDesktopSpacePaneMode(desktopSettings.spacePaneMode || (desktopSpaceLabelsExpanded ? "expanded" : "icons"));
+    desktopSpaceLabelsExpanded = desktopSpacePaneMode === "expanded";
+    desktopSpaceFloatingLabelsExpanded = desktopSettings.spaceFloatingLabelsExpanded !== false;
+    desktopMiddlePaneHidden = desktopSettings.middlePaneHidden === true;
+    desktopMiddlePaneWidth = clampDesktopMiddlePaneWidth(desktopSettings.middlePaneWidth, Number.isFinite(desktopMiddlePaneWidth) ? desktopMiddlePaneWidth : defaultDesktopMiddlePaneWidth());
+    desktopSpaceDisplayMode = desktopSettings.spaceDisplayMode === "current" ? "current" : "full";
+    syncDesktopMiddlePaneWidthVar();
+  }
+
   function normalizeDesktopSpacePaneMode(value) {
     return /^(expanded|icons|hidden)$/.test(String(value || "")) ? String(value) : "icons";
+  }
+
+  function desktopMiddlePaneViewportWidth() {
+    return Math.max(
+      320,
+      Number(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0)
+    );
+  }
+
+  function desktopMiddlePaneWidthBounds() {
+    const viewportWidth = desktopMiddlePaneViewportWidth();
+    const maxByViewport = Math.max(DESKTOP_MIDDLE_PANE_MIN_WIDTH, viewportWidth - DESKTOP_MIDDLE_PANE_ROOM_MIN_WIDTH);
+    const max = Math.max(
+      DESKTOP_MIDDLE_PANE_MIN_WIDTH,
+      Math.min(DESKTOP_MIDDLE_PANE_MAX_WIDTH, maxByViewport)
+    );
+    return {
+      min: Math.min(DESKTOP_MIDDLE_PANE_MIN_WIDTH, max),
+      max
+    };
+  }
+
+  function clampDesktopMiddlePaneWidth(value, fallback = DESKTOP_MIDDLE_PANE_DEFAULT_WIDTH) {
+    const bounds = desktopMiddlePaneWidthBounds();
+    let width = Number.parseFloat(value);
+    if (!Number.isFinite(width) || width <= 0) width = Number.parseFloat(fallback);
+    if (!Number.isFinite(width) || width <= 0) width = DESKTOP_MIDDLE_PANE_DEFAULT_WIDTH;
+    return Math.round(Math.min(bounds.max, Math.max(bounds.min, width)));
+  }
+
+  function defaultDesktopMiddlePaneWidth() {
+    const viewportWidth = desktopMiddlePaneViewportWidth();
+    const preferred = Math.min(
+      DESKTOP_MIDDLE_PANE_DEFAULT_WIDTH,
+      Math.max(260, Math.round(viewportWidth * 0.28))
+    );
+    return clampDesktopMiddlePaneWidth(preferred, DESKTOP_MIDDLE_PANE_DEFAULT_WIDTH);
+  }
+
+  function normalizeCurrentDesktopMiddlePaneWidth(fallback = defaultDesktopMiddlePaneWidth()) {
+    desktopMiddlePaneWidth = clampDesktopMiddlePaneWidth(
+      desktopMiddlePaneWidth,
+      fallback
+    );
+    return desktopMiddlePaneWidth;
+  }
+
+  function currentDesktopMiddlePaneWidth() {
+    const width = normalizeCurrentDesktopMiddlePaneWidth();
+    syncDesktopMiddlePaneWidthVar();
+    return width;
+  }
+
+  function syncDesktopMiddlePaneWidthVar() {
+    const html = document.documentElement;
+    if (!(html instanceof HTMLElement)) return;
+    html.style.setProperty("--mmlc-desktop-middle-pane-width", `${normalizeCurrentDesktopMiddlePaneWidth()}px`);
+  }
+
+  function setDesktopMiddlePaneWidth(width, options = {}) {
+    const previous = Number.isFinite(desktopMiddlePaneWidth) ? desktopMiddlePaneWidth : NaN;
+    const next = clampDesktopMiddlePaneWidth(width, Number.isFinite(previous) ? previous : defaultDesktopMiddlePaneWidth());
+    desktopMiddlePaneWidth = next;
+    syncDesktopMiddlePaneWidthVar();
+    if (options.apply !== false) {
+      applyDesktopMiddlePaneWidthToElement(findMiddlePanePanel(), next, options);
+    }
+    if (options.persist === true) {
+      persistDesktopHierarchySettings();
+    }
+    if (options.schedule === "frame") scheduleDesktopMiddleEdgePositionUpdate();
+    else scheduleDesktopMiddleEdgePositionUpdates([0, 80, 240]);
+    return next;
+  }
+
+  function applyDesktopMiddlePaneWidthToElement(panel, width = currentDesktopMiddlePaneWidth(), options = {}) {
+    if (!(panel instanceof HTMLElement) || panel.closest(OWNED_SELECTOR)) return false;
+    if (desktopMiddlePaneHidden === true && !desktopMiddleFloatingPaneIsOpen()) return false;
+
+    const next = clampDesktopMiddlePaneWidth(width, currentDesktopMiddlePaneWidth());
+    const bounds = desktopMiddlePaneWidthBounds();
+    const priority = options.important === false ? "" : "important";
+
+    setStylePropertyIfChanged(panel, "flex", `0 0 ${next}px`, priority);
+    setStylePropertyIfChanged(panel, "flex-grow", "0", priority);
+    setStylePropertyIfChanged(panel, "flex-shrink", "0", priority);
+    setStylePropertyIfChanged(panel, "flex-basis", `${next}px`, priority);
+    setStylePropertyIfChanged(panel, "width", `${next}px`, priority);
+    setStylePropertyIfChanged(panel, "min-width", `${bounds.min}px`, priority);
+    setStylePropertyIfChanged(panel, "max-width", `${bounds.max}px`, priority);
+    return true;
   }
 
   function nativeNavigationPanesMustRemainOpen() {
@@ -1294,6 +1410,7 @@
     document.documentElement.classList.toggle("mmlc-desktop-space-labels-expanded", mode === "expanded");
     document.documentElement.classList.toggle("mmlc-desktop-middle-pane-hidden", desktopMiddlePaneHidden === true);
     document.documentElement.classList.toggle("mmlc-desktop-middle-pane-floating-open", middleFloatingOpen);
+    syncDesktopMiddlePaneWidthVar();
     updateDesktopSpaceFloatingCloseHandlers();
     updateDesktopMiddleFloatingCloseHandlers();
     updateDesktopChatListUnreadPollingState();
@@ -2293,6 +2410,7 @@
     enforceNativeSpacePanelExpandedForDesktopUnreadSync();
     installDesktopHierarchyObserver();
     installDesktopUnreadSyncObserver();
+    installDesktopMiddlePaneResizePersistence();
     startDesktopUnreadPeriodicSync();
     startDesktopMiddleEdgePositionTracking();
     desktopReloadSelectionSynced = false;
@@ -2324,6 +2442,7 @@
     desktopSpaceFloatingSelectionHold = false;
     removeDesktopSpaceFloatingAvatar();
     desktopMiddlePaneTemporaryOpen = false;
+    desktopMiddlePaneResizeDrag = null;
     clearDesktopMiddlePaneCloseSuppression();
     updateDesktopSpaceFloatingCloseHandlers();
     updateDesktopMiddleFloatingCloseHandlers();
@@ -2356,10 +2475,12 @@
       desktopUnreadPeriodicTimer = null;
     }
     stopDesktopChatListUnreadPolling();
+    document.documentElement.classList.remove("mmlc-desktop-middle-pane-resizing");
     if (desktopOpenRoomRestoreTimer) {
       clearTimeout(desktopOpenRoomRestoreTimer);
       desktopOpenRoomRestoreTimer = null;
     }
+    document.documentElement.style.removeProperty("--mmlc-desktop-middle-pane-width");
   }
 
   function installDesktopHierarchyObserver() {
@@ -2371,6 +2492,113 @@
       attributes: true,
       attributeFilter: ["class", "aria-selected", "aria-expanded", "style"]
     });
+  }
+
+  function installDesktopMiddlePaneResizePersistence() {
+    if (desktopMiddlePaneResizeListenersInstalled) return;
+    desktopMiddlePaneResizeListenersInstalled = true;
+    document.addEventListener("pointerdown", handleDesktopMiddlePaneResizePointerDown, true);
+    document.addEventListener("pointermove", handleDesktopMiddlePaneResizePointerMove, true);
+    document.addEventListener("pointerup", handleDesktopMiddlePaneResizePointerEnd, true);
+    document.addEventListener("pointercancel", handleDesktopMiddlePaneResizePointerEnd, true);
+    document.addEventListener("lostpointercapture", handleDesktopMiddlePaneResizePointerEnd, true);
+  }
+
+  function handleDesktopMiddlePaneResizePointerDown(event) {
+    if (!isDesktopHierarchyNativeModeUsable() || desktopMiddlePaneHidden === true) return;
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+
+    const pane = findMiddlePanePanel();
+    if (!(pane instanceof HTMLElement) || pane.closest(OWNED_SELECTOR)) return;
+    const handle = desktopMiddlePaneResizeHandleFromEvent(event, pane);
+    if (!handle) return;
+
+    const rect = pane.getBoundingClientRect();
+    if (!Number.isFinite(rect.left) || !Number.isFinite(rect.width) || rect.width < 40) return;
+
+    desktopMiddlePaneResizeDrag = {
+      pointerId: event.pointerId,
+      left: rect.left,
+      lastWidth: clampDesktopMiddlePaneWidth(rect.width, currentDesktopMiddlePaneWidth()),
+      moved: false
+    };
+
+    document.documentElement.classList.add("mmlc-desktop-middle-pane-resizing");
+    setDesktopMiddlePaneWidth(desktopMiddlePaneResizeDrag.lastWidth, { apply: true, important: true, persist: false, schedule: "frame" });
+
+    try { handle.setPointerCapture?.(event.pointerId); } catch {}
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+  }
+
+  function handleDesktopMiddlePaneResizePointerMove(event) {
+    const drag = desktopMiddlePaneResizeDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    const nextWidth = clampDesktopMiddlePaneWidth(Number(event.clientX) - drag.left, drag.lastWidth);
+    if (Number.isFinite(nextWidth) && Math.abs(nextWidth - drag.lastWidth) >= 1) {
+      drag.lastWidth = nextWidth;
+      drag.moved = true;
+      setDesktopMiddlePaneWidth(nextWidth, { apply: true, important: true, persist: false, schedule: "frame" });
+    }
+
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+  }
+
+  function handleDesktopMiddlePaneResizePointerEnd(event) {
+    const drag = desktopMiddlePaneResizeDrag;
+    if (!drag || event.pointerId !== drag.pointerId) return;
+
+    const widthFromPointer = Number.isFinite(Number(event.clientX))
+      ? clampDesktopMiddlePaneWidth(Number(event.clientX) - drag.left, drag.lastWidth)
+      : drag.lastWidth;
+    const finalWidth = drag.moved ? widthFromPointer : drag.lastWidth;
+
+    desktopMiddlePaneResizeDrag = null;
+    document.documentElement.classList.remove("mmlc-desktop-middle-pane-resizing");
+    setDesktopMiddlePaneWidth(finalWidth, { apply: true, important: true, persist: true });
+    enforceNativeNavigationPanesOpen("desktop-middle-pane-resize-end");
+    renderDesktopHierarchyNativeUiSoon(0);
+
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    event.stopImmediatePropagation?.();
+  }
+
+  function desktopMiddlePaneResizeHandleFromEvent(event, pane) {
+    if (!(pane instanceof HTMLElement)) return null;
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target) return null;
+
+    const paneRect = pane.getBoundingClientRect();
+    const separator = target.closest?.("[role='separator'], .mx_Separator, [class*='Separator'], [data-separator-type]");
+    if (separator instanceof Element && !separator.closest(OWNED_SELECTOR)) {
+      const separatorRect = separator.getBoundingClientRect();
+      const verticallyAligned = separatorRect.bottom >= paneRect.top && separatorRect.top <= paneRect.bottom;
+      const besidePane = Math.abs(separatorRect.left - paneRect.right) <= 20 ||
+        Math.abs(separatorRect.right - paneRect.right) <= 20 ||
+        looksLikeMiddlePaneExpandHandle(separator);
+      if (verticallyAligned && besidePane) return separator;
+    }
+
+    const clientX = Number(event.clientX);
+    const clientY = Number(event.clientY);
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+    const nearRightEdge = Math.abs(clientX - paneRect.right) <= 10 &&
+      clientY >= paneRect.top &&
+      clientY <= paneRect.bottom;
+    if (!nearRightEdge) return null;
+
+    if (target.closest?.("#left-panel, [data-testid='left-panel'], .mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label='Chatliste'], [aria-label='Room list']")) {
+      return pane;
+    }
+
+    const hit = document.elementFromPoint(clientX, clientY);
+    if (hit instanceof Element && hit.closest?.("#left-panel, [data-testid='left-panel']")) return pane;
+    return null;
   }
 
   function renderDesktopHierarchyNativeUiSoon(delayMs = 80) {
@@ -3433,6 +3661,11 @@
   }
 
   function findNativeRoomListComposeButton() {
+    const overridden = document.querySelector("[data-mmlc-desktop-compose-overridden='true']");
+    if (overridden instanceof HTMLElement && overridden.isConnected && !overridden.closest(OWNED_SELECTOR) && isRendered(overridden)) {
+      return overridden;
+    }
+
     const header = document.querySelector("[data-testid='room-list-header']");
     if (!(header instanceof Element) || header.closest(OWNED_SELECTOR)) return null;
 
@@ -3549,6 +3782,18 @@
   }
 
   async function runDesktopHierarchyCreateAction(action) {
+    const kind = action === "group-room" || action === "subspace" ? action : "";
+    if (!kind) return;
+
+    if (isDesktopHierarchyNativeModeUsable()) {
+      const wasCollapsed = nativeSpacePanelIsCollapsed();
+      await withDesktopHierarchyNativeAction(async () => {
+        await openCreateFlow(kind);
+        await delay(240);
+      }, { restoreCollapsed: wasCollapsed, reason: `desktop-hierarchy-create-${kind}` });
+      return;
+    }
+
     if (action === "group-room") {
       await openCreateFlow("group-room");
       return;
@@ -6175,6 +6420,7 @@
   function nativeNavigationPaneOpenWidth(kind = "middle") {
     const viewportWidth = Math.max(320, Number(window.visualViewport?.width || window.innerWidth || document.documentElement.clientWidth || 0));
     if (kind === "space") return Math.max(172, Math.min(260, Math.round(viewportWidth * 0.28)));
+    if (isDesktopHierarchyNativeModeUsable() && !nativeNavigationPanesMustRemainOpen()) return currentDesktopMiddlePaneWidth();
     return Math.max(260, Math.min(420, Math.round(viewportWidth * 0.42)));
   }
 
@@ -6265,7 +6511,13 @@
       && desktopMiddlePaneHidden === true
       && !desktopMiddleFloatingPaneIsOpen();
     const compactMobileChatPane = !smartMiddleIntentionallyHidden && shouldCompactNativePanesForSmallChatWindow();
+    const desktopResizableMiddlePane = !smartMiddleIntentionallyHidden &&
+      !compactMobileChatPane &&
+      isDesktopHierarchyNativeModeUsable() &&
+      !nativeNavigationPanesMustRemainOpen();
     const width = smartMiddleIntentionallyHidden ? 48 : compactMobileChatPane ? 1 : nativeNavigationPaneOpenWidth("middle");
+    const middleBounds = desktopMiddlePaneWidthBounds();
+    const middlePanePriority = desktopResizableMiddlePane ? "important" : "";
     rememberMobileChatNativePaneStyle(panel);
     panel.dataset.mmlcNavigationPanesOpen = String(reason || "keep-panes-open");
     panel.removeAttribute("inert");
@@ -6276,13 +6528,13 @@
     panel.style.visibility = "visible";
     panel.style.opacity = "1";
     panel.style.pointerEvents = "auto";
-    panel.style.flex = `0 0 ${width}px`;
-    panel.style.flexGrow = "0";
-    panel.style.flexShrink = "0";
-    panel.style.flexBasis = `${width}px`;
-    panel.style.width = `${width}px`;
-    panel.style.minWidth = compactMobileChatPane ? "1px" : smartMiddleIntentionallyHidden ? "48px" : "240px";
-    panel.style.maxWidth = compactMobileChatPane ? "1px" : smartMiddleIntentionallyHidden ? "48px" : "460px";
+    setStylePropertyIfChanged(panel, "flex", `0 0 ${width}px`, middlePanePriority);
+    setStylePropertyIfChanged(panel, "flex-grow", "0", middlePanePriority);
+    setStylePropertyIfChanged(panel, "flex-shrink", "0", middlePanePriority);
+    setStylePropertyIfChanged(panel, "flex-basis", `${width}px`, middlePanePriority);
+    setStylePropertyIfChanged(panel, "width", `${width}px`, middlePanePriority);
+    setStylePropertyIfChanged(panel, "min-width", compactMobileChatPane ? "1px" : smartMiddleIntentionallyHidden ? "48px" : `${desktopResizableMiddlePane ? middleBounds.min : 240}px`, middlePanePriority);
+    setStylePropertyIfChanged(panel, "max-width", compactMobileChatPane ? "1px" : smartMiddleIntentionallyHidden ? "48px" : `${desktopResizableMiddlePane ? middleBounds.max : 460}px`, middlePanePriority);
     panel.style.overflow = (compactMobileChatPane || smartMiddleIntentionallyHidden) ? "hidden" : "visible";
     panel.style.overflowX = (compactMobileChatPane || smartMiddleIntentionallyHidden) ? "hidden" : "visible";
     panel.style.overflowY = compactMobileChatPane ? "hidden" : smartMiddleIntentionallyHidden ? "hidden" : "auto";
@@ -14198,6 +14450,9 @@
     if (document.documentElement.classList.contains("mmlc-native-parse-layout")) {
       return Math.max(320, Math.min(440, Math.round(window.innerWidth * 0.38)));
     }
+    if (isDesktopHierarchyNativeModeUsable() && !nativeNavigationPanesMustRemainOpen()) {
+      return currentDesktopMiddlePaneWidth();
+    }
     return Math.max(220, Math.min(360, Math.round(window.innerWidth * 0.42)));
   }
 
@@ -14221,12 +14476,15 @@
     if (!(pane instanceof Element)) return;
 
     const width = preferredMiddlePaneWidth();
+    const bounds = desktopMiddlePaneWidthBounds();
+    const desktopResizableMiddlePane = isDesktopHierarchyNativeModeUsable() && !nativeNavigationPanesMustRemainOpen();
+    const priority = desktopResizableMiddlePane ? "important" : "";
     pane.removeAttribute("inert");
     pane.setAttribute("data-mmlc-forced-middle-pane", "true");
-    pane.style.flex = `0 0 ${width}px`;
-    pane.style.width = `${width}px`;
-    pane.style.minWidth = `${Math.min(width, 220)}px`;
-    pane.style.maxWidth = `${Math.min(460, Math.max(width, window.innerWidth - 96))}px`;
+    setStylePropertyIfChanged(pane, "flex", `0 0 ${width}px`, priority);
+    setStylePropertyIfChanged(pane, "width", `${width}px`, priority);
+    setStylePropertyIfChanged(pane, "min-width", `${desktopResizableMiddlePane ? Math.min(width, bounds.min) : Math.min(width, 220)}px`, priority);
+    setStylePropertyIfChanged(pane, "max-width", `${desktopResizableMiddlePane ? bounds.max : Math.min(460, Math.max(width, window.innerWidth - 96))}px`, priority);
     pane.style.overflow = pane.style.overflow || "visible";
 
     const handle = findMiddlePaneExpandHandle(pane);
