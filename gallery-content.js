@@ -300,7 +300,14 @@
   let currentLightboxPanX = 0;
   let currentLightboxPanY = 0;
   let currentLightboxPanning = false;
+  let currentLightboxLoadSequence = 0;
+  let currentLightboxDisplayObjectUrl = "";
+  let lastLightboxOpenSource = null;
+  let lastLightboxOpenAt = 0;
   const lightboxDownloadObjectUrls = new Set();
+  const renderedImageSnapshotByImage = new WeakMap();
+  const renderedImageSnapshotByEventId = new Map();
+  const galleryMediaRecoveryByEventId = new Map();
   const imageCaptions = new WeakMap();
   const pendingComposerClearByElement = new WeakMap();
   let pageSession = null;
@@ -318,6 +325,7 @@
   let pasteProcessingLockUntil = 0;
   const clipboardContentHashes = new Map();
   const galleryEventMetadataByEventId = new Map();
+  const mattermostImportMetadataByEventId = new Map();
   const galleryScopeIds = new WeakMap();
   let nextGalleryScopeId = 1;
   let mergedThreadViewEnabled = false;
@@ -379,7 +387,25 @@
   }
 
   function shouldHandleGalleryInputEvent(event) {
-    return isGalleryEnabled() && !isEventFromOtherCombinedUi(event);
+    if (!isGalleryEnabled() || isEventFromOtherCombinedUi(event)) return false;
+    if (isSmartElementReorderDragEvent(event)) {
+      forceDropOverlayClosed();
+      return false;
+    }
+    return true;
+  }
+
+  function isSmartElementReorderDragEvent(event) {
+    if (window.__smartElementReorderDragActive === true) return true;
+    if (document.documentElement.classList.contains("mmlc-reorder-drag-active")) return true;
+    if (document.body?.classList?.contains("mmlc-reorder-drag-active")) return true;
+
+    const target = event?.target instanceof Element ? event.target : null;
+    if (target?.closest?.(".mmlc-list-item-draggable, .mmlc-list-item-dragging, .mmlc-desktop-order-draggable, .mmlc-desktop-order-dragging")) return true;
+
+    const dataTransfer = event?.dataTransfer || event?.clipboardData || null;
+    const types = Array.from(dataTransfer?.types || []).map(type => String(type).toLowerCase());
+    return types.includes("application/x-smart-element-reorder");
   }
 
   async function refreshCombinedFeatureConfig() {
@@ -647,7 +673,15 @@
     for (const delayMs of delays) {
       setTimeout(() => {
         const force = delayMs <= 140;
-        scheduleGalleryRebuild(delayMs <= 140 ? 30 : 120, { reason, force });
+        const hasMountedGallery = Boolean(document.querySelector(".mg-inline-gallery[data-mg-gallery-id]"));
+
+        // Early passes discover media while Element is mounting the room. Once a
+        // gallery is present, later warm-up passes add no information and only
+        // risk reprocessing a temporarily incomplete virtualized source DOM.
+        if (!hasMountedGallery || delayMs <= 320) {
+          scheduleGalleryRebuild(delayMs <= 140 ? 30 : 120, { reason, force });
+        }
+
         scheduleThreadViewRebuild({ reason, delayMs: delayMs <= 140 ? 50 : 140, allowAutoScroll: true, force });
       }, delayMs);
     }
@@ -755,6 +789,13 @@
     const delays = [80, 180, 360, 700, 1200, 2100, 3400, 5200, 7600];
     for (const delayMs of delays) {
       window.setTimeout(() => {
+        const hasMountedGallery = Boolean(document.querySelector(".mg-inline-gallery[data-mg-gallery-id]"));
+        const hasRenderedThreads = Boolean(document.querySelector(".mg-thread-merged, .mg-thread-inline-reply"));
+
+        // Do not keep forcing complete room renders after the extension-owned
+        // room content is already mounted. Observer/load events handle later real
+        // changes without tearing through the stable gallery DOM.
+        if (delayMs >= 360 && (hasMountedGallery || hasRenderedThreads)) return;
         forceSmartElementRoomContentRender(`${reason}-${delayMs}`);
       }, delayMs);
     }
@@ -791,11 +832,19 @@
       return;
     }
 
-    // Direct-message rooms sometimes keep the same route while Element swaps the
-    // visible timeline. Keep nudging the renderer shortly after a visible room is
-    // detected, but throttle it so normal typing/scrolling is not disturbed.
-    if (Date.now() - lastActiveRoomForcedRenderAt > 1800 && shouldAutoRefreshGalleryView()) {
-      forceSmartElementRoomContentRender(`${reason}-steady`);
+    // Direct-message rooms can keep the same route while Element swaps the
+    // timeline. A recovery nudge is still useful only while no extension-owned
+    // room content has been mounted. Re-forcing a successfully rendered gallery
+    // every 1.8 seconds was the main remaining source of visible flicker.
+    const hasMountedGallery = Boolean(document.querySelector(".mg-inline-gallery[data-mg-gallery-id]"));
+    const hasRenderedThreads = Boolean(document.querySelector(".mg-thread-merged, .mg-thread-inline-reply"));
+    if (
+      !hasMountedGallery &&
+      !hasRenderedThreads &&
+      Date.now() - lastActiveRoomForcedRenderAt > 10000 &&
+      shouldAutoRefreshGalleryView()
+    ) {
+      forceSmartElementRoomContentRender(`${reason}-steady-recovery`);
       lastActiveRoomForcedRenderAt = Date.now();
     }
   }
@@ -3446,6 +3495,7 @@
       childList: true,
       subtree: true,
       attributes: true,
+      attributeOldValue: true,
       attributeFilter: ["data-event-id", "title", "aria-label", "class", "style", "src", "srcset", "href", "data-testid", "aria-expanded"]
     });
 
@@ -3457,7 +3507,27 @@
     if (mutationTouchesNativeThreadPanel(mutation)) return true;
 
     if (mutation.type === "attributes") {
-      return ["data-event-id", "class", "style", "src", "srcset", "href", "data-testid", "aria-label", "title"].includes(mutation.attributeName);
+      if (mutation.attributeName === "data-event-id" || mutation.attributeName === "href") {
+        return true;
+      }
+
+      if (mutation.attributeName === "src" || mutation.attributeName === "srcset") {
+        const target = mutation.target;
+        if (!(target instanceof HTMLImageElement)) return false;
+
+        // Once a native image event is represented by a mounted gallery, Element
+        // may continue rotating thumbnail/blob URLs. The visible gallery must not
+        // be rebuilt for those transient source changes. Its robust loader and the
+        // authenticated viewer download path handle media upgrades independently.
+        const eventId = eventIdForElement(target);
+        if (eventId && document.querySelector(`.mg-inline-gallery img[data-event-id="${cssEscape(eventId)}"]`)) {
+          return false;
+        }
+
+        return !target.closest(".mg-gallery-placeholder, .mg-thread-hidden-message, .mg-native-thread-source-hidden");
+      }
+
+      return false;
     }
 
     if (mutation.type !== "childList") return false;
@@ -3611,7 +3681,20 @@
 
   function isExtensionOwnedMutation(mutation) {
     if (mutation.type === "attributes") {
-      return mutation.target instanceof Element && isExtensionOwnedElement(mutation.target);
+      if (mutation.target instanceof Element && isExtensionOwnedElement(mutation.target)) {
+        return true;
+      }
+
+      if (mutation.attributeName === "class" && mutation.target instanceof Element) {
+        const currentClasses = mutation.target.className || "";
+        const previousClasses = mutation.oldValue || "";
+        const extensionSourceClass = /(?:^|\s)(?:mg-gallery-placeholder|mg-thread-hidden-message|mg-native-thread-source-hidden|mg-mattermost-imported-event)(?:\s|$)/;
+        if (extensionSourceClass.test(String(currentClasses)) || extensionSourceClass.test(String(previousClasses))) {
+          return true;
+        }
+      }
+
+      return false;
     }
 
     if (mutation.type !== "childList") return false;
@@ -3689,8 +3772,14 @@
             if (item.eventId && item.gallery) {
               galleryEventMetadataByEventId.set(item.eventId, item.gallery);
             }
+
+            if (item.eventId && item.mattermostImport) {
+              mattermostImportMetadataByEventId.set(item.eventId, item.mattermostImport);
+            }
           }
         }
+
+        syncMattermostImportEventTiles();
 
         resolve();
       };
@@ -3727,6 +3816,7 @@
       }
 
       await refreshGalleryMetadataFromElementTimeline();
+      syncMattermostImportEventTiles();
       if (!shouldHideNativeGallerySources()) restorePreviouslyHiddenPlaceholders();
 
       const galleryScrollPositions = captureGalleryScrollPositions();
@@ -3833,10 +3923,16 @@
   function installGalleryAutoRefreshLoop() {
     if (galleryAutoRefreshIntervalId) return;
 
+    // The MutationObserver, room-change hooks, and image load handlers already
+    // trigger normal gallery updates. A frequent forced rebuild used to re-scan
+    // temporarily incomplete virtualized timelines and could replace an otherwise
+    // valid gallery every few seconds. Keep only a slow recovery pass for rooms in
+    // which no Smart Element gallery is currently mounted.
     galleryAutoRefreshIntervalId = window.setInterval(() => {
       if (!shouldAutoRefreshGalleryView()) return;
-      scheduleGalleryRebuild(90, { reason: "gallery-auto-refresh", force: true });
-    }, 850);
+      if (document.querySelector(".mg-inline-gallery[data-mg-gallery-id]")) return;
+      scheduleGalleryRebuild(120, { reason: "gallery-auto-refresh-recovery", force: false });
+    }, 10000);
   }
 
   function shouldAutoRefreshGalleryView() {
@@ -3934,6 +4030,10 @@
         if (item.gallery?.id) {
           galleryEventMetadataByEventId.set(item.eventId, item.gallery);
         }
+
+        if (item.mattermostImport) {
+          mattermostImportMetadataByEventId.set(item.eventId, item.mattermostImport);
+        }
       }
     }
 
@@ -3950,6 +4050,8 @@
         events: threadEvents
       });
     }
+
+    syncMattermostImportEventTiles();
   }
 
   function isActualThreadTimelineItem(item, rootEventId = "") {
@@ -4277,6 +4379,9 @@
       item.eventId || "",
       item.ts || 0,
       item.body || "",
+      item.senderName || "",
+      item.mattermostImport?.senderName || "",
+      item.mattermostImport?.postId || "",
       item.msgtype || "",
       item.format || "",
       item.formattedBody || "",
@@ -5328,12 +5433,18 @@
   function renderedImageFullSrc(image) {
     if (!(image instanceof HTMLImageElement)) return "";
 
+    const snapshot = cachedRenderedImageSnapshot(image);
+    if (snapshot) return snapshot;
+
+    const rendered = browserImageUrl(image.currentSrc || image.src || image.getAttribute("src") || "");
+    if (rendered && image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      return rendered;
+    }
+
     return firstBrowserImageUrl(
       image.dataset.fullSrc,
       image.getAttribute("data-full-src"),
-      image.currentSrc,
-      image.src,
-      image.getAttribute("src")
+      rendered
     );
   }
 
@@ -7347,6 +7458,62 @@
       "";
   }
 
+  function syncMattermostImportEventTiles() {
+    const seenMessages = new Set();
+
+    for (const element of document.querySelectorAll("[data-event-id]")) {
+      if (!(element instanceof Element)) continue;
+      if (isExtensionOwnedElement(element)) continue;
+
+      const eventId = eventIdForElement(element);
+      const message = findMessageContainer(element);
+      if (!(message instanceof Element) || isExtensionOwnedElement(message)) continue;
+      if (seenMessages.has(message)) continue;
+      seenMessages.add(message);
+
+      const metadata = eventId ? mattermostImportMetadataByEventId.get(eventId) : null;
+      setMattermostImportEventTileState(message, eventId, metadata);
+    }
+
+    for (const message of document.querySelectorAll(".mg-mattermost-imported-event")) {
+      if (!(message instanceof Element) || seenMessages.has(message)) continue;
+
+      const eventId = eventIdForElement(message);
+      const metadata = eventId ? mattermostImportMetadataByEventId.get(eventId) : null;
+      setMattermostImportEventTileState(message, eventId, metadata);
+    }
+  }
+
+  function setMattermostImportEventTileState(message, eventId, metadata) {
+    const imported = Boolean(metadata);
+    message.classList.toggle("mg-mattermost-imported-event", imported);
+
+    if (!imported) {
+      delete message.dataset.mgMattermostImported;
+      delete message.dataset.mgMattermostEventId;
+      delete message.dataset.mgMattermostSender;
+      delete message.dataset.mgMattermostPostId;
+      return;
+    }
+
+    message.dataset.mgMattermostImported = "1";
+    if (eventId) message.dataset.mgMattermostEventId = eventId;
+
+    const senderName = normalizeSpaces(metadata.senderName || metadata.sender_name || "");
+    if (senderName) {
+      message.dataset.mgMattermostSender = senderName;
+    } else {
+      delete message.dataset.mgMattermostSender;
+    }
+
+    const postId = String(metadata.postId || metadata.post_id || "").trim();
+    if (postId) {
+      message.dataset.mgMattermostPostId = postId;
+    } else {
+      delete message.dataset.mgMattermostPostId;
+    }
+  }
+
   function extractGalleryIdFromElement(element) {
     const metadata = extractGalleryMetadataFromElement(element);
     if (metadata && metadata.id) return metadata.id;
@@ -7468,14 +7635,8 @@
   }
 
   function rebuildNativeThreadAttachedGalleries() {
-    for (const gallery of document.querySelectorAll(".mg-native-thread-attached-gallery")) {
-      gallery.remove();
-    }
-
-    for (const source of document.querySelectorAll(".mg-native-thread-source-hidden")) {
-      source.classList.remove("mg-native-thread-source-hidden");
-      delete source.dataset.mgNativeThreadHiddenFor;
-    }
+    const buildPass = String(currentGalleryBuildPass);
+    const currentRoomKey = galleryRoomKey();
 
     for (const panel of collectNativeThreadPanels()) {
       const eventElements = collectNativeThreadPanelEventElements(panel);
@@ -7497,27 +7658,74 @@
       const textEntries = entries.filter(entry => !entry.isImage);
       const imageEntries = entries.filter(entry => entry.isImage);
 
+      const mountAttachment = (galleryId, attachedItems, targetMessage, attachmentFor) => {
+        const signature = makeNativeThreadGallerySignature(galleryId, attachedItems);
+        const existing = Array.from(panel.querySelectorAll(".mg-native-thread-attached-gallery"))
+          .find(gallery => gallery.dataset.mgGalleryId === galleryId);
+
+        const existingEventIds = existing
+          ? new Set(Array.from(existing.querySelectorAll("img[data-event-id]")).map(img => img.dataset.eventId).filter(Boolean))
+          : new Set();
+        const nextEventIds = new Set((attachedItems || []).map(item => item?.eventId).filter(Boolean));
+        const nextIsSubsetOfExisting = Boolean(
+          existing &&
+          nextEventIds.size > 0 &&
+          nextEventIds.size <= existingEventIds.size &&
+          Array.from(nextEventIds).every(eventId => existingEventIds.has(eventId))
+        );
+
+        if (existing && (existing.dataset.mgNativeThreadRenderSignature === signature || nextIsSubsetOfExisting)) {
+          existing.dataset.mgGalleryBuildPass = buildPass;
+          existing.dataset.mgGalleryLastSeenAt = String(Date.now());
+          existing.dataset.mgGalleryRoomKey = currentRoomKey;
+          existing.dataset.mgGalleryMissedPasses = "0";
+          hideNativeThreadSourceMessages(attachedItems, eventElements, galleryId);
+          return existing;
+        }
+
+        const attachment = createThreadGalleryMessage(attachedItems, galleryId, eventElements);
+        if (!attachment?.matches?.(".mg-inline-gallery")) return null;
+
+        attachment.classList.add("mg-native-thread-gallery", "mg-native-thread-attached-gallery");
+        attachment.dataset.mgNativeThreadAttachmentFor = attachmentFor || "";
+        attachment.dataset.mgNativeThreadRenderSignature = signature;
+        attachment.dataset.mgGalleryBuildPass = buildPass;
+        attachment.dataset.mgGalleryLastSeenAt = String(Date.now());
+        attachment.dataset.mgGalleryRoomKey = currentRoomKey;
+        attachment.dataset.mgGalleryMissedPasses = "0";
+
+        if (existing?.parentElement) {
+          existing.replaceWith(attachment);
+        } else {
+          const target = targetMessage ? findNativeThreadAttachmentTarget(targetMessage) : null;
+          if (target?.parentElement) {
+            target.parentElement.insertBefore(attachment, target.nextSibling);
+          } else if (targetMessage) {
+            targetMessage.appendChild(attachment);
+          } else {
+            return null;
+          }
+        }
+
+        hideNativeThreadSourceMessages(attachedItems, eventElements, galleryId);
+        return attachment;
+      };
+
       for (const entry of textEntries) {
         if (handledGalleryIds.has(entry.galleryId)) continue;
 
         const attachedItems = attachedGalleryItemsForThreadItem(entry.item, eventElements);
         if (attachedItems.length === 0) continue;
 
-        const attachment = createThreadGalleryMessage(attachedItems, entry.galleryId, eventElements);
-        if (!attachment?.matches?.(".mg-inline-gallery")) continue;
+        const attachment = mountAttachment(
+          entry.galleryId,
+          attachedItems,
+          entry.message,
+          entry.eventId
+        );
+        if (!attachment) continue;
 
         handledGalleryIds.add(entry.galleryId);
-        attachment.classList.add("mg-native-thread-gallery", "mg-native-thread-attached-gallery");
-        attachment.dataset.mgNativeThreadAttachmentFor = entry.eventId;
-
-        const target = findNativeThreadAttachmentTarget(entry.message);
-        if (target?.parentElement) {
-          target.parentElement.insertBefore(attachment, target.nextSibling);
-        } else {
-          entry.message.appendChild(attachment);
-        }
-
-        hideNativeThreadSourceMessages(attachedItems, eventElements, entry.galleryId);
       }
 
       const imageEntriesByGallery = new Map();
@@ -7534,24 +7742,58 @@
         const attachedItems = sortThreadGalleryItems(groupedEntries.map(entry => entry.item), eventElements);
         if (attachedItems.length === 0) continue;
 
-        const attachment = createThreadGalleryMessage(attachedItems, galleryId, eventElements);
-        if (!attachment?.matches?.(".mg-inline-gallery")) continue;
+        const firstEntry = groupedEntries[0] || null;
+        const attachment = mountAttachment(
+          galleryId,
+          attachedItems,
+          firstEntry?.message || null,
+          firstEntry?.eventId || ""
+        );
+        if (!attachment) continue;
 
         handledGalleryIds.add(galleryId);
-        attachment.classList.add("mg-native-thread-gallery", "mg-native-thread-attached-gallery");
-        attachment.dataset.mgNativeThreadAttachmentFor = groupedEntries[0]?.eventId || "";
-
-        const firstMessage = groupedEntries[0]?.message;
-        const target = firstMessage ? findNativeThreadAttachmentTarget(firstMessage) : null;
-        if (target?.parentElement) {
-          target.parentElement.insertBefore(attachment, target.nextSibling);
-        } else if (firstMessage) {
-          firstMessage.appendChild(attachment);
-        }
-
-        hideNativeThreadSourceMessages(attachedItems, eventElements, galleryId);
       }
     }
+
+    const now = Date.now();
+    for (const gallery of document.querySelectorAll(".mg-native-thread-attached-gallery")) {
+      if (gallery.dataset.mgGalleryBuildPass === buildPass) continue;
+
+      const roomChanged = Boolean(
+        gallery.dataset.mgGalleryRoomKey &&
+        gallery.dataset.mgGalleryRoomKey !== currentRoomKey
+      );
+      const lastSeenAt = Number(gallery.dataset.mgGalleryLastSeenAt || 0) || 0;
+      const stale = lastSeenAt > 0 && now - lastSeenAt > 15000;
+
+      if (!roomChanged && !stale) continue;
+
+      const galleryId = gallery.dataset.mgGalleryId || "";
+      gallery.remove();
+      if (galleryId) {
+        for (const source of document.querySelectorAll(`.mg-native-thread-source-hidden[data-mg-native-thread-hidden-for="${cssEscape(galleryId)}"]`)) {
+          source.classList.remove("mg-native-thread-source-hidden");
+          delete source.dataset.mgNativeThreadHiddenFor;
+        }
+      }
+    }
+  }
+
+  function makeNativeThreadGallerySignature(galleryId, items) {
+    const parts = (items || []).map(item => {
+      const eventId = String(item?.eventId || "");
+      const index = Number.isFinite(Number(item?.gallery?.index)) ? Number(item.gallery.index) : "";
+      const mediaIdentity = stableGalleryUrlKey(
+        item?.media?.mxcUrl ||
+        item?.gallery?.url ||
+        item?.media?.downloadUrl ||
+        item?.media?.thumbnailUrl ||
+        ""
+      );
+      return `${eventId || mediaIdentity}|${index}`;
+    });
+
+    return `${galleryId}::${parts.join("::")}`;
   }
 
   function hideNativeThreadSourceMessages(items, eventElements, galleryId = "") {
@@ -7606,6 +7848,124 @@
     return message;
   }
 
+  function rememberRenderedImageSnapshot(img) {
+    if (!(img instanceof HTMLImageElement)) return "";
+    if (!(img.complete && img.naturalWidth > 0 && img.naturalHeight > 0)) return "";
+
+    const existing = renderedImageSnapshotByImage.get(img);
+    if (existing) return existing;
+
+    const current = browserImageUrl(img.currentSrc || img.src || img.getAttribute("src") || "");
+    if (/^data:image\//i.test(current)) {
+      renderedImageSnapshotByImage.set(img, current);
+      const eventId = img.dataset.eventId || "";
+      if (eventId) renderedImageSnapshotByEventId.set(eventId, current);
+      return current;
+    }
+
+    try {
+      const maxDimension = 2048;
+      const scale = Math.min(1, maxDimension / Math.max(img.naturalWidth, img.naturalHeight));
+      const width = Math.max(1, Math.round(img.naturalWidth * scale));
+      const height = Math.max(1, Math.round(img.naturalHeight * scale));
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext("2d");
+      if (!context) return "";
+      context.drawImage(img, 0, 0, width, height);
+
+      const snapshot = canvas.toDataURL("image/png");
+      if (!snapshot || snapshot === "data:,") return "";
+
+      renderedImageSnapshotByImage.set(img, snapshot);
+      const eventId = img.dataset.eventId || "";
+      if (eventId) renderedImageSnapshotByEventId.set(eventId, snapshot);
+      return snapshot;
+    } catch {
+      // Cross-origin images can taint the canvas. Their live source remains usable,
+      // and the authenticated background download is used as the durable fallback.
+      return "";
+    }
+  }
+
+  function cachedRenderedImageSnapshot(img) {
+    if (!(img instanceof HTMLImageElement)) return "";
+    return renderedImageSnapshotByImage.get(img) ||
+      renderedImageSnapshotByEventId.get(img.dataset.eventId || "") ||
+      "";
+  }
+
+  async function recoverGalleryImageThroughBackground(img, sourceMeta = null) {
+    if (!(img instanceof HTMLImageElement)) return "";
+
+    const eventId = img.dataset.eventId || "";
+    const mediaKey = eventId || stableGalleryUrlKey(
+      sourceMeta?.url ||
+      sourceMeta?.mxcUrl ||
+      img.dataset.mxcUrl ||
+      img.dataset.fullSrc ||
+      img.currentSrc ||
+      img.src ||
+      ""
+    );
+
+    if (mediaKey && galleryMediaRecoveryByEventId.has(mediaKey)) {
+      return galleryMediaRecoveryByEventId.get(mediaKey);
+    }
+
+    const recovery = (async () => {
+      const candidates = [];
+      const add = value => {
+        if (!value) return;
+        addDownloadCandidatesFromUrl(String(value), candidates);
+      };
+
+      add(sourceMeta?.downloadUrl);
+      add(sourceMeta?.thumbnailUrl);
+      add(sourceMeta?.url);
+      add(sourceMeta?.mxcUrl);
+      add(sourceMeta?.gallery?.downloadUrl);
+      add(sourceMeta?.gallery?.url);
+      add(sourceMeta?.media?.downloadUrl);
+      add(sourceMeta?.media?.thumbnailUrl);
+      add(sourceMeta?.media?.mxcUrl);
+      for (const candidate of buildMatrixMediaDownloadCandidates(img)) add(candidate);
+
+      let matrixHttpCandidates = Array.from(new Set(candidates))
+        .filter(value => /^https?:/i.test(value) && isMatrixMediaUrl(value));
+
+      if (matrixHttpCandidates.length === 0 && eventId) {
+        const bridgeMedia = await resolveMediaDownloadFromBridge(img);
+        if (bridgeMedia.mxcUrl && !img.dataset.mxcUrl) img.dataset.mxcUrl = bridgeMedia.mxcUrl;
+        add(bridgeMedia.downloadUrl);
+        add(bridgeMedia.mxcUrl);
+        matrixHttpCandidates = Array.from(new Set(candidates))
+          .filter(value => /^https?:/i.test(value) && isMatrixMediaUrl(value));
+      }
+
+      for (const url of matrixHttpCandidates) {
+        try {
+          const dataUrl = await fetchMatrixMediaDataUrlInBackground(url);
+          if (/^data:image\//i.test(dataUrl)) return dataUrl;
+        } catch {}
+      }
+
+      return "";
+    })();
+
+    if (mediaKey) galleryMediaRecoveryByEventId.set(mediaKey, recovery);
+
+    try {
+      return await recovery;
+    } finally {
+      if (mediaKey && galleryMediaRecoveryByEventId.get(mediaKey) === recovery) {
+        galleryMediaRecoveryByEventId.delete(mediaKey);
+      }
+    }
+  }
+
   function installRobustGalleryImageLoading(img, sourceImage = null, sourceElement = null, sourceMeta = null) {
     if (!(img instanceof HTMLImageElement)) return;
     if (img.dataset.mgRobustImageLoading === "1") return;
@@ -7615,6 +7975,7 @@
 
     const candidates = galleryImageFallbackCandidates(img, sourceImage, sourceMeta);
     let index = 0;
+    let backgroundRecoveryStarted = false;
 
     const markLoaded = () => {
       if (!(img.naturalWidth > 0 || img.naturalHeight > 0)) return;
@@ -7623,10 +7984,13 @@
       img.classList.remove("mg-gallery-image-error");
       const wrapper = img.closest(".mg-gallery-item");
       wrapper?.classList?.remove("mg-gallery-item-error", "mg-gallery-item-fallback-to-native");
+      rememberRenderedImageSnapshot(img);
 
       if (sourceElement instanceof Element && sourceElement.dataset.mgGalleryImageLoadFailed !== "1") {
         sourceElement.classList.add("mg-gallery-placeholder");
         sourceElement.dataset.mgGalleryPlaceholderPass = String(currentGalleryBuildPass);
+        sourceElement.dataset.mgGalleryPlaceholderMisses = "0";
+        sourceElement.dataset.mgGalleryPlaceholderLastSeenAt = String(Date.now());
       }
     };
 
@@ -7637,24 +8001,18 @@
       wrapper?.classList?.add("mg-gallery-item-fallback-to-native");
       wrapper?.classList?.remove("mg-gallery-item-error");
 
-      // Keep Element's original message visible if our cloned thumbnail cannot be
-      // loaded. This is the safe mobile reload path: Element may lazily replace
-      // images with placeholders until its own media/service-worker pipeline has
-      // resolved the real source. Hiding the original too early produced the
-      // visible Smart Element error placeholder even though Element could show the
-      // image once mobile view was disabled.
       if (sourceElement instanceof Element) {
         sourceElement.classList.remove("mg-gallery-placeholder", "mg-thread-hidden-message");
         delete sourceElement.dataset.mgGalleryPlaceholderPass;
+        delete sourceElement.dataset.mgGalleryPlaceholderMisses;
+        delete sourceElement.dataset.mgGalleryPlaceholderLastSeenAt;
         sourceElement.dataset.mgGalleryImageLoadFailed = "1";
       }
 
       cleanupGalleryFallbackItems(wrapper?.closest?.(".mg-inline-gallery"));
     };
 
-    img.addEventListener("load", markLoaded);
-
-    img.addEventListener("error", () => {
+    const tryNextSource = async () => {
       while (index < candidates.length) {
         const next = candidates[index++];
         if (!next || next === img.currentSrc || next === img.src) continue;
@@ -7662,18 +8020,31 @@
         return;
       }
 
+      if (!backgroundRecoveryStarted) {
+        backgroundRecoveryStarted = true;
+        const recovered = await recoverGalleryImageThroughBackground(img, sourceMeta);
+        if (recovered) {
+          img.src = recovered;
+          return;
+        }
+      }
+
       markFailed();
+    };
+
+    img.addEventListener("load", markLoaded);
+    img.addEventListener("error", () => {
+      void tryNextSource();
     });
 
     if (img.complete) {
       if (img.naturalWidth > 0 || img.naturalHeight > 0) {
         markLoaded();
       } else {
-        // If the browser already knows the cloned source is broken, run the error
-        // fallback asynchronously so that the original Element message remains
-        // visible and no stale gallery placeholder is shown.
         setTimeout(() => {
-          if (!(img.naturalWidth > 0 || img.naturalHeight > 0)) markFailed();
+          if (!(img.naturalWidth > 0 || img.naturalHeight > 0)) {
+            void tryNextSource();
+          }
         }, 0);
       }
     }
@@ -7745,19 +8116,22 @@
 
     const scope = galleryScopeElement(anchor);
     const scopeId = galleryScopeKey(scope);
+    const roomKey = galleryRoomKey();
     const renderKey = makeGalleryRenderKey(galleryId, imageItems);
     const existing = findExistingInlineGalleryForScope(parent, galleryId, scopeId);
 
-    if (existing && existing.dataset.mgGalleryRenderKey === renderKey) {
+    if (existing) {
       existing.dataset.mgGalleryBuildPass = String(currentGalleryBuildPass);
-      withVisibleGallerySources(imageItems, () => {
-        applyInlineGalleryIndent(existing, anchor, parent);
-      });
+      existing.dataset.mgGalleryLastSeenAt = String(Date.now());
+      existing.dataset.mgGalleryRoomKey = roomKey;
+      existing.dataset.mgGalleryMissedPasses = "0";
+
+      reconcileInlineGalleryItems(existing, imageItems);
+      existing.dataset.mgGalleryRenderKey = renderKey;
+      applyInlineGalleryIndent(existing, anchor, parent);
       markGallerySourcePlaceholders(imageItems);
       return;
     }
-
-    removeExistingInlineGalleryForScope(parent, galleryId, scopeId);
 
     const gallery = document.createElement("div");
     gallery.className = "mg-inline-gallery";
@@ -7768,43 +8142,161 @@
     gallery.dataset.mgGalleryScopeId = scopeId;
     gallery.dataset.mgGalleryRenderKey = renderKey;
     gallery.dataset.mgGalleryBuildPass = String(currentGalleryBuildPass);
+    gallery.dataset.mgGalleryLastSeenAt = String(Date.now());
+    gallery.dataset.mgGalleryRoomKey = roomKey;
+    gallery.dataset.mgGalleryMissedPasses = "0";
 
-    for (const item of imageItems) {
-      const img = item.img;
-      if (!img) continue;
-
-      const wrapper = document.createElement("div");
-      wrapper.className = "mg-gallery-item";
-
-      const clone = img.cloneNode(true);
-      const cloneSrc = img.currentSrc || img.src || img.getAttribute("src") || "";
-      if (cloneSrc) {
-        clone.src = cloneSrc;
-        clone.removeAttribute("srcset");
-      }
-      clone.dataset.mgGalleryImage = "1";
-      clone.dataset.fullSrc = img.dataset.fullSrc || img.dataset.mxcUrl || img.getAttribute("data-full-src") || img.getAttribute("data-mxc-url") || cloneSrc;
-
-      const sourceEventId = eventIdForElement(item.element);
-      const sourceMeta = sourceEventId ? galleryEventMetadataByEventId.get(sourceEventId) : null;
-      if (sourceEventId) clone.dataset.eventId = sourceEventId;
-      if (sourceMeta?.url) clone.dataset.mxcUrl = sourceMeta.url;
-      if (sourceMeta?.caption) clone.dataset.caption = sourceMeta.caption;
-      installRobustGalleryImageLoading(clone, img, item.element, sourceMeta);
-
-      wrapper.appendChild(clone);
-      appendPostedImageReplyButton(wrapper, sourceEventId);
-      appendPostedImageDeleteButton(wrapper, sourceEventId);
-      gallery.appendChild(wrapper);
-    }
-
-    withVisibleGallerySources(imageItems, () => {
-      applyInlineGalleryIndent(gallery, anchor, parent);
-    });
+    reconcileInlineGalleryItems(gallery, imageItems);
+    applyInlineGalleryIndent(gallery, anchor, parent);
 
     const reference = findDirectChildForParent(anchor, parent);
     parent.insertBefore(gallery, reference);
     markGallerySourcePlaceholders(imageItems);
+  }
+
+  function galleryRoomKey() {
+    return String(extractRoomFromUrl() || window.location.pathname || "");
+  }
+
+  function galleryItemKey(item) {
+    const eventId = eventIdForElement(item?.element);
+    if (eventId) return `event:${eventId}`;
+
+    const index = extractGalleryIndex(item?.element);
+    const mediaIdentity = stableGalleryUrlKey(
+      item?.img?.dataset?.mxcUrl ||
+      item?.img?.getAttribute?.("data-mxc-url") ||
+      item?.img?.dataset?.fullSrc ||
+      item?.img?.getAttribute?.("data-full-src") ||
+      item?.img?.currentSrc ||
+      item?.img?.src ||
+      item?.img?.getAttribute?.("src") ||
+      ""
+    );
+
+    return `media:${mediaIdentity}|${index ?? ""}`;
+  }
+
+  function inlineGalleryWrapperKey(wrapper) {
+    if (!(wrapper instanceof Element)) return "";
+    if (wrapper.dataset.mgGalleryItemKey) return wrapper.dataset.mgGalleryItemKey;
+
+    const img = wrapper.querySelector("img");
+    const eventId = img?.dataset?.eventId || "";
+    const mediaIdentity = stableGalleryUrlKey(
+      img?.dataset?.mxcUrl ||
+      img?.dataset?.fullSrc ||
+      img?.currentSrc ||
+      img?.src ||
+      ""
+    );
+    const key = eventId ? `event:${eventId}` : `media:${mediaIdentity}|`;
+    wrapper.dataset.mgGalleryItemKey = key;
+    return key;
+  }
+
+  function createInlineGalleryWrapper(item) {
+    const img = item?.img;
+    if (!(img instanceof HTMLImageElement)) return null;
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "mg-gallery-item";
+    wrapper.dataset.mgGalleryItemKey = galleryItemKey(item);
+
+    const clone = img.cloneNode(true);
+    const cloneSrc = img.currentSrc || img.src || img.getAttribute("src") || "";
+    if (cloneSrc) {
+      clone.src = cloneSrc;
+      clone.removeAttribute("srcset");
+    }
+    clone.dataset.mgGalleryImage = "1";
+
+    const sourceEventId = eventIdForElement(item.element);
+    const sourceMeta = sourceEventId ? galleryEventMetadataByEventId.get(sourceEventId) : null;
+    const fullBrowserSrc = firstBrowserImageUrl(
+      cachedRenderedImageSnapshot(img),
+      img.dataset.fullSrc,
+      img.getAttribute("data-full-src"),
+      cloneSrc
+    );
+    clone.dataset.fullSrc = fullBrowserSrc || cloneSrc;
+
+    if (sourceEventId) clone.dataset.eventId = sourceEventId;
+    const sourceMxcUrl = sourceMeta?.url || img.dataset.mxcUrl || img.getAttribute("data-mxc-url") || "";
+    if (sourceMxcUrl) clone.dataset.mxcUrl = sourceMxcUrl;
+    if (sourceMeta?.caption) clone.dataset.caption = sourceMeta.caption;
+    installRobustGalleryImageLoading(clone, img, item.element, sourceMeta);
+
+    wrapper.appendChild(clone);
+    appendPostedImageReplyButton(wrapper, sourceEventId);
+    appendPostedImageDeleteButton(wrapper, sourceEventId);
+    return wrapper;
+  }
+
+  function updateInlineGalleryWrapper(wrapper, item) {
+    if (!(wrapper instanceof Element)) return;
+    const img = wrapper.querySelector("img");
+    const sourceImage = item?.img;
+    if (!(img instanceof HTMLImageElement) || !(sourceImage instanceof HTMLImageElement)) return;
+
+    const eventId = eventIdForElement(item.element);
+    const sourceMeta = eventId ? galleryEventMetadataByEventId.get(eventId) : null;
+    if (eventId) img.dataset.eventId = eventId;
+
+    const mxcUrl = sourceMeta?.url || sourceImage.dataset.mxcUrl || sourceImage.getAttribute("data-mxc-url") || "";
+    if (mxcUrl) img.dataset.mxcUrl = mxcUrl;
+    if (sourceMeta?.caption) img.dataset.caption = sourceMeta.caption;
+
+    // Never rotate the visible clone merely because Element changed a temporary
+    // native blob/thumbnail URL. Only supply a source when the current clone has
+    // not loaded successfully.
+    if (!(img.complete && img.naturalWidth > 0 && img.naturalHeight > 0)) {
+      const nextSrc = firstBrowserImageUrl(
+        cachedRenderedImageSnapshot(sourceImage),
+        sourceImage.currentSrc,
+        sourceImage.src,
+        sourceImage.getAttribute("src")
+      );
+      if (nextSrc && nextSrc !== img.currentSrc && nextSrc !== img.src) {
+        img.src = nextSrc;
+      }
+    }
+  }
+
+  function reconcileInlineGalleryItems(gallery, imageItems) {
+    if (!(gallery instanceof Element)) return;
+
+    const wrappers = Array.from(gallery.children)
+      .filter(child => child instanceof Element && child.matches(".mg-gallery-item"));
+    const byKey = new Map();
+    for (const wrapper of wrappers) {
+      const key = inlineGalleryWrapperKey(wrapper);
+      if (key && !byKey.has(key)) byKey.set(key, wrapper);
+    }
+
+    for (const item of imageItems || []) {
+      const key = galleryItemKey(item);
+      const wrapper = byKey.get(key) || null;
+
+      if (wrapper) {
+        updateInlineGalleryWrapper(wrapper, item);
+        continue;
+      }
+
+      const created = createInlineGalleryWrapper(item);
+      if (!created) continue;
+
+      // New media is a real gallery change and may be appended safely. Existing
+      // loaded wrappers are never moved: an incomplete virtualized DOM scan must
+      // not reorder the visible gallery from A-B-C-D to B-C-D-A and back again.
+      gallery.appendChild(created);
+      byKey.set(key, created);
+    }
+
+    // Intentionally do not remove wrappers that are absent from this particular
+    // DOM scan. Element virtualizes imported media events independently, so a
+    // scan can temporarily see 1-3 of a four-image gallery. Existing wrappers are
+    // retained until the room changes or their mount is removed with the timeline.
   }
 
 
@@ -7883,11 +8375,18 @@
     if (!(gallery instanceof HTMLElement) || !(anchor instanceof Element) || !(parent instanceof Element)) return;
 
     const indentSource = findGalleryIndentSource(anchor);
-    if (!indentSource) return;
+    let indent = Number(gallery.dataset.mgGalleryIndent || 0) || 0;
 
-    const parentRect = parent.getBoundingClientRect();
-    const sourceRect = indentSource.getBoundingClientRect();
-    const indent = Math.max(0, Math.round(sourceRect.left - parentRect.left));
+    if (indentSource instanceof Element) {
+      const parentRect = parent.getBoundingClientRect();
+      const sourceRect = indentSource.getBoundingClientRect();
+      const hasUsableGeometry = parentRect.width > 0 && sourceRect.width > 0 && sourceRect.height > 0;
+
+      if (hasUsableGeometry) {
+        indent = Math.max(0, Math.round(sourceRect.left - parentRect.left));
+        gallery.dataset.mgGalleryIndent = String(indent);
+      }
+    }
 
     if (indent > 0) {
       gallery.style.marginLeft = `${indent}px`;
@@ -7927,60 +8426,96 @@
       if (item.element.dataset.mgGalleryImageLoadFailed === "1") continue;
       item.element.classList.add("mg-gallery-placeholder");
       item.element.dataset.mgGalleryPlaceholderPass = String(currentGalleryBuildPass);
-    }
-  }
-
-  function withVisibleGallerySources(imageItems, callback) {
-    const restored = [];
-
-    for (const item of imageItems) {
-      const element = item?.element;
-      if (!(element instanceof Element)) continue;
-      if (!element.classList.contains("mg-gallery-placeholder")) continue;
-
-      element.classList.remove("mg-gallery-placeholder");
-      restored.push(element);
-    }
-
-    try {
-      return callback();
-    } finally {
-      if (shouldHideNativeGallerySources()) {
-        for (const element of restored) {
-          element.classList.add("mg-gallery-placeholder");
-          element.dataset.mgGalleryPlaceholderPass = String(currentGalleryBuildPass);
-        }
-      }
+      item.element.dataset.mgGalleryPlaceholderMisses = "0";
+      item.element.dataset.mgGalleryPlaceholderLastSeenAt = String(Date.now());
     }
   }
 
   function cleanupStaleInlineGalleryRenderPass(pass) {
     const passText = String(pass);
+    const currentRoomKey = galleryRoomKey();
+    const retainedGalleryIds = new Set();
+    const now = Date.now();
 
     for (const gallery of document.querySelectorAll(".mg-inline-gallery[data-mg-gallery-scope-id]")) {
-      if (gallery.dataset.mgGalleryBuildPass !== passText) {
-        gallery.remove();
+      if (gallery.dataset.mgGalleryBuildPass === passText) {
+        gallery.dataset.mgGalleryMissedPasses = "0";
+        gallery.dataset.mgGalleryLastSeenAt = String(now);
+        gallery.dataset.mgGalleryRoomKey = currentRoomKey;
+        if (gallery.dataset.mgGalleryId) retainedGalleryIds.add(gallery.dataset.mgGalleryId);
+        continue;
       }
+
+      const roomChanged = Boolean(
+        gallery.dataset.mgGalleryRoomKey &&
+        gallery.dataset.mgGalleryRoomKey !== currentRoomKey
+      );
+      let lastSeenAt = Number(gallery.dataset.mgGalleryLastSeenAt || 0) || 0;
+      if (!lastSeenAt) {
+        lastSeenAt = now;
+        gallery.dataset.mgGalleryLastSeenAt = String(now);
+      }
+      const stale = now - lastSeenAt > 60000;
+
+      // A gallery is removed only after a sustained absence, not after a handful
+      // of rapid observer passes. This avoids visible removal/recreation while
+      // Element temporarily virtualizes individual Mattermost-imported images.
+      if (!roomChanged && !stale && gallery.isConnected) {
+        if (gallery.dataset.mgGalleryId) retainedGalleryIds.add(gallery.dataset.mgGalleryId);
+        continue;
+      }
+
+      gallery.remove();
     }
 
     for (const element of document.querySelectorAll(".mg-gallery-placeholder")) {
-      if (element.dataset.mgGalleryPlaceholderPass !== passText) {
-        element.classList.remove("mg-gallery-placeholder");
-        delete element.dataset.mgGalleryPlaceholderPass;
+      if (element.dataset.mgGalleryPlaceholderPass === passText) {
+        element.dataset.mgGalleryPlaceholderMisses = "0";
+        continue;
       }
+
+      const galleryId = extractGalleryIdFromElement(element);
+      const eventId = eventIdForElement(element);
+      const correspondingGalleryStillVisible = Boolean(
+        (galleryId && retainedGalleryIds.has(galleryId)) ||
+        (eventId && document.querySelector(`.mg-inline-gallery img[data-event-id="${cssEscape(eventId)}"]`))
+      );
+      if (correspondingGalleryStillVisible) continue;
+
+      let lastSeenAt = Number(element.dataset.mgGalleryPlaceholderLastSeenAt || 0) || 0;
+      if (!lastSeenAt) {
+        lastSeenAt = now;
+        element.dataset.mgGalleryPlaceholderLastSeenAt = String(now);
+      }
+      if (now - lastSeenAt <= 60000) continue;
+
+      element.classList.remove("mg-gallery-placeholder");
+      delete element.dataset.mgGalleryPlaceholderPass;
+      delete element.dataset.mgGalleryPlaceholderMisses;
+      delete element.dataset.mgGalleryPlaceholderLastSeenAt;
     }
   }
 
+
   function findExistingInlineGalleryForScope(parent, galleryId, scopeId) {
+    let sameGalleryIdFallback = null;
+
     for (const gallery of Array.from(parent.children)) {
       if (!(gallery instanceof Element)) continue;
       if (!gallery.matches(".mg-inline-gallery")) continue;
       if (gallery.dataset.mgGalleryId !== galleryId) continue;
-      if ((gallery.dataset.mgGalleryScopeId || "") !== scopeId) continue;
-      return gallery;
+
+      if ((gallery.dataset.mgGalleryScopeId || "") === scopeId) {
+        return gallery;
+      }
+
+      if (!sameGalleryIdFallback) sameGalleryIdFallback = gallery;
     }
 
-    return null;
+    if (sameGalleryIdFallback) {
+      sameGalleryIdFallback.dataset.mgGalleryScopeId = scopeId;
+    }
+    return sameGalleryIdFallback;
   }
 
   function removeExistingInlineGalleryForScope(parent, galleryId, scopeId) {
@@ -7993,12 +8528,49 @@
     }
   }
 
+  function stableGalleryUrlKey(rawUrl) {
+    const value = String(rawUrl || "").trim();
+    if (!value) return "";
+    if (/^mxc:\/\//i.test(value)) return value;
+
+    try {
+      const url = new URL(value, window.location.href);
+
+      // Element can rotate authenticated query parameters or temporary blob URLs
+      // while the underlying Matrix event remains unchanged. Those transient
+      // values must not force Smart Element to remove and recreate the gallery.
+      if (url.protocol === "blob:") {
+        return `blob:${url.origin}`;
+      }
+
+      url.search = "";
+      url.hash = "";
+      return url.href;
+    } catch {
+      return value.replace(/[?#].*$/, "");
+    }
+  }
+
   function makeGalleryRenderKey(galleryId, imageItems) {
     const parts = imageItems.map(item => {
       const eventId = eventIdForElement(item.element);
-      const src = item.img?.currentSrc || item.img?.src || item.img?.getAttribute("src") || "";
       const index = extractGalleryIndex(item.element);
-      return `${eventId}|${index ?? ""}|${src}`;
+      const metadata = eventId ? galleryEventMetadataByEventId.get(eventId) : null;
+      const stableMediaId = stableGalleryUrlKey(
+        metadata?.url ||
+        item.img?.dataset?.mxcUrl ||
+        item.img?.getAttribute?.("data-mxc-url") ||
+        item.img?.dataset?.fullSrc ||
+        item.img?.getAttribute?.("data-full-src") ||
+        item.img?.currentSrc ||
+        item.img?.src ||
+        item.img?.getAttribute?.("src") ||
+        ""
+      );
+
+      // Event IDs and gallery indices are the canonical identity. The stable URL
+      // is only a fallback for DOM variants where Element does not expose an ID.
+      return `${eventId || stableMediaId}|${index ?? ""}`;
     });
 
     return `${galleryId}::${parts.join("::")}`;
@@ -8073,6 +8645,13 @@
       event.preventDefault();
       event.stopPropagation();
       hideDropOverlay();
+
+      const now = Date.now();
+      if (lastLightboxOpenSource === img && now - lastLightboxOpenAt < 350) {
+        return;
+      }
+      lastLightboxOpenSource = img;
+      lastLightboxOpenAt = now;
 
       openLightbox(images, index);
     };
@@ -8185,23 +8764,84 @@
     closeLightbox();
   }, true);
 
-  function updateLightbox() {
+  async function updateLightbox() {
     const image = document.getElementById("mg-lightbox-image");
     const counter = document.getElementById("mg-lightbox-counter");
+    const imageWrap = document.querySelector(".mg-lightbox-image-wrap");
 
     if (!image || !counter) return;
 
     const source = currentLightboxImages[currentLightboxIndex];
-    const src = source.dataset.fullSrc || source.currentSrc || source.src;
+    if (!(source instanceof HTMLImageElement)) return;
 
-    image.onload = () => {
-      resetLightboxTransform();
-      computeLightboxFitScale();
-      applyLightboxZoom();
+    const loadSequence = ++currentLightboxLoadSequence;
+    const immediateSrc = renderedImageFullSrc(source);
+    let sourceAttempt = 0;
+
+    const setStatus = status => {
+      if (!(imageWrap instanceof HTMLElement)) return;
+      imageWrap.dataset.mgLightboxStatus = status || "";
+      imageWrap.classList.toggle("mg-lightbox-loading", status === "loading");
+      imageWrap.classList.toggle("mg-lightbox-load-failed", status === "failed");
     };
 
-    image.src = src;
-    image.style.background = "white";
+    const assignSource = (url, { waitForLoad = false } = {}) => {
+      if (!url) return Promise.resolve(false);
+      const attempt = ++sourceAttempt;
+
+      return new Promise(resolve => {
+        let settled = false;
+        const finish = loaded => {
+          if (settled) return;
+          settled = true;
+          resolve(loaded);
+        };
+
+        image.onload = () => {
+          if (loadSequence !== currentLightboxLoadSequence || attempt !== sourceAttempt) {
+            finish(false);
+            return;
+          }
+          image.classList.remove("mg-lightbox-image-error");
+          setStatus("");
+          resetLightboxTransform();
+          computeLightboxFitScale();
+          applyLightboxZoom();
+          finish(true);
+        };
+
+        image.onerror = () => {
+          if (loadSequence !== currentLightboxLoadSequence || attempt !== sourceAttempt) {
+            finish(false);
+            return;
+          }
+          image.classList.add("mg-lightbox-image-error");
+          finish(false);
+        };
+
+        image.classList.remove("mg-lightbox-image-error");
+        image.src = url;
+
+        if (!waitForLoad) {
+          finish(Boolean(image.complete && image.naturalWidth > 0 && image.naturalHeight > 0));
+        } else if (image.complete) {
+          queueMicrotask(() => {
+            if (attempt !== sourceAttempt) return finish(false);
+            finish(Boolean(image.naturalWidth > 0 && image.naturalHeight > 0));
+          });
+        }
+      });
+    };
+
+    setStatus("loading");
+    image.classList.remove("mg-lightbox-image-error");
+    if (immediateSrc) {
+      void assignSource(immediateSrc);
+    } else {
+      image.removeAttribute("src");
+    }
+
+    image.style.background = "transparent";
     counter.textContent = `${currentLightboxIndex + 1} / ${currentLightboxImages.length}`;
 
     const caption = document.querySelector(".mg-lightbox-caption");
@@ -8215,10 +8855,62 @@
     }
 
     if (image.complete && image.naturalWidth > 0) {
+      setStatus("");
       resetLightboxTransform();
       computeLightboxFitScale();
       applyLightboxZoom();
     }
+
+    try {
+      const dataUrl = await fetchBestMatrixMediaDataUrl(source);
+      if (loadSequence !== currentLightboxLoadSequence || !document.getElementById("mg-lightbox")) {
+        return;
+      }
+
+      const loaded = await assignSource(dataUrl, { waitForLoad: true });
+      if (!loaded) throw new Error("Authenticated Matrix media did not decode as an image.");
+      return;
+    } catch (backgroundError) {
+      console.warn("Authenticated background media load failed; retaining rendered fallback.", backgroundError);
+    }
+
+    if (loadSequence !== currentLightboxLoadSequence) return;
+    if (image.complete && image.naturalWidth > 0 && image.naturalHeight > 0) {
+      setStatus("");
+      return;
+    }
+
+    try {
+      const blob = await fetchBestMatrixMediaBlob(source);
+      if (loadSequence !== currentLightboxLoadSequence || !document.getElementById("mg-lightbox")) {
+        return;
+      }
+
+      const objectUrl = URL.createObjectURL(blob);
+      const loaded = await assignSource(objectUrl, { waitForLoad: true });
+      if (!loaded) {
+        URL.revokeObjectURL(objectUrl);
+        throw new Error("Downloaded Matrix media did not decode as an image.");
+      }
+
+      if (currentLightboxDisplayObjectUrl) {
+        URL.revokeObjectURL(currentLightboxDisplayObjectUrl);
+      }
+      currentLightboxDisplayObjectUrl = objectUrl;
+      return;
+    } catch (error) {
+      if (loadSequence !== currentLightboxLoadSequence) return;
+      console.warn("Could not load full-resolution Matrix media in lightbox.", error);
+    }
+
+    if (immediateSrc) {
+      const restored = await assignSource(immediateSrc, { waitForLoad: true });
+      if (restored) return;
+    }
+
+    image.classList.add("mg-lightbox-image-error");
+    image.removeAttribute("src");
+    setStatus("failed");
   }
 
   function handleLightboxKey(event) {
@@ -8518,6 +9210,119 @@
     return currentLightboxImages[currentLightboxIndex] || null;
   }
 
+  function sendExtensionRuntimeMessage(message) {
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (callback, value) => {
+        if (settled) return;
+        settled = true;
+        callback(value);
+      };
+
+      try {
+        const maybePromise = chrome.runtime.sendMessage(message, response => {
+          const runtimeError = chrome.runtime.lastError;
+          if (runtimeError) {
+            finish(reject, new Error(runtimeError.message || String(runtimeError)));
+            return;
+          }
+          finish(resolve, response);
+        });
+
+        if (maybePromise && typeof maybePromise.then === "function") {
+          maybePromise.then(
+            response => finish(resolve, response),
+            error => finish(reject, error)
+          );
+        }
+      } catch (error) {
+        finish(reject, error);
+      }
+    });
+  }
+
+  async function fetchMatrixMediaDataUrlInBackground(url) {
+    if (!/^https?:/i.test(String(url || ""))) {
+      throw new Error("Matrix media background download requires an HTTP(S) URL.");
+    }
+
+    const accessToken = document.getElementById("mg-token")?.value?.trim() || pageSession?.accessToken || "";
+    const response = await sendExtensionRuntimeMessage({
+      type: "matrixFetchDataUrl",
+      url,
+      accessToken
+    });
+
+    if (!response?.ok) {
+      throw new Error(response?.error || "Matrix media background download failed.");
+    }
+
+    const dataUrl = response.result?.dataUrl || "";
+    if (!/^data:image\//i.test(dataUrl)) {
+      throw new Error("Downloaded Matrix media is not a recognized image.");
+    }
+
+    return dataUrl;
+  }
+
+  async function fetchBestMatrixMediaDataUrl(source) {
+    const knownCandidates = buildMatrixMediaDownloadCandidates(source);
+    const hasKnownMatrixHttpUrl = knownCandidates.some(value => /^https?:/i.test(String(value || "")) && isMatrixMediaUrl(value));
+    const bridgeMedia = hasKnownMatrixHttpUrl
+      ? { downloadUrl: "", mxcUrl: source.dataset.mxcUrl || "" }
+      : await resolveMediaDownloadFromBridge(source);
+
+    if (bridgeMedia.mxcUrl && !source.dataset.mxcUrl) {
+      source.dataset.mxcUrl = bridgeMedia.mxcUrl;
+    }
+
+    const candidates = [
+      ...(bridgeMedia.downloadUrl ? [bridgeMedia.downloadUrl] : []),
+      ...knownCandidates,
+      ...buildMatrixMediaDownloadCandidates(source)
+    ];
+
+    let lastError = null;
+    for (const url of Array.from(new Set(candidates)).filter(value => /^https?:/i.test(String(value || "")))) {
+      try {
+        return await fetchMatrixMediaDataUrlInBackground(url);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error("No downloadable Matrix image URL found.");
+  }
+
+  async function normalizeDownloadedImageBlob(blob) {
+    if (!(blob instanceof Blob) || blob.size === 0) {
+      throw new Error("Downloaded Matrix media is empty.");
+    }
+
+    const declaredType = String(blob.type || "").split(";")[0].trim().toLowerCase();
+    if (declaredType.startsWith("image/")) return blob;
+
+    const bytes = new Uint8Array(await blob.slice(0, 32).arrayBuffer());
+    const startsWith = signature => signature.every((value, index) => bytes[index] === value);
+    let detectedType = "";
+
+    if (startsWith([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) detectedType = "image/png";
+    else if (startsWith([0xff, 0xd8, 0xff])) detectedType = "image/jpeg";
+    else if (startsWith([0x47, 0x49, 0x46, 0x38])) detectedType = "image/gif";
+    else if (startsWith([0x42, 0x4d])) detectedType = "image/bmp";
+    else if (
+      bytes.length >= 12 &&
+      String.fromCharCode(...bytes.slice(0, 4)) === "RIFF" &&
+      String.fromCharCode(...bytes.slice(8, 12)) === "WEBP"
+    ) detectedType = "image/webp";
+
+    if (!detectedType) {
+      throw new Error(`Downloaded Matrix media is not a recognized image (${declaredType || "unknown type"}).`);
+    }
+
+    return new Blob([blob], { type: detectedType });
+  }
+
   async function resolveMediaDownloadFromBridge(source) {
     const requestId = `mg_media_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
@@ -8704,7 +9509,7 @@
           continue;
         }
 
-        return await response.blob();
+        return await normalizeDownloadedImageBlob(await response.blob());
       } catch (error) {
         lastError = error;
       }
@@ -8806,8 +9611,17 @@
   }
 
   function closeLightbox() {
+    currentLightboxLoadSequence += 1;
+
     const old = document.getElementById("mg-lightbox");
     if (old) old.remove();
+
+    if (currentLightboxDisplayObjectUrl) {
+      try {
+        URL.revokeObjectURL(currentLightboxDisplayObjectUrl);
+      } catch {}
+      currentLightboxDisplayObjectUrl = "";
+    }
 
     document.removeEventListener("keydown", handleLightboxKey, true);
     currentLightboxImages = [];

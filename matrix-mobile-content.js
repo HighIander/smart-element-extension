@@ -160,6 +160,8 @@
   let panelSortMode = "user";
   const userSortOrders = new Map();
   let activeDragSort = null;
+  let smartElementReorderDragDepth = 0;
+  let smartElementReorderDragCleanupTimer = null;
   let combinedFeatureConfig = {
     enableGallery: true,
     enableMattermostTools: true,
@@ -193,6 +195,12 @@
   let desktopMiddlePaneTemporaryOpen = false;
   let desktopMiddlePaneTemporaryFromSpaceSelection = false;
   let desktopMiddlePaneSpaceLandingHoldUntil = 0;
+  let desktopMiddlePaneCloseSuppressedUntil = 0;
+  let desktopMiddlePaneCloseSuppressionToken = 0;
+  let desktopMiddlePaneCloseSuppressionReleaseTimer = null;
+  let desktopMiddlePaneSpaceSelectionLockToken = 0;
+  let desktopMiddlePaneSpaceSelectionActiveToken = 0;
+  let desktopMiddlePaneSpaceSelectionReleaseTimer = null;
   let desktopMiddleFloatingCloseHandlersInstalled = false;
   let desktopMiddleFloatingMouseLeaveTarget = null;
   let desktopMiddleEdgePositionFrame = null;
@@ -793,13 +801,15 @@
     return current?.parentElement === ancestor ? current : null;
   }
 
-  async function waitForDesktopHierarchyChatListRendered(timeoutMs = 1400) {
+  async function waitForDesktopHierarchyChatListRendered(timeoutMs = 1400, options = {}) {
     const started = Date.now();
     while (Date.now() - started < timeoutMs) {
       const host = document.getElementById("mmlc-desktop-chat-list-host");
       const visible = host instanceof HTMLElement && isRendered(host);
+      const nativeVisible = desktopNativeMiddlePaneVisibleForSuppression();
       const isStart = document.documentElement.classList.contains("mmlc-desktop-start-selected");
-      if (visible || isStart) {
+      if ((options.requireNativeMiddlePane === true ? nativeVisible : visible) ||
+          (isStart && options.requireVisibleHost !== true && options.requireNativeMiddlePane !== true)) {
         await nextAnimationFrame();
         await delay(80);
         return true;
@@ -807,6 +817,31 @@
       await delay(80);
     }
     return false;
+  }
+
+  function desktopNativeMiddlePaneVisibleForSuppression() {
+    const pane = findMiddlePanePanel();
+    if (!(pane instanceof HTMLElement) || !isRendered(pane)) return false;
+    const paneRect = pane.getBoundingClientRect();
+    if (!Number.isFinite(paneRect.width) || paneRect.width < 120 || paneRect.height < 120) return false;
+    const roomPanel = pane.querySelector(".mx_RoomListPanel, nav[aria-label='Chatliste'], nav[aria-label='Room list']");
+    if (!(roomPanel instanceof HTMLElement) || !isRendered(roomPanel)) return false;
+    const roomRect = roomPanel.getBoundingClientRect();
+    return Number.isFinite(roomRect.width) && roomRect.width >= 120 && roomRect.height >= 120;
+  }
+
+  function ensureDesktopNativeMiddlePaneVisibleBeforeCloseSuppression(reason = "desktop-middle-pre-close-suppression") {
+    if (!(desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryOpen === true && desktopMiddlePaneTemporaryFromSpaceSelection === true)) {
+      return false;
+    }
+    desktopMiddlePaneTemporaryOpen = true;
+    desktopMiddlePaneTemporaryFromSpaceSelection = true;
+    syncDesktopPaneModeClasses();
+    forceElementLeftPanelOpen(reason);
+    ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
+    renderDesktopMiddleChatNativeUi();
+    scheduleDesktopMiddleEdgePositionUpdates([0, 40, 120, 260]);
+    return desktopNativeMiddlePaneVisibleForSuppression();
   }
 
   function updateNativeStartPageHeadingLabel() {
@@ -1248,6 +1283,7 @@
     if (!desktopMiddlePaneHidden) {
       desktopMiddlePaneTemporaryOpen = false;
       desktopMiddlePaneTemporaryFromSpaceSelection = false;
+      clearDesktopMiddlePaneCloseSuppression();
     }
     const middleFloatingOpen = desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryOpen === true;
     document.documentElement.classList.toggle("mmlc-desktop-space-panel-expanded", mode === "expanded");
@@ -1406,6 +1442,7 @@
       html.style.removeProperty("--mmlc-desktop-chat-overlay-width");
       html.style.removeProperty("--mmlc-desktop-chat-overlay-width-root");
       html.style.removeProperty("--mmlc-desktop-chat-overlay-height");
+      html.style.removeProperty("--mmlc-desktop-chat-overlay-viewport-height");
       return;
     }
 
@@ -1426,8 +1463,18 @@
       }
     }
 
-    const viewportWidth = Math.max(320, window.innerWidth || 0);
-    const viewportHeight = Math.max(240, window.innerHeight || 0);
+    const visualViewportHeight = Number(window.visualViewport?.height);
+    const viewportWidth = Math.max(
+      320,
+      Number(window.innerWidth) || 0,
+      Number(document.documentElement.clientWidth) || 0
+    );
+    const viewportHeight = Math.max(
+      240,
+      Number(window.innerHeight) || 0,
+      Number(document.documentElement.clientHeight) || 0,
+      Number.isFinite(visualViewportHeight) && visualViewportHeight > 0 ? visualViewportHeight : 0
+    );
     const leftGap = 8;
     const rightGap = 12;
     const topAndBottomGap = 20;
@@ -1484,6 +1531,7 @@
     html.style.setProperty("--mmlc-desktop-chat-overlay-width", `${overlayWidth}px`);
     html.style.setProperty("--mmlc-desktop-chat-overlay-width-root", `${overlayWidth}px`);
     html.style.setProperty("--mmlc-desktop-chat-overlay-height", `${overlayHeight}px`);
+    html.style.setProperty("--mmlc-desktop-chat-overlay-viewport-height", `${Math.round(viewportHeight)}px`);
   }
 
   function updateDesktopMiddleEdgePosition() {
@@ -1666,7 +1714,16 @@
       desktopMiddlePaneTemporaryOpen = true;
     }
 
+    if (desktopMiddlePaneCloseSuppressionActive()) {
+      desktopNativeMenuDismissPreserveMiddlePaneUntil = Math.max(desktopNativeMenuDismissPreserveMiddlePaneUntil || 0, until);
+      desktopMiddlePaneTemporaryOpen = true;
+      desktopMiddlePaneTemporaryFromSpaceSelection = true;
+    }
+
     syncDesktopPaneModeClasses();
+    if (desktopMiddlePaneCloseSuppressionActive()) {
+      reassertDesktopMiddlePaneVisibleForCloseSuppression("native-menu-dismiss-preserve-begin");
+    }
   }
 
   function desktopNativeMenuDismissShouldPreserveSpacePane() {
@@ -1691,8 +1748,17 @@
       changed = true;
     }
 
+    if (desktopMiddlePaneCloseSuppressionActive()) {
+      desktopMiddlePaneTemporaryOpen = true;
+      desktopMiddlePaneTemporaryFromSpaceSelection = true;
+      changed = true;
+    }
+
     if (!changed) return false;
     syncDesktopPaneModeClasses();
+    if (desktopMiddlePaneCloseSuppressionActive()) {
+      reassertDesktopMiddlePaneVisibleForCloseSuppression(`${reason}-middle-close-suppressed`);
+    }
     renderDesktopMiddleChatNativeUi();
     renderDesktopHierarchyNativeUiSoon(0);
     scheduleDesktopMiddleEdgePositionUpdates([0, 80, 220]);
@@ -1827,11 +1893,143 @@
     return desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryOpen === true;
   }
 
+  function desktopMiddlePaneSpaceSelectionLockActive() {
+    return desktopMiddlePaneHidden === true &&
+      desktopMiddlePaneTemporaryFromSpaceSelection === true &&
+      desktopMiddlePaneSpaceSelectionActiveToken > 0;
+  }
+
+  function desktopMiddlePaneCloseSuppressionActive() {
+    return desktopMiddlePaneHidden === true &&
+      desktopMiddlePaneTemporaryFromSpaceSelection === true &&
+      (desktopMiddlePaneSpaceSelectionLockActive() || Date.now() < (desktopMiddlePaneCloseSuppressedUntil || 0));
+  }
+
+  function syncDesktopMiddlePaneCloseSuppressionClass() {
+    document.documentElement.classList.toggle(
+      "mmlc-desktop-middle-pane-close-suppressed",
+      desktopMiddlePaneCloseSuppressionActive()
+    );
+  }
+
+  function beginDesktopMiddlePaneSpaceSelectionLock(reason = "desktop-space-selection-operation") {
+    if (!(desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryOpen === true && desktopMiddlePaneTemporaryFromSpaceSelection === true)) return 0;
+
+    desktopMiddlePaneSpaceSelectionLockToken += 1;
+    desktopMiddlePaneSpaceSelectionActiveToken = desktopMiddlePaneSpaceSelectionLockToken;
+    if (desktopMiddlePaneSpaceSelectionReleaseTimer) {
+      clearTimeout(desktopMiddlePaneSpaceSelectionReleaseTimer);
+      desktopMiddlePaneSpaceSelectionReleaseTimer = null;
+    }
+
+    syncDesktopMiddlePaneCloseSuppressionClass();
+    reassertDesktopMiddlePaneVisibleForCloseSuppression(`${reason}-armed`);
+    scheduleDesktopMiddlePaneCloseSuppressionVisibilityReassertions(reason);
+    return desktopMiddlePaneSpaceSelectionActiveToken;
+  }
+
+  function releaseDesktopMiddlePaneSpaceSelectionLockSoon(reason = "desktop-space-selection-operation-complete", delayMs = 900, token = 0) {
+    const releaseToken = Number(token) || 0;
+    if (!releaseToken || releaseToken !== desktopMiddlePaneSpaceSelectionActiveToken) return false;
+
+    if (desktopMiddlePaneSpaceSelectionReleaseTimer) clearTimeout(desktopMiddlePaneSpaceSelectionReleaseTimer);
+    desktopMiddlePaneSpaceSelectionReleaseTimer = window.setTimeout(() => {
+      if (releaseToken !== desktopMiddlePaneSpaceSelectionActiveToken) return;
+      desktopMiddlePaneSpaceSelectionReleaseTimer = null;
+      desktopMiddlePaneSpaceSelectionActiveToken = 0;
+      syncDesktopMiddlePaneCloseSuppressionClass();
+      syncDesktopPaneModeClasses();
+      renderDesktopMiddleChatNativeUi();
+      scheduleDesktopMiddleEdgePositionUpdates([0, 80, 220]);
+    }, Math.max(0, Math.min(5000, Number(delayMs) || 0)));
+    return true;
+  }
+
+  function beginDesktopMiddlePaneCloseSuppression(reason = "desktop-space-selection", durationMs = 6500) {
+    if (!(desktopMiddlePaneHidden === true && desktopMiddlePaneTemporaryOpen === true && desktopMiddlePaneTemporaryFromSpaceSelection === true)) return 0;
+    desktopMiddlePaneCloseSuppressionToken += 1;
+    desktopMiddlePaneCloseSuppressedUntil = Math.max(
+      desktopMiddlePaneCloseSuppressedUntil || 0,
+      Date.now() + Math.max(600, Math.min(12000, Number(durationMs) || 6500))
+    );
+    if (desktopMiddlePaneCloseSuppressionReleaseTimer) {
+      clearTimeout(desktopMiddlePaneCloseSuppressionReleaseTimer);
+      desktopMiddlePaneCloseSuppressionReleaseTimer = null;
+    }
+    syncDesktopMiddlePaneCloseSuppressionClass();
+    const token = desktopMiddlePaneCloseSuppressionToken;
+    const fallbackDelay = Math.max(0, desktopMiddlePaneCloseSuppressedUntil - Date.now() + 80);
+    desktopMiddlePaneCloseSuppressionReleaseTimer = window.setTimeout(() => {
+      if (token !== desktopMiddlePaneCloseSuppressionToken) return;
+      if (Date.now() < (desktopMiddlePaneCloseSuppressedUntil || 0)) return;
+      desktopMiddlePaneCloseSuppressionReleaseTimer = null;
+      desktopMiddlePaneCloseSuppressedUntil = 0;
+      syncDesktopMiddlePaneCloseSuppressionClass();
+    }, fallbackDelay);
+    reassertDesktopMiddlePaneVisibleForCloseSuppression(`${reason}-armed`);
+    scheduleDesktopMiddlePaneCloseSuppressionVisibilityReassertions(reason);
+    return desktopMiddlePaneCloseSuppressionToken;
+  }
+
+  function releaseDesktopMiddlePaneCloseSuppressionSoon(reason = "desktop-space-selection-complete", delayMs = 1200, token = 0) {
+    if (!desktopMiddlePaneCloseSuppressedUntil) return false;
+    const releaseToken = Number(token) || 0;
+    if (!releaseToken) return false;
+    if (releaseToken !== desktopMiddlePaneCloseSuppressionToken) return false;
+    if (desktopMiddlePaneCloseSuppressionReleaseTimer) clearTimeout(desktopMiddlePaneCloseSuppressionReleaseTimer);
+    desktopMiddlePaneCloseSuppressionReleaseTimer = window.setTimeout(() => {
+      if (releaseToken !== desktopMiddlePaneCloseSuppressionToken) return;
+      desktopMiddlePaneCloseSuppressionReleaseTimer = null;
+      desktopMiddlePaneCloseSuppressedUntil = 0;
+      syncDesktopMiddlePaneCloseSuppressionClass();
+    }, Math.max(0, Math.min(5000, Number(delayMs) || 0)));
+    return true;
+  }
+
+  function clearDesktopMiddlePaneCloseSuppression() {
+    desktopMiddlePaneCloseSuppressedUntil = 0;
+    desktopMiddlePaneCloseSuppressionToken += 1;
+    desktopMiddlePaneSpaceSelectionLockToken += 1;
+    desktopMiddlePaneSpaceSelectionActiveToken = 0;
+    if (desktopMiddlePaneCloseSuppressionReleaseTimer) {
+      clearTimeout(desktopMiddlePaneCloseSuppressionReleaseTimer);
+      desktopMiddlePaneCloseSuppressionReleaseTimer = null;
+    }
+    if (desktopMiddlePaneSpaceSelectionReleaseTimer) {
+      clearTimeout(desktopMiddlePaneSpaceSelectionReleaseTimer);
+      desktopMiddlePaneSpaceSelectionReleaseTimer = null;
+    }
+    syncDesktopMiddlePaneCloseSuppressionClass();
+  }
+
+  function reassertDesktopMiddlePaneVisibleForCloseSuppression(reason = "desktop-middle-close-suppressed-visible") {
+    if (!desktopMiddlePaneCloseSuppressionActive()) return false;
+    desktopMiddlePaneTemporaryOpen = true;
+    desktopMiddlePaneTemporaryFromSpaceSelection = true;
+    syncDesktopPaneModeClasses();
+    forceElementLeftPanelOpen(reason);
+    ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
+    renderDesktopMiddleChatNativeUi();
+    scheduleDesktopMiddleEdgePositionUpdates([0, 80, 220]);
+    return true;
+  }
+
+  function scheduleDesktopMiddlePaneCloseSuppressionVisibilityReassertions(reason = "desktop-middle-close-suppressed-visible") {
+    if (!desktopMiddlePaneCloseSuppressionActive()) return;
+    for (const delayMs of [0, 16, 40, 80, 120, 260, 520, 900, 1400, 2200]) {
+      window.setTimeout(() => {
+        reassertDesktopMiddlePaneVisibleForCloseSuppression(`${reason}-${delayMs}`);
+      }, delayMs);
+    }
+  }
+
   function closeDesktopMiddleFloatingPane(reason = "desktop-middle-floating-close") {
     if (!desktopMiddleFloatingPaneIsOpen()) return false;
+    if (desktopMiddlePaneCloseSuppressionActive()) return false;
     desktopMiddlePaneTemporaryOpen = false;
     desktopMiddlePaneTemporaryFromSpaceSelection = false;
     desktopMiddlePaneSpaceLandingHoldUntil = 0;
+    clearDesktopMiddlePaneCloseSuppression();
     syncDesktopPaneModeClasses();
     renderDesktopMiddleChatNativeUi();
     renderDesktopHierarchyNativeUiSoon(0);
@@ -1888,6 +2086,7 @@
     if (event?.isTrusted === false) return;
 
     if (desktopNativeMenuDismissShouldPreserveMiddlePane()) return;
+    if (desktopMiddlePaneCloseSuppressionActive()) return;
     if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
     const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
     const host = document.getElementById("mmlc-desktop-chat-list-host");
@@ -1901,6 +2100,7 @@
     if (Date.now() - desktopMiddleFloatingOpenedAt < 220) return;
 
     if (desktopNativeMenuDismissShouldPreserveMiddlePane()) return;
+    if (desktopMiddlePaneCloseSuppressionActive()) return;
     if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) {
       const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
       const host = document.getElementById("mmlc-desktop-chat-list-host");
@@ -1926,6 +2126,7 @@
     if (!desktopMiddleFloatingPaneIsOpen()) return;
     if (event?.isTrusted === false) return;
     if (desktopNativeMenuDismissShouldPreserveMiddlePane()) return;
+    if (desktopMiddlePaneCloseSuppressionActive()) return;
     if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
     const target = event.target;
     if (target instanceof Element && target.closest("#left-panel, [data-testid='left-panel'], #mmlc-desktop-chat-list-host, #mmlc-desktop-middle-restore, #mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover")) return;
@@ -1937,6 +2138,7 @@
     if (event?.isTrusted === false) return;
     const target = event.target;
     if (!(target instanceof Element) || target.closest(OWNED_SELECTOR)) return;
+    if (desktopMiddlePaneCloseSuppressionActive()) return;
     const roomTarget = target.closest([
       "#left-panel [data-testid='room-list'] [role='option']",
       "#left-panel [data-testid='room-list'] [role='treeitem']",
@@ -2115,12 +2317,14 @@
       "mmlc-desktop-space-mode-current",
       "mmlc-desktop-middle-pane-hidden",
       "mmlc-desktop-middle-pane-floating-open",
+      "mmlc-desktop-middle-pane-close-suppressed",
       "mmlc-desktop-start-selected"
     );
     desktopSpacePaneTemporaryOpen = false;
     desktopSpaceFloatingSelectionHold = false;
     removeDesktopSpaceFloatingAvatar();
     desktopMiddlePaneTemporaryOpen = false;
+    clearDesktopMiddlePaneCloseSuppression();
     updateDesktopSpaceFloatingCloseHandlers();
     updateDesktopMiddleFloatingCloseHandlers();
     document.getElementById("mmlc-desktop-space-list-host")?.remove();
@@ -2725,6 +2929,7 @@
 
     const list = document.createElement("div");
     list.className = "mmlc-desktop-space-list";
+    installDesktopListDropZoneHandlers(list, () => renderDesktopHierarchyNativeUiSoon(0));
     host.appendChild(list);
 
     const expandToggle = document.createElement("button");
@@ -2951,6 +3156,14 @@
     button.setAttribute("aria-label", displayLabelForItem(item));
     button.style.setProperty("--mmlc-desktop-level", String(Math.max(0, Number(item.level || 0))));
 
+    const reorder = desktopSpaceReorderContext(item);
+    if (reorder) {
+      installDesktopOrderDragHandlers(button, {
+        ...reorder,
+        rerender: () => renderDesktopHierarchyNativeUiSoon(0)
+      });
+    }
+
     const avatar = item.type === "start"
       ? makeFixedTextAvatar("DM", "mmlc-desktop-space-avatar")
       : (makeInlineSpaceAvatar(item, "mmlc-desktop-space-avatar") || makeFixedTextAvatar(item.icon || initialsForLabel(displayLabelForItem(item)), "mmlc-desktop-space-avatar"));
@@ -2969,6 +3182,10 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
+      if (button.dataset.mmlcSuppressClick === "1") {
+        delete button.dataset.mmlcSuppressClick;
+        return;
+      }
 
       const keepSpacePaneOpen = desktopSpaceFloatingPaneIsOpen();
       if (keepSpacePaneOpen) {
@@ -3122,18 +3339,20 @@
         const unread = unreadForDesktopChatButtonItem(withPath, liveUnreadForRenderedChats);
         return unread?.hasUnread || unread?.count || unread?.highlightCount ? { ...withPath, unread } : withPath;
       });
+    const sortedChats = sortItemsByUserOrder(chats, chatListKey);
 
     const list = document.createElement("div");
     list.className = "mmlc-desktop-chat-list";
+    installDesktopListDropZoneHandlers(list, () => renderDesktopMiddleChatNativeUi());
     host.appendChild(list);
 
-    if (!chats.length) {
+    if (!sortedChats.length) {
       const empty = document.createElement("div");
       empty.className = "mmlc-desktop-empty";
       empty.textContent = "No direct chats cached for this space.";
       list.appendChild(empty);
     } else {
-      for (const chat of chats) {
+      for (const chat of sortedChats) {
         list.appendChild(makeDesktopChatButton(chat));
       }
     }
@@ -3393,6 +3612,7 @@
         desktopMiddlePaneTemporaryOpen = false;
         desktopMiddlePaneTemporaryFromSpaceSelection = false;
         desktopMiddlePaneSpaceLandingHoldUntil = 0;
+        clearDesktopMiddlePaneCloseSuppression();
         syncDesktopPaneModeClasses();
         persistDesktopHierarchySettings();
         enforceNativeNavigationPanesOpen("desktop-middle-arrow-collapse");
@@ -3406,6 +3626,7 @@
         desktopMiddlePaneTemporaryOpen = true;
         desktopMiddlePaneTemporaryFromSpaceSelection = false;
         desktopMiddlePaneSpaceLandingHoldUntil = 0;
+        clearDesktopMiddlePaneCloseSuppression();
         syncDesktopPaneModeClasses();
         enforceNativeNavigationPanesOpen("desktop-middle-toggle-open-floating");
         ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
@@ -3420,6 +3641,7 @@
         desktopMiddlePaneTemporaryOpen = false;
         desktopMiddlePaneTemporaryFromSpaceSelection = false;
         desktopMiddlePaneSpaceLandingHoldUntil = 0;
+        clearDesktopMiddlePaneCloseSuppression();
         syncDesktopPaneModeClasses();
         persistDesktopHierarchySettings();
         enforceNativeNavigationPanesOpen("desktop-middle-toggle-lock-open");
@@ -3433,6 +3655,7 @@
       desktopMiddlePaneTemporaryOpen = false;
       desktopMiddlePaneTemporaryFromSpaceSelection = false;
       desktopMiddlePaneSpaceLandingHoldUntil = 0;
+      clearDesktopMiddlePaneCloseSuppression();
       syncDesktopPaneModeClasses();
       persistDesktopHierarchySettings();
       enforceNativeNavigationPanesOpen("desktop-middle-toggle-hide");
@@ -3457,6 +3680,7 @@
       desktopMiddlePaneHidden = false;
       desktopMiddlePaneTemporaryOpen = false;
       desktopMiddlePaneTemporaryFromSpaceSelection = false;
+      clearDesktopMiddlePaneCloseSuppression();
       syncDesktopPaneModeClasses();
       persistDesktopHierarchySettings();
       renderDesktopMiddleChatNativeUi();
@@ -3491,6 +3715,14 @@
     button.dataset.mmlcDesktopChatKey = roomUnreadCacheKey(item) || normalizeChatKey(item.label || "");
     button.title = displayLabelForItem(item);
 
+    const reorder = desktopChatReorderContext(item);
+    if (reorder) {
+      installDesktopOrderDragHandlers(button, {
+        ...reorder,
+        rerender: () => renderDesktopMiddleChatNativeUi()
+      });
+    }
+
     const avatar = makeDesktopChatAvatar(item);
     const label = document.createElement("span");
     label.className = "mmlc-desktop-chat-label";
@@ -3504,6 +3736,10 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
+      if (button.dataset.mmlcSuppressClick === "1") {
+        delete button.dataset.mmlcSuppressClick;
+        return;
+      }
 
       const action = item.joined === false ? joinDesktopUnjoinedItem(item) : openDesktopCachedChat(item);
       if (desktopMiddleFloatingPaneIsOpen()) closeDesktopMiddleFloatingPane("chat-click");
@@ -3569,10 +3805,28 @@
       // temporary floating pane instead of leaving the user on the right pane
       // only.
       ensureDesktopMiddlePaneVisibleForSpaceOpen();
+      const spaceSelectionLockToken = beginDesktopMiddlePaneSpaceSelectionLock("desktop-start-space-open-operation");
       beginDesktopMiddlePaneSpaceLandingHold(1800);
       scheduleDesktopSpaceFloatingSelectionHoldReassertions("desktop-start-space-open");
       renderDesktopHierarchyNativeUiSoon(0);
-      await waitForDesktopHierarchyChatListRendered(240);
+      ensureDesktopNativeMiddlePaneVisibleBeforeCloseSuppression("desktop-start-space-open-before-lock");
+      let chatListReadyForSuppression = await waitForDesktopHierarchyChatListRendered(680, { requireNativeMiddlePane: true });
+      if (!chatListReadyForSuppression) {
+        ensureDesktopNativeMiddlePaneVisibleBeforeCloseSuppression("desktop-start-space-open-before-lock-retry");
+        await nextAnimationFrame();
+        await delay(80);
+        chatListReadyForSuppression = desktopNativeMiddlePaneVisibleForSuppression();
+      }
+      if (chatListReadyForSuppression) {
+        ensureDesktopNativeMiddlePaneVisibleBeforeCloseSuppression("desktop-start-space-open-lock-ready");
+      }
+      const closeSuppressionToken = chatListReadyForSuppression
+        ? beginDesktopMiddlePaneCloseSuppression("desktop-start-space-open", 5200)
+        : 0;
+      if (closeSuppressionToken) {
+        reassertDesktopMiddlePaneVisibleForCloseSuppression("desktop-start-space-open-after-lock");
+        scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("desktop-start-space-open-chatlist-ready");
+      }
 
       showChatOpeningOverlay(true, {
         title: "Opening direct messages.",
@@ -3582,9 +3836,16 @@
         await selectNativeStartPageForDesktopHierarchy();
       } finally {
         showChatOpeningOverlay(false, { minVisibleMs: 360 });
+        releaseDesktopMiddlePaneCloseSuppressionSoon("desktop-start-page-chatlist-open-finished", 1400, closeSuppressionToken);
+        releaseDesktopMiddlePaneSpaceSelectionLockSoon(
+          "desktop-start-page-operation-finished",
+          1600,
+          spaceSelectionLockToken
+        );
       }
       reassertDesktopMiddlePaneOpenForSpaceLanding("desktop-start-page-chatlist-open-final");
       reassertDesktopSpaceFloatingSelectionHold("desktop-start-page-chatlist-open-final");
+      releaseDesktopMiddlePaneCloseSuppressionSoon("desktop-start-page-chatlist-open-final", 1400, closeSuppressionToken);
       renderDesktopHierarchyNativeUiSoon(0);
       return;
     }
@@ -3605,11 +3866,32 @@
     // clicks and scroll probes on every normal Space change. The native parser is
     // now reserved for manual refreshes or missing/stale caches.
     ensureDesktopMiddlePaneVisibleForSpaceOpen();
+    const spaceSelectionLockToken = beginDesktopMiddlePaneSpaceSelectionLock("desktop-space-open-operation");
     beginDesktopMiddlePaneSpaceLandingHold(1800);
     scheduleDesktopSpaceFloatingSelectionHoldReassertions("desktop-space-open");
     renderDesktopHierarchyNativeUiSoon(0);
-    await waitForDesktopHierarchyChatListRendered(240);
-    scheduleDesktopSelectedSpaceLandingScreen(item, pathSnapshot, item.label);
+    ensureDesktopNativeMiddlePaneVisibleBeforeCloseSuppression("desktop-space-open-before-lock");
+    let chatListReadyForSuppression = await waitForDesktopHierarchyChatListRendered(680, { requireNativeMiddlePane: true });
+    if (!chatListReadyForSuppression) {
+      ensureDesktopNativeMiddlePaneVisibleBeforeCloseSuppression("desktop-space-open-before-lock-retry");
+      await nextAnimationFrame();
+      await delay(80);
+      chatListReadyForSuppression = desktopNativeMiddlePaneVisibleForSuppression();
+    }
+    if (chatListReadyForSuppression) {
+      ensureDesktopNativeMiddlePaneVisibleBeforeCloseSuppression("desktop-space-open-lock-ready");
+    }
+    const closeSuppressionToken = chatListReadyForSuppression
+      ? beginDesktopMiddlePaneCloseSuppression("desktop-space-open", 8000)
+      : 0;
+    if (closeSuppressionToken) {
+      reassertDesktopMiddlePaneVisibleForCloseSuppression("desktop-space-open-after-lock");
+      scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("desktop-space-open-chatlist-ready");
+    }
+    scheduleDesktopSelectedSpaceLandingScreen(item, pathSnapshot, item.label, {
+      closeSuppressionToken,
+      spaceSelectionLockToken
+    });
     // Do not auto-refresh the Space/chat structure from a normal Space click.
     // Even when limited to stale/missing caches, refreshOneDesktopSpaceCache()
     // has to visit Element's native hierarchy and can visibly walk through
@@ -3640,7 +3922,19 @@
         () => openDesktopSelectedSpaceLandingScreen(selectedLabel, pathSnapshot, run, options, item),
         { reason: "desktop-space-landing-simple" }
       )
-        .catch(error => console.warn("Smart Element could not show the native Space landing screen.", error));
+        .catch(error => console.warn("Smart Element could not show the native Space landing screen.", error))
+        .finally(() => {
+          releaseDesktopMiddlePaneCloseSuppressionSoon(
+            "desktop-space-landing-simple-complete",
+            1400,
+            options.closeSuppressionToken
+          );
+          releaseDesktopMiddlePaneSpaceSelectionLockSoon(
+            "desktop-space-landing-operation-complete",
+            1600,
+            options.spaceSelectionLockToken
+          );
+        });
     }, Number(options.delayMs || 80));
   }
 
@@ -3904,7 +4198,6 @@
       desktopMiddlePaneTemporaryOpen = true;
       desktopMiddlePaneTemporaryFromSpaceSelection = true;
       syncDesktopPaneModeClasses();
-      scheduleCloseNativeSpaceMenusOpenedBySyntheticClick("desktop-spacebar-chatlist-open");
     } else {
       desktopMiddlePaneTemporaryOpen = false;
       desktopMiddlePaneTemporaryFromSpaceSelection = false;
@@ -4191,8 +4484,84 @@
       if (isPrefix(aPath, bPath)) return -1;
       if (isPrefix(bPath, aPath)) return 1;
 
+      const sharedDepth = firstDifferentPathSegmentIndex(aPath, bPath);
+      if (sharedDepth >= 0) {
+        const listKey = desktopSpaceSiblingListKeyForComparablePath(aPath, sharedDepth);
+        const order = userSortOrders.get(listKey) || [];
+        if (order.length) {
+          const orderIndex = new Map(order.map((id, index) => [id, index]));
+          const aId = desktopSpaceSortableIdForComparablePath(aPath, sharedDepth);
+          const bId = desktopSpaceSortableIdForComparablePath(bPath, sharedDepth);
+          const ai = orderIndex.has(aId) ? orderIndex.get(aId) : Number.MAX_SAFE_INTEGER;
+          const bi = orderIndex.has(bId) ? orderIndex.get(bId) : Number.MAX_SAFE_INTEGER;
+          if (ai !== bi) return ai - bi;
+        }
+      }
+
       return (originalIndex.get(a) ?? 0) - (originalIndex.get(b) ?? 0);
     });
+  }
+
+  function firstDifferentPathSegmentIndex(a, b) {
+    const max = Math.min(Array.isArray(a) ? a.length : 0, Array.isArray(b) ? b.length : 0);
+    for (let index = 0; index < max; index += 1) {
+      if (a[index] !== b[index]) return index;
+    }
+    return -1;
+  }
+
+  function desktopSpaceComparablePath(item) {
+    const path = Array.isArray(item?.path) && item.path.length
+      ? item.path
+      : fallbackSpacePath(item?.label || "");
+    return desktopSpacePathComparableLabels(path);
+  }
+
+  function desktopSpaceSiblingListKeyForComparablePath(labels, depth) {
+    const cleanLabels = (Array.isArray(labels) ? labels : []).map(label => normalizeSpaces(label).toLowerCase()).filter(Boolean);
+    const index = Math.max(0, Number(depth) || 0);
+    if (index <= 0) return spaceCacheKey();
+
+    const parentLabels = cleanLabels.slice(0, index);
+    const parentPath = pathSegmentsFromSpacePath(parentLabels.map(label => ({ label, type: "space" })));
+    const parentLabel = parentLabels[parentLabels.length - 1] || "";
+    return spaceDetailCacheKey(parentPath, parentLabel);
+  }
+
+  function desktopSpaceSortableIdForComparablePath(labels, depth) {
+    const cleanLabels = (Array.isArray(labels) ? labels : []).map(label => normalizeSpaces(label).toLowerCase()).filter(Boolean);
+    const index = Math.max(0, Number(depth) || 0);
+    const label = cleanLabels[index] || "";
+    if (!label) return "";
+    return sortableItemId({ type: index === 0 ? "space" : "subspace", label });
+  }
+
+  function desktopSpaceReorderContext(item) {
+    if (!item || item.type === "start" || !normalizeSpaces(item.label || "")) return null;
+    const labels = desktopSpaceComparablePath(item);
+    if (!labels.length) return null;
+    const depth = Math.max(0, labels.length - 1);
+    const listKey = desktopSpaceSiblingListKeyForComparablePath(labels, depth);
+    const itemId = desktopSpaceSortableIdForComparablePath(labels, depth);
+    if (!listKey || !itemId) return null;
+    return { listKey, itemId };
+  }
+
+  function desktopChatReorderContext(item) {
+    if (!isReorderableListItem(item)) return null;
+    const label = normalizeSpaces(currentSpaceLabel || "");
+    if (!label || /^(startseite|home|direct messages|direktnachrichten)$/i.test(label)) return null;
+    const selected = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(currentSpacePath) || { label, path: currentSpacePathForPanel(label) };
+    const path = Array.isArray(item?.path) && item.path.length
+      ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(item.path).filter(segment => segment.type !== "room"))
+      : Array.isArray(selected.path) && selected.path.length
+        ? pathSegmentsFromSpacePath(logicalPathWithoutRoot(selected.path))
+        : currentSpacePathForPanel(label);
+    const last = lastSelectableSpacePathSegment(path);
+    const listKey = chatsCacheKey(path, last?.label || label);
+    const itemId = sortableItemId(item);
+    if (!listKey || !itemId) return null;
+    return { listKey, itemId };
   }
 
   function desktopCurrentLevelSpaceTree() {
@@ -5948,6 +6317,8 @@
       desktopSpaceFloatingLabelsExpanded = false;
       desktopMiddlePaneHidden = false;
       desktopMiddlePaneTemporaryOpen = false;
+      desktopMiddlePaneTemporaryFromSpaceSelection = false;
+      clearDesktopMiddlePaneCloseSuppression();
     }
 
     restoreNativeSpacePanelCollapsedFallback();
@@ -8287,6 +8658,7 @@
     }
 
     hideEmpty();
+    installPanelListDropZoneHandlers(list, options.listKey);
 
     for (const item of items) {
       const row = document.createElement("button");
@@ -9393,10 +9765,12 @@
   function installListDragHandlers(row, item, listKey) {
     row.addEventListener("dragstart", event => {
       activeDragSort = { listKey, itemId: sortableItemId(item) };
+      beginSmartElementReorderDrag("panel-dragstart");
       row.classList.add("mmlc-list-item-dragging");
       try {
         event.dataTransfer.effectAllowed = "move";
         event.dataTransfer.setData("text/plain", activeDragSort.itemId);
+        event.dataTransfer.setData("application/x-smart-element-reorder", activeDragSort.itemId);
       } catch {}
     });
 
@@ -9404,6 +9778,7 @@
       row.classList.remove("mmlc-list-item-dragging", "mmlc-list-item-drop-before", "mmlc-list-item-drop-after");
       clearDropMarkers();
       activeDragSort = null;
+      endSmartElementReorderDrag("panel-dragend");
     });
 
     row.addEventListener("dragover", event => {
@@ -9428,6 +9803,8 @@
       const insertAfter = dropAfterTarget(row, event);
       updateUserSortOrderFromDrop(listKey, activeDragSort.itemId, targetId, insertAfter);
       clearDropMarkers();
+      activeDragSort = null;
+      endSmartElementReorderDrag("panel-row-drop");
       persistSortSettingsSoon();
       rerenderCurrentPanelFromCache();
     });
@@ -9457,6 +9834,7 @@
           if (!state) return;
           state.active = true;
           activeDragSort = { listKey, itemId };
+          beginSmartElementReorderDrag("panel-pointer-dragstart");
           row.classList.add("mmlc-list-item-dragging");
           row.dataset.mmlcSuppressClick = "1";
           try { row.setPointerCapture(event.pointerId); } catch {}
@@ -9481,7 +9859,7 @@
       event.preventDefault();
       event.stopPropagation();
 
-      const targetRow = document.elementFromPoint(event.clientX, event.clientY)?.closest?.(".mmlc-list-item-draggable[data-mmlc-sort-id]");
+      const targetRow = panelDropTargetFromPoint(event.clientX, event.clientY);
       if (!(targetRow instanceof HTMLElement) || targetRow.dataset.mmlcSortId === state.itemId) {
         clearDropMarkers();
         state.targetId = "";
@@ -9513,6 +9891,7 @@
       event.stopPropagation();
       row.dataset.mmlcSuppressClick = "1";
       activeDragSort = null;
+      endSmartElementReorderDrag("panel-pointer-dragend");
 
       if (targetId && targetId !== draggedId) {
         updateUserSortOrderFromDrop(activeListKey, draggedId, targetId, insertAfter);
@@ -9533,8 +9912,60 @@
 
   function dropAfterTarget(row, event) {
     const rect = row.getBoundingClientRect();
-    const relativeX = ((event.clientX || 0) - rect.left) / Math.max(1, rect.width);
+    const clientX = Number(event?.clientX) || 0;
+    const clientY = Number(event?.clientY) || 0;
+    const relativeY = (clientY - rect.top) / Math.max(1, rect.height);
+    if (relativeY <= 0.35) return false;
+    if (relativeY >= 0.65) return true;
+    const relativeX = (clientX - rect.left) / Math.max(1, rect.width);
     return relativeX >= 0.5;
+  }
+
+  function installPanelListDropZoneHandlers(list, listKey) {
+    if (!(list instanceof HTMLElement) || list.dataset.mmlcDropZoneInstalled === "1") return;
+    list.dataset.mmlcDropZoneInstalled = "1";
+
+    list.addEventListener("dragover", event => {
+      if (!activeDragSort || activeDragSort.listKey !== listKey) return;
+      const targetRow = panelDropTargetFromPoint(event.clientX, event.clientY, list);
+      if (!(targetRow instanceof HTMLElement)) return;
+      const targetId = targetRow.dataset.mmlcSortId || "";
+      if (!targetId || targetId === activeDragSort.itemId) return;
+      event.preventDefault();
+      try { event.dataTransfer.dropEffect = "move"; } catch {}
+      markDropTarget(targetRow, event);
+    });
+
+    list.addEventListener("drop", event => {
+      if (!activeDragSort || activeDragSort.listKey !== listKey) return;
+      const targetRow = panelDropTargetFromPoint(event.clientX, event.clientY, list);
+      if (!(targetRow instanceof HTMLElement)) return;
+      const targetId = targetRow.dataset.mmlcSortId || "";
+      if (!targetId || targetId === activeDragSort.itemId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      updateUserSortOrderFromDrop(listKey, activeDragSort.itemId, targetId, dropAfterTarget(targetRow, event));
+      clearDropMarkers();
+      activeDragSort = null;
+      endSmartElementReorderDrag("panel-list-drop");
+      persistSortSettingsSoon();
+      rerenderCurrentPanelFromCache();
+    });
+
+    list.addEventListener("dragleave", event => {
+      if (list.contains(event.relatedTarget)) return;
+      clearDropMarkers();
+    });
+  }
+
+  function panelDropTargetFromPoint(clientX, clientY, root = null) {
+    const direct = document.elementFromPoint(clientX, clientY)?.closest?.(".mmlc-list-item-draggable[data-mmlc-sort-id]");
+    if (direct instanceof HTMLElement) return direct;
+
+    const list = root instanceof Element ? root : getPanelList();
+    const rows = Array.from(list?.querySelectorAll?.(".mmlc-list-item-draggable[data-mmlc-sort-id]") || [])
+      .filter(row => row instanceof HTMLElement);
+    return nearestDropRow(rows, clientX, clientY);
   }
 
   function clearDropMarkers(except = null) {
@@ -9543,12 +9974,14 @@
     });
   }
 
-  function updateUserSortOrderFromDrop(listKey, draggedId, targetId, insertAfter) {
+  function updateUserSortOrderFromDrop(listKey, draggedId, targetId, insertAfter, visibleOrderOverride = null) {
     if (!listKey || !draggedId || !targetId || draggedId === targetId) return;
 
-    const visibleOrder = Array.from(getPanelList()?.querySelectorAll(".mmlc-list-item-draggable[data-mmlc-sort-id]") || [])
-      .map(row => row.dataset.mmlcSortId)
-      .filter(Boolean);
+    const visibleOrder = Array.isArray(visibleOrderOverride)
+      ? visibleOrderOverride.map(String).filter(Boolean)
+      : Array.from(getPanelList()?.querySelectorAll(".mmlc-list-item-draggable[data-mmlc-sort-id]") || [])
+        .map(row => row.dataset.mmlcSortId)
+        .filter(Boolean);
 
     const previousOrder = userSortOrders.get(listKey) || [];
     const base = visibleOrder.length ? visibleOrder : previousOrder;
@@ -9562,6 +9995,280 @@
     const insertIndex = targetIndex + (insertAfter ? 1 : 0);
     merged.splice(insertIndex, 0, draggedId);
     userSortOrders.set(listKey, merged);
+  }
+
+  function installDesktopOrderDragHandlers(row, options = {}) {
+    if (!(row instanceof HTMLElement)) return;
+    const listKey = String(options.listKey || "");
+    const itemId = String(options.itemId || "");
+    if (!listKey || !itemId) return;
+
+    row.draggable = true;
+    row.dataset.mmlcDesktopListKey = listKey;
+    row.dataset.mmlcDesktopSortId = itemId;
+    row.classList.add("mmlc-desktop-order-draggable");
+
+    row.addEventListener("dragstart", event => {
+      activeDragSort = { listKey, itemId, desktop: true };
+      beginSmartElementReorderDrag("desktop-dragstart");
+      row.classList.add("mmlc-desktop-order-dragging");
+      try {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", itemId);
+        event.dataTransfer.setData("application/x-smart-element-reorder", itemId);
+      } catch {}
+    });
+
+    row.addEventListener("dragend", () => {
+      row.classList.remove("mmlc-desktop-order-dragging", "mmlc-desktop-order-drop-before", "mmlc-desktop-order-drop-after");
+      clearDesktopDropMarkers();
+      activeDragSort = null;
+      endSmartElementReorderDrag("desktop-dragend");
+    });
+
+    row.addEventListener("dragover", event => {
+      if (!activeDragSort?.desktop || activeDragSort.listKey !== listKey) return;
+      const targetId = row.dataset.mmlcDesktopSortId || "";
+      if (!targetId || targetId === activeDragSort.itemId) return;
+      event.preventDefault();
+      try { event.dataTransfer.dropEffect = "move"; } catch {}
+      markDesktopDropTarget(row, event);
+    });
+
+    row.addEventListener("dragleave", () => {
+      row.classList.remove("mmlc-desktop-order-drop-before", "mmlc-desktop-order-drop-after");
+    });
+
+    row.addEventListener("drop", event => {
+      if (!activeDragSort?.desktop || activeDragSort.listKey !== listKey) return;
+      const targetId = row.dataset.mmlcDesktopSortId || "";
+      if (!targetId || targetId === activeDragSort.itemId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      updateUserSortOrderFromDrop(
+        listKey,
+        activeDragSort.itemId,
+        targetId,
+        desktopDropAfterTarget(row, event),
+        desktopVisibleSortOrder(listKey)
+      );
+      clearDesktopDropMarkers();
+      activeDragSort = null;
+      endSmartElementReorderDrag("desktop-row-drop");
+      persistSortSettingsSoon();
+      if (typeof options.rerender === "function") options.rerender();
+    });
+
+    installDesktopPointerOrderDragHandlers(row, { listKey, itemId, rerender: options.rerender });
+  }
+
+  function installDesktopPointerOrderDragHandlers(row, options = {}) {
+    let state = null;
+
+    row.addEventListener("pointerdown", event => {
+      if (event.pointerType === "mouse" || event.button > 0) return;
+      state = {
+        pointerId: event.pointerId,
+        itemId: options.itemId,
+        listKey: options.listKey,
+        startX: event.clientX,
+        startY: event.clientY,
+        active: false,
+        targetId: "",
+        insertAfter: false,
+        timer: setTimeout(() => {
+          if (!state) return;
+          state.active = true;
+          activeDragSort = { listKey: options.listKey, itemId: options.itemId, desktop: true };
+          beginSmartElementReorderDrag("desktop-pointer-dragstart");
+          row.classList.add("mmlc-desktop-order-dragging");
+          row.dataset.mmlcSuppressClick = "1";
+          try { row.setPointerCapture(event.pointerId); } catch {}
+        }, 260)
+      };
+    });
+
+    row.addEventListener("pointermove", event => {
+      if (!state || state.pointerId !== event.pointerId) return;
+
+      const dx = event.clientX - state.startX;
+      const dy = event.clientY - state.startY;
+      if (!state.active && Math.hypot(dx, dy) > 9) {
+        clearTimeout(state.timer);
+        state = null;
+        return;
+      }
+
+      if (!state?.active) return;
+      event.preventDefault();
+      event.stopPropagation();
+
+      const targetRow = desktopDropTargetFromPoint(event.clientX, event.clientY, state.listKey);
+      if (!(targetRow instanceof HTMLElement) || targetRow.dataset.mmlcDesktopListKey !== state.listKey || targetRow.dataset.mmlcDesktopSortId === state.itemId) {
+        clearDesktopDropMarkers();
+        state.targetId = "";
+        return;
+      }
+
+      state.targetId = targetRow.dataset.mmlcDesktopSortId || "";
+      state.insertAfter = desktopDropAfterTarget(targetRow, event);
+      markDesktopDropTarget(targetRow, event);
+    });
+
+    const finish = event => {
+      if (!state || state.pointerId !== event.pointerId) return;
+      clearTimeout(state.timer);
+
+      const wasActive = state.active;
+      const draggedId = state.itemId;
+      const targetId = state.targetId;
+      const listKey = state.listKey;
+      const insertAfter = state.insertAfter;
+
+      state = null;
+      row.classList.remove("mmlc-desktop-order-dragging");
+      clearDesktopDropMarkers();
+      try { row.releasePointerCapture(event.pointerId); } catch {}
+
+      if (!wasActive) return;
+      event.preventDefault();
+      event.stopPropagation();
+      row.dataset.mmlcSuppressClick = "1";
+      activeDragSort = null;
+      endSmartElementReorderDrag("desktop-pointer-dragend");
+
+      if (targetId && targetId !== draggedId) {
+        updateUserSortOrderFromDrop(listKey, draggedId, targetId, insertAfter, desktopVisibleSortOrder(listKey));
+        persistSortSettingsSoon();
+        if (typeof options.rerender === "function") options.rerender();
+      }
+    };
+
+    row.addEventListener("pointerup", finish);
+    row.addEventListener("pointercancel", finish);
+  }
+
+  function installDesktopListDropZoneHandlers(list, rerender) {
+    if (!(list instanceof HTMLElement) || list.dataset.mmlcDesktopDropZoneInstalled === "1") return;
+    list.dataset.mmlcDesktopDropZoneInstalled = "1";
+
+    list.addEventListener("dragover", event => {
+      if (!activeDragSort?.desktop) return;
+      const targetRow = desktopDropTargetFromPoint(event.clientX, event.clientY, activeDragSort.listKey, list);
+      if (!(targetRow instanceof HTMLElement)) return;
+      const targetId = targetRow.dataset.mmlcDesktopSortId || "";
+      if (!targetId || targetId === activeDragSort.itemId) return;
+      event.preventDefault();
+      try { event.dataTransfer.dropEffect = "move"; } catch {}
+      markDesktopDropTarget(targetRow, event);
+    });
+
+    list.addEventListener("drop", event => {
+      if (!activeDragSort?.desktop) return;
+      const targetRow = desktopDropTargetFromPoint(event.clientX, event.clientY, activeDragSort.listKey, list);
+      if (!(targetRow instanceof HTMLElement)) return;
+      const targetId = targetRow.dataset.mmlcDesktopSortId || "";
+      if (!targetId || targetId === activeDragSort.itemId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      updateUserSortOrderFromDrop(
+        activeDragSort.listKey,
+        activeDragSort.itemId,
+        targetId,
+        desktopDropAfterTarget(targetRow, event),
+        desktopVisibleSortOrder(activeDragSort.listKey)
+      );
+      clearDesktopDropMarkers();
+      activeDragSort = null;
+      endSmartElementReorderDrag("desktop-list-drop");
+      persistSortSettingsSoon();
+      if (typeof rerender === "function") rerender();
+    });
+
+    list.addEventListener("dragleave", event => {
+      if (list.contains(event.relatedTarget)) return;
+      clearDesktopDropMarkers();
+    });
+  }
+
+  function desktopDropTargetFromPoint(clientX, clientY, listKey, root = null) {
+    const direct = document.elementFromPoint(clientX, clientY)?.closest?.(".mmlc-desktop-order-draggable[data-mmlc-desktop-sort-id]");
+    if (direct instanceof HTMLElement && (!listKey || direct.dataset.mmlcDesktopListKey === listKey)) return direct;
+
+    const scope = root instanceof Element ? root : document;
+    const rows = Array.from(scope.querySelectorAll(".mmlc-desktop-order-draggable[data-mmlc-desktop-sort-id]"))
+      .filter(row => row instanceof HTMLElement && (!listKey || row.dataset.mmlcDesktopListKey === listKey));
+    return nearestDropRow(rows, clientX, clientY);
+  }
+
+  function desktopVisibleSortOrder(listKey) {
+    return Array.from(document.querySelectorAll(".mmlc-desktop-order-draggable[data-mmlc-desktop-sort-id]"))
+      .filter(row => row instanceof HTMLElement && row.dataset.mmlcDesktopListKey === listKey)
+      .map(row => row.dataset.mmlcDesktopSortId)
+      .filter(Boolean);
+  }
+
+  function markDesktopDropTarget(row, event) {
+    clearDesktopDropMarkers(row);
+    row.classList.toggle("mmlc-desktop-order-drop-after", desktopDropAfterTarget(row, event));
+    row.classList.toggle("mmlc-desktop-order-drop-before", !desktopDropAfterTarget(row, event));
+  }
+
+  function desktopDropAfterTarget(row, event) {
+    const rect = row.getBoundingClientRect();
+    const relativeY = ((event.clientY || 0) - rect.top) / Math.max(1, rect.height);
+    return relativeY >= 0.5;
+  }
+
+  function clearDesktopDropMarkers(except = null) {
+    document.querySelectorAll(".mmlc-desktop-order-drop-before, .mmlc-desktop-order-drop-after").forEach(row => {
+      if (row !== except) row.classList.remove("mmlc-desktop-order-drop-before", "mmlc-desktop-order-drop-after");
+    });
+  }
+
+  function nearestDropRow(rows, clientX, clientY) {
+    const x = Number(clientX) || 0;
+    const y = Number(clientY) || 0;
+    return rows
+      .map(row => {
+        const rect = row.getBoundingClientRect();
+        const clampedX = Math.max(rect.left, Math.min(rect.right, x));
+        const clampedY = Math.max(rect.top, Math.min(rect.bottom, y));
+        const dx = x - clampedX;
+        const dy = y - clampedY;
+        const inflated = Math.min(96, Math.max(rect.width, rect.height) * 0.45 + 24);
+        return {
+          row,
+          distance: Math.hypot(dx, dy),
+          limit: Math.max(44, inflated)
+        };
+      })
+      .filter(entry => entry.distance <= entry.limit)
+      .sort((a, b) => a.distance - b.distance)[0]?.row || null;
+  }
+
+  function beginSmartElementReorderDrag(reason = "reorder-drag") {
+    smartElementReorderDragDepth += 1;
+    if (smartElementReorderDragCleanupTimer) {
+      clearTimeout(smartElementReorderDragCleanupTimer);
+      smartElementReorderDragCleanupTimer = null;
+    }
+    document.documentElement.classList.add("mmlc-reorder-drag-active");
+    document.body?.classList?.add("mmlc-reorder-drag-active");
+    document.documentElement.dataset.mmlcReorderDrag = reason;
+    try { window.__smartElementReorderDragActive = true; } catch {}
+  }
+
+  function endSmartElementReorderDrag(reason = "reorder-drag-end") {
+    smartElementReorderDragDepth = Math.max(0, smartElementReorderDragDepth - 1);
+    if (smartElementReorderDragCleanupTimer) clearTimeout(smartElementReorderDragCleanupTimer);
+    smartElementReorderDragCleanupTimer = setTimeout(() => {
+      smartElementReorderDragDepth = 0;
+      document.documentElement.classList.remove("mmlc-reorder-drag-active");
+      document.body?.classList?.remove("mmlc-reorder-drag-active");
+      delete document.documentElement.dataset.mmlcReorderDrag;
+      try { window.__smartElementReorderDragActive = false; } catch {}
+    }, smartElementReorderDragDepth > 0 ? 80 : 0);
   }
 
   function rerenderCurrentPanelFromCache() {
@@ -12079,7 +12786,16 @@
     for (const delayMs of [120, 280, 520, 880]) {
       window.setTimeout(() => {
         beginDesktopNativeMenuDismissPanePreserve(900);
+        if (desktopMiddlePaneCloseSuppressionActive()) {
+          reassertDesktopMiddlePaneVisibleForCloseSuppression(`${reason}-${delayMs}-before-click`);
+        }
         clickOpenMessageAreaToDismissNativeSpaceMenus(`${reason}-${delayMs}`);
+        if (desktopMiddlePaneCloseSuppressionActive()) {
+          reassertDesktopMiddlePaneVisibleForCloseSuppression(`${reason}-${delayMs}-after-click`);
+          window.setTimeout(() => {
+            reassertDesktopMiddlePaneVisibleForCloseSuppression(`${reason}-${delayMs}-after-layout`);
+          }, 24);
+        }
         reassertDesktopPanesAfterNativeMenuDismiss(`${reason}-${delayMs}`);
       }, delayMs);
     }
@@ -12097,12 +12813,12 @@
     const point = openMessageAreaClickPointForNativeMenuDismissal();
     if (!point) return false;
 
-    let target = document.elementFromPoint(point.x, point.y);
+    let target = point.target instanceof Element ? point.target : document.elementFromPoint(point.x, point.y);
     if (!(target instanceof Element) || target.closest(OWNED_SELECTOR)) {
       target = point.element instanceof Element ? point.element : document.body;
     }
 
-    if (target instanceof Element && target.closest?.("#left-panel, [data-testid='left-panel'], .mx_SpacePanel, [class*='SpacePanel'], #mmlc-desktop-space-list-host, #mmlc-desktop-chat-list-host")) {
+    if (target instanceof Element && isUnsafeNativeMenuDismissalHit(target)) {
       target = point.element instanceof Element ? point.element : document.body;
     }
 
@@ -12180,33 +12896,82 @@
       const bottom = Math.min(rect.bottom, viewportHeight - 32);
       if (right - left < 80 || bottom - top < 80) continue;
 
-      const testPoints = [
-        { x: Math.round(left + (right - left) * 0.72), y: Math.round(top + (bottom - top) * 0.58) },
-        { x: Math.round(left + (right - left) * 0.55), y: Math.round(top + (bottom - top) * 0.68) },
-        { x: Math.round(left + (right - left) * 0.85), y: Math.round(top + (bottom - top) * 0.42) }
-      ];
+      const testPoints = nativeMenuDismissalTestPoints(left, right, top, bottom);
 
       for (const point of testPoints) {
         const hit = document.elementFromPoint(point.x, point.y);
-        if (hit instanceof Element && isUnsafeNativeMenuDismissalHit(hit)) continue;
-        return { ...point, element };
+        if (!(hit instanceof Element) || isUnsafeNativeMenuDismissalHit(hit)) continue;
+        return { ...point, element, target: hit };
       }
     }
 
-    const x = Math.round(Math.max(leftBoundary + 120, viewportWidth * 0.72));
-    const y = Math.round(Math.max(96, viewportHeight * 0.62));
+    const fallbackPoints = nativeMenuDismissalTestPoints(
+      Math.max(leftBoundary + 32, 12),
+      viewportWidth - 24,
+      72,
+      viewportHeight - 32
+    );
+
+    for (const point of fallbackPoints) {
+      const hit = document.elementFromPoint(point.x, point.y);
+      if (!(hit instanceof Element) || isUnsafeNativeMenuDismissalHit(hit)) continue;
+      return { ...point, element: document.body, target: hit };
+    }
+
+    const x = Math.round(Math.max(leftBoundary + 64, viewportWidth * 0.18));
+    const y = Math.round(Math.max(96, viewportHeight * 0.86));
     return {
       x: Math.min(viewportWidth - 24, x),
       y: Math.min(viewportHeight - 32, y),
-      element: document.body
+      element: document.body,
+      target: document.body
     };
+  }
+
+  function nativeMenuDismissalTestPoints(left, right, top, bottom) {
+    const width = Math.max(1, right - left);
+    const height = Math.max(1, bottom - top);
+    const points = [
+      // The lower-left room pane is often the least content-dense area after a
+      // Space landing, so try it before the timeline center/right positions.
+      { x: left + width * 0.12, y: top + height * 0.88 },
+      { x: left + width * 0.18, y: top + height * 0.78 },
+      { x: left + width * 0.08, y: bottom - 18 },
+      { x: right - 18, y: bottom - 18 },
+      { x: right - 22, y: top + height * 0.50 },
+      { x: left + width * 0.72, y: top + height * 0.58 },
+      { x: left + width * 0.55, y: top + height * 0.68 },
+      { x: left + width * 0.85, y: top + height * 0.42 },
+      { x: left + 24, y: top + 24 },
+      { x: right - 24, y: top + 24 },
+      { x: left + width * 0.35, y: bottom - 24 },
+      { x: left + width * 0.50, y: bottom - 24 },
+      { x: left + width * 0.65, y: bottom - 24 }
+    ];
+
+    const seen = new Set();
+    return points
+      .map(point => ({
+        x: Math.round(Math.max(left + 1, Math.min(right - 1, point.x))),
+        y: Math.round(Math.max(top + 1, Math.min(bottom - 1, point.y)))
+      }))
+      .filter(point => {
+        const key = `${point.x}:${point.y}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }
 
   function isUnsafeNativeMenuDismissalHit(hit) {
     if (!(hit instanceof Element)) return false;
     if (hit.closest?.(OWNED_SELECTOR)) return true;
     if (hit.closest?.("#left-panel, [data-testid='left-panel'], .mx_SpacePanel, [class*='SpacePanel'], #mmlc-desktop-space-list-host, #mmlc-desktop-chat-list-host")) return true;
-    if (hit.closest?.("button, a, input, textarea, select, [role='button'], [role='menuitem'], [role='option'], [contenteditable='true']")) return true;
+    if (hit.closest?.("#mg-panel, #mg-lightbox, .mg-lightbox, #mmi-overlay, .mmi-overlay")) return true;
+    if (hit.closest?.("button, a, input, textarea, select, option, label, summary, [role='button'], [role='link'], [role='menuitem'], [role='option'], [tabindex]:not([tabindex='-1']), [contenteditable]:not([contenteditable='false'])")) return true;
+    if (hit.closest?.("img, picture, video, audio, canvas, iframe, object, embed, svg")) return true;
+    if (hit.closest?.("[role='menu'], [role='dialog'], [aria-modal='true'], [data-radix-popper-content-wrapper], [class*='ContextMenu'], [class*='Popover'], [class*='Dialog'], [class*='Modal'], [class*='Tooltip']")) return true;
+    if (hit.closest?.("[data-event-id], .mx_EventTile, [class*='EventTile'], .mx_MImageBody, [class*='ImageBody'], .mx_MediaBody, [class*='MediaBody'], .mx_EventTile_body, [class*='EventTile_body'], .mx_ReactionsRow, [class*='ReactionsRow']")) return true;
     return false;
   }
 

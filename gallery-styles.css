@@ -1543,3 +1543,56 @@ body.mg-global-dragover #mg-dropzone {
 .mx_ThreadView .mg-native-thread-source-hidden {
   display: none !important;
 }
+
+/* Mattermost imports already include the original Mattermost sender in the
+   message body. Hide Element's Matrix sender chrome for those imported events. */
+.mg-mattermost-imported-event .mx_EventTile_avatar,
+.mg-mattermost-imported-event [class*="EventTile_avatar"],
+.mg-mattermost-imported-event .mx_EventTile_sender,
+.mg-mattermost-imported-event [class*="EventTile_sender"],
+.mg-mattermost-imported-event .mx_SenderProfile,
+.mg-mattermost-imported-event [class*="SenderProfile"],
+.mg-mattermost-imported-event [data-testid="message_sender"],
+.mg-mattermost-imported-event [data-testid="sender-name"] {
+  display: none !important;
+}
+
+/* v1.0.117: suppress the browser's broken-image glyph while the lightbox
+   retries authenticated Matrix media through the live Element client. */
+.mg-lightbox img.mg-lightbox-image-error {
+  visibility: hidden !important;
+}
+
+/* v1.0.118: keep the viewer informative while authenticated Matrix media is
+   resolved, without exposing the browser's broken-image glyph. */
+.mg-lightbox-image-wrap {
+  position: relative !important;
+}
+
+.mg-lightbox-image-wrap::after {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  box-sizing: border-box;
+  color: rgba(255, 255, 255, 0.88);
+  font: 500 15px/1.4 system-ui, sans-serif;
+  text-align: center;
+  pointer-events: none;
+}
+
+.mg-lightbox-image-wrap.mg-lightbox-loading::after {
+  content: "Loading image…";
+  display: flex;
+}
+
+.mg-lightbox-image-wrap.mg-lightbox-load-failed::after {
+  content: "Image could not be loaded";
+  display: flex;
+}
+
+.mg-lightbox-image-wrap:not(.mg-lightbox-loading):not(.mg-lightbox-load-failed)::after {
+  display: none;
+}

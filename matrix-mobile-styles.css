@@ -2291,6 +2291,77 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-space-f
   pointer-events: auto !important;
 }
 
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-middle-pane-close-suppressed #mmlc-desktop-chat-list-host {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] {
+  --mmlc-desktop-chat-overlay-right-gap: 16px;
+  --mmlc-desktop-chat-overlay-top-gap: 8px;
+  --mmlc-desktop-chat-overlay-bottom-gap: 14px;
+  --mmlc-desktop-chat-overlay-width: var(--mmlc-desktop-chat-overlay-width-root, min(500px, calc(100vw - var(--mmlc-desktop-chat-overlay-left, var(--mmlc-desktop-middle-edge-x, 48px)) - var(--mmlc-desktop-chat-overlay-right-gap)))) !important;
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  position: relative !important;
+  left: auto !important;
+  top: auto !important;
+  bottom: auto !important;
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  flex: 0 0 48px !important;
+  flex-basis: 48px !important;
+  height: auto !important;
+  max-height: 100% !important;
+  overflow: visible !important;
+  z-index: 2147483504 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed .mx_LeftPanel_panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed .mx_LeftPanel_outerWrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed .mx_LeftPanel_wrapper,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed .mx_LeftPanel_roomListContainer,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed .mx_LeftPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed nav[aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed nav[aria-label="Room list"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  width: var(--mmlc-desktop-chat-overlay-width) !important;
+  min-width: min(320px, var(--mmlc-desktop-chat-overlay-width)) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width) !important;
+  height: auto !important;
+  max-height: calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px)) !important;
+  flex: 0 0 var(--mmlc-desktop-chat-overlay-width) !important;
+  flex-basis: var(--mmlc-desktop-chat-overlay-width) !important;
+  overflow: visible !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed nav[aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed nav[aria-label="Room list"] {
+  position: fixed !important;
+  left: var(--mmlc-desktop-chat-overlay-left, var(--mmlc-desktop-middle-edge-x, 48px)) !important;
+  right: auto !important;
+  top: var(--mmlc-desktop-chat-overlay-top-gap, 8px) !important;
+  bottom: var(--mmlc-desktop-chat-overlay-bottom-gap, 14px) !important;
+  min-height: min(300px, calc(100vh - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px))) !important;
+  border: 2px solid #000 !important;
+  border-radius: 10px !important;
+  box-shadow: 10px 10px 34px rgba(0, 0, 0, 0.34) !important;
+  background: #fff !important;
+  box-sizing: border-box !important;
+  z-index: 2147483505 !important;
+}
+
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action .mx_SpacePanel > ul.mx_SpaceTreeLevel,
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action .mx_SpacePanel > ul[role="tree"] {
   display: block !important;
@@ -2538,6 +2609,45 @@ html.mmlc-desktop-indent-subspaces:not(.mmlc-desktop-space-panel-hidden) .mmlc-d
 .mmlc-desktop-space-button:focus-visible {
   background: color-mix(in srgb, Highlight 16%, transparent);
   outline: none;
+}
+
+.mmlc-desktop-order-draggable {
+  cursor: grab;
+}
+
+.mmlc-desktop-order-draggable:active,
+.mmlc-desktop-order-dragging {
+  cursor: grabbing;
+}
+
+.mmlc-desktop-order-dragging {
+  opacity: 0.55;
+}
+
+.mmlc-desktop-order-drop-before,
+.mmlc-desktop-order-drop-after {
+  outline: 2px solid color-mix(in srgb, Highlight 70%, transparent);
+  outline-offset: 1px;
+}
+
+.mmlc-desktop-order-drop-before::before,
+.mmlc-desktop-order-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 3px;
+  border-radius: 999px;
+  background: Highlight;
+  pointer-events: none;
+}
+
+.mmlc-desktop-order-drop-before::before {
+  top: -4px;
+}
+
+.mmlc-desktop-order-drop-after::after {
+  bottom: -4px;
 }
 
 .mmlc-desktop-space-selected {
@@ -4479,4 +4589,128 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-mi
     pointer-events: none !important;
     overflow: hidden !important;
   }
+}
+
+/* Smart Element 1.0.114: keep the temporarily protected chat-list overlay at
+   full viewport height throughout native Space selection. During Element's
+   rerender/native-action phase, position:fixed can be resolved against a
+   transient containing block whose intrinsic height only covers the populated
+   room-list content. Explicit viewport-derived height prevents the lower half
+   of the floating pane from collapsing until normal auto-hide behavior returns. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] {
+  height: var(--mmlc-desktop-chat-overlay-viewport-height, 100dvh) !important;
+  min-height: var(--mmlc-desktop-chat-overlay-viewport-height, 100dvh) !important;
+  max-height: var(--mmlc-desktop-chat-overlay-viewport-height, 100dvh) !important;
+  align-self: stretch !important;
+  overflow: visible !important;
+  contain: none !important;
+  clip-path: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel :is(.mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel, .mx_LeftPanel_roomListContainer),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] :is(.mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel, .mx_LeftPanel_roomListContainer) {
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  overflow: visible !important;
+  contain: none !important;
+  clip-path: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel :is(.mx_RoomListPanel, nav[aria-label="Chatliste"], nav[aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] :is(.mx_RoomListPanel, nav[aria-label="Chatliste"], nav[aria-label="Room list"]) {
+  position: fixed !important;
+  top: var(--mmlc-desktop-chat-overlay-top-gap, 8px) !important;
+  bottom: auto !important;
+  height: calc(var(--mmlc-desktop-chat-overlay-viewport-height, 100dvh) - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px)) !important;
+  min-height: calc(var(--mmlc-desktop-chat-overlay-viewport-height, 100dvh) - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px)) !important;
+  max-height: calc(var(--mmlc-desktop-chat-overlay-viewport-height, 100dvh) - var(--mmlc-desktop-chat-overlay-top-gap, 8px) - var(--mmlc-desktop-chat-overlay-bottom-gap, 14px)) !important;
+  overflow: hidden auto !important;
+  contain: none !important;
+  clip-path: none !important;
+}
+
+
+
+/* Smart Element 1.0.115: while a collapsed chat-list pane is kept open for a
+   native Space-selection operation, Element temporarily restores its own room
+   list below the extension-rendered list. The full-height panel must remain an
+   opaque white surface, but the native room-list subtree must not be allowed to
+   paint into the otherwise empty lower part of the overlay. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel :is(.mx_RoomListPanel, nav[aria-label="Chatliste"], nav[aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] :is(.mx_RoomListPanel, nav[aria-label="Chatliste"], nav[aria-label="Room list"]) {
+  background: #fff !important;
+  background-color: #fff !important;
+  background-image: none !important;
+  background-clip: padding-box !important;
+  isolation: isolate !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #mmlc-desktop-chat-list-host {
+  position: relative !important;
+  z-index: 3 !important;
+  background: #fff !important;
+  background-color: #fff !important;
+  background-image: none !important;
+}
+
+/* In the current Element DOM the native virtualized room list is the direct
+   sibling following #mmlc-desktop-chat-list-host. Hiding all following siblings
+   is intentionally scoped to the temporary selection lock, so normal Element
+   rendering is restored immediately when the operation finishes. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel .mx_RoomListPanel > #mmlc-desktop-chat-list-host ~ *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel nav[aria-label="Chatliste"] > #mmlc-desktop-chat-list-host ~ *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel nav[aria-label="Room list"] > #mmlc-desktop-chat-list-host ~ *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] .mx_RoomListPanel > #mmlc-desktop-chat-list-host ~ *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] nav[aria-label="Chatliste"] > #mmlc-desktop-chat-list-host ~ *,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] nav[aria-label="Room list"] > #mmlc-desktop-chat-list-host ~ * {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+/* Also cover Element variants that wrap the native virtualized list in a
+   differently ordered direct child. These selectors never match descendants
+   inside the extension host itself. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel .mx_RoomListPanel > :is(div, section):has([data-testid="room-list"]):not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel .mx_RoomListPanel > :is(div, section):has([data-virtuoso-scroller="true"][aria-label="Chatliste"]):not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed #left-panel .mx_RoomListPanel > :is(div, section):has([data-virtuoso-scroller="true"][aria-label="Room list"]):not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] .mx_RoomListPanel > :is(div, section):has([data-testid="room-list"]):not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] .mx_RoomListPanel > :is(div, section):has([data-virtuoso-scroller="true"][aria-label="Chatliste"]):not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open.mmlc-desktop-middle-pane-close-suppressed [data-testid="left-panel"] .mx_RoomListPanel > :is(div, section):has([data-virtuoso-scroller="true"][aria-label="Room list"]):not(#mmlc-desktop-chat-list-host) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
+}
+
+/* Smart Element 1.0.116: keep the search control at the same inset from the
+   floating pane's top border before, during, and after native Space selection.
+   Element's native-action phase supplies this inset through its own layout;
+   the normal extension-rendered phase needs an explicit top margin so releasing
+   the operation lock does not make the search bar jump against the border. */
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) #left-panel :is(.mx_RoomListPanel, nav[aria-label="Chatliste"], nav[aria-label="Room list"]) > [data-testid="room-list-search"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open:not(.mmlc-desktop-native-action) [data-testid="left-panel"] :is(.mx_RoomListPanel, nav[aria-label="Chatliste"], nav[aria-label="Room list"]) > [data-testid="room-list-search"] {
+  margin-top: var(--mmlc-desktop-chat-search-top-gap, 10px) !important;
 }

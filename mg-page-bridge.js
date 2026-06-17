@@ -17,6 +17,8 @@
   const EVENT_ACTION_RESPONSE = "matrix-gallery-sender-event-action-response";
   const OPEN_THREAD_REQUEST = "matrix-gallery-sender-open-thread-request";
   const OPEN_THREAD_RESPONSE = "matrix-gallery-sender-open-thread-response";
+  const GALLERY_CONTENT_KEY = "de.tkluge.gallery";
+  const MATTERMOST_CONTENT_KEY = "de.tkluge.mattermost_import";
 
   let lastSession = null;
   let installed = false;
@@ -1092,47 +1094,28 @@
     const room = getRoomByIdOrAlias(client, roomIdOrAlias);
     if (!room) return [];
 
-    const events = [];
-
-    try {
-      const liveTimeline = room.getLiveTimeline?.();
-      if (liveTimeline?.getEvents) {
-        events.push(...liveTimeline.getEvents());
-      }
-    } catch {}
-
-    try {
-      if (Array.isArray(room.timeline)) {
-        events.push(...room.timeline);
-      }
-    } catch {}
-
-    try {
-      const timelines = room.getLiveTimelineSet?.().getTimelines?.() || [];
-      for (const timeline of timelines) {
-        if (timeline?.getEvents) {
-          events.push(...timeline.getEvents());
-        }
-      }
-    } catch {}
-
     const seen = new Set();
     const result = [];
 
-    for (const event of events) {
+    for (const event of collectRoomEventObjects(room)) {
       try {
-        const eventId = event.getId?.() || event.event?.event_id;
+        const eventId = event.getId?.() || event.event?.event_id || event.event_id || "";
         if (!eventId || seen.has(eventId)) continue;
         seen.add(eventId);
 
-        const content = event.getContent?.() || event.event?.content || {};
-        const gallery = content["de.tkluge.gallery"];
+        const rawContent = event.getContent?.() || event.event?.content || {};
+        const content = event.getEffectiveContent?.() || rawContent["m.new_content"] || rawContent;
+        const gallery = content[GALLERY_CONTENT_KEY] || rawContent[GALLERY_CONTENT_KEY] || null;
+        const mattermostImport = summarizeMattermostImport(
+          content[MATTERMOST_CONTENT_KEY] || rawContent[MATTERMOST_CONTENT_KEY]
+        );
 
-        if (!gallery || !gallery.id) continue;
+        if ((!gallery || !gallery.id) && !mattermostImport) continue;
 
         result.push({
           eventId,
-          gallery
+          gallery,
+          mattermostImport
         });
       } catch {}
     }
@@ -1289,7 +1272,7 @@
     const msgtype = content?.msgtype || "";
     const info = content?.info || {};
     const file = content?.file || {};
-    const gallery = content?.["de.tkluge.gallery"] || {};
+    const gallery = content?.[GALLERY_CONTENT_KEY] || {};
     const isImage = msgtype === "m.image" || String(info.mimetype || file.mimetype || "").toLowerCase().startsWith("image/");
 
     if (!isImage) return null;
@@ -1311,6 +1294,34 @@
       height: Number(info.h || info.height || 0) || 0,
       galleryId: gallery.id || "",
       caption: gallery.caption || ""
+    };
+  }
+
+  function summarizeMattermostImport(meta) {
+    if (!meta || typeof meta !== "object") return null;
+
+    const senderName = normalizeBridgeSpaces(meta.sender_name || meta.senderName || "");
+    const postId = String(meta.post_id || meta.postId || "").trim();
+    const createAt = Number(meta.create_at ?? meta.createAt ?? 0) || 0;
+
+    if (!senderName && !postId && !createAt) return null;
+
+    return {
+      version: Number(meta.version || 0) || 0,
+      source: String(meta.source || "").trim(),
+      channelId: String(meta.channel_id || meta.channelId || "").trim(),
+      channelName: String(meta.channel_name || meta.channelName || "").trim(),
+      channelType: String(meta.channel_type || meta.channelType || "").trim(),
+      postId,
+      rootId: String(meta.root_id || meta.rootId || "").trim(),
+      parentId: String(meta.parent_id || meta.parentId || "").trim(),
+      userId: String(meta.user_id || meta.userId || "").trim(),
+      senderName,
+      createAt,
+      fileId: String(meta.file_id || meta.fileId || "").trim(),
+      fileName: String(meta.file_name || meta.fileName || "").trim(),
+      mimeType: String(meta.mime_type || meta.mimeType || "").trim(),
+      galleryId: String(meta.gallery_id || meta.galleryId || "").trim()
     };
   }
 
@@ -1343,6 +1354,9 @@
 
       const content = event.getEffectiveContent?.() || rawContent["m.new_content"] || rawContent;
       const relatesTo = content["m.relates_to"] || rawRelatesTo || {};
+      const mattermostImport = summarizeMattermostImport(
+        content[MATTERMOST_CONTENT_KEY] || rawContent[MATTERMOST_CONTENT_KEY]
+      );
       const relationType = relatesTo.rel_type || relation.rel_type || "";
       const isThreadRelation = relationType === "m.thread";
       const thread = event.getThread?.() || event.thread || null;
@@ -1393,8 +1407,8 @@
       return {
         eventId,
         sender,
-        senderName: displayNameForSender(sender, event, room, client),
-        avatarUrl: avatarUrlForSender(sender, event, room, client),
+        senderName: mattermostImport?.senderName || displayNameForSender(sender, event, room, client),
+        avatarUrl: mattermostImport ? "" : avatarUrlForSender(sender, event, room, client),
         ts: event.getTs?.() || event.event?.origin_server_ts || event.origin_server_ts || 0,
         msgtype: content.msgtype || "",
         format: content.format || "",
@@ -1409,7 +1423,8 @@
         isMatrixReply,
         matrixReplyToEventId,
         replyToEventId,
-        gallery: content["de.tkluge.gallery"] || null,
+        gallery: content[GALLERY_CONTENT_KEY] || null,
+        mattermostImport,
         media: redacted ? null : summarizeEventMedia(content)
       };
     } catch {
