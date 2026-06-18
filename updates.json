@@ -1,0 +1,17 @@
+{
+  "addons": {
+    "smart-element@t-kluge.de": {
+      "updates": [
+        {
+          "version": "1.0.121",
+          "update_link": "https://github.com/HighIander/smart-element-extension/releases/download/v1.0.121/smart-element-extension-1.0.121-firefox.xpi",
+          "applications": {
+            "gecko": {
+              "strict_min_version": "142.0"
+            }
+          }
+        }
+      ]
+    }
+  }
+}
