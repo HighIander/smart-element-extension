@@ -4433,69 +4433,9 @@
     reassertDesktopSpaceFloatingSelectionHold("desktop-space-landing-simple-final");
     scheduleDesktopMiddlePaneSpaceLandingReassertions(run, "desktop-space-landing-simple-final-reassert");
     scheduleDesktopSpaceFloatingSelectionHoldReassertions("desktop-space-landing-simple-final-reassert");
-    updateSelectedDesktopSpaceCacheFromVisibleOverview(selectedLabel, targetPath, {
-      reason: "desktop-space-landing-visible-overview"
-    });
-    scheduleSelectedDesktopSpaceOverviewCacheUpdates(selectedLabel, targetPath, run, "desktop-space-landing-visible-overview");
     dispatchDesktopRoomContentWillShow("desktop-space-landing-simple", { label: selectedLabel });
     dispatchDesktopRoomContentRefresh("desktop-space-landing-simple", { label: selectedLabel });
     return Boolean(findSpaceOverviewPane()) || true;
-  }
-
-  function scheduleSelectedDesktopSpaceOverviewCacheUpdates(label, path, run, reason = "desktop-space-overview-cache-update") {
-    const selectedLabel = normalizeSpaces(label || "");
-    if (!selectedLabel) return;
-    const pathSnapshot = cloneSpacePathSegments(path && path.length ? path : fallbackSpacePath(selectedLabel));
-
-    for (const delayMs of [180, 720, 1600]) {
-      window.setTimeout(() => {
-        if (run !== desktopSelectedSpaceLandingRun) return;
-        updateSelectedDesktopSpaceCacheFromVisibleOverview(selectedLabel, pathSnapshot, {
-          reason: `${reason}-${delayMs}`
-        });
-      }, delayMs);
-    }
-  }
-
-  function updateSelectedDesktopSpaceCacheFromVisibleOverview(label, path, options = {}) {
-    const selectedLabel = normalizeSpaces(label || "");
-    if (!selectedLabel || !isDesktopHierarchyNativeModeUsable()) return false;
-
-    const currentSelected = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(desktopSelectedSpacePath);
-    const currentLabel = normalizeSpaces(currentSelected?.label || currentSpaceLabel || "").toLowerCase();
-    if (currentLabel && currentLabel !== selectedLabel.toLowerCase()) return false;
-
-    const pane = findSpaceOverviewPane();
-    if (!(pane instanceof Element) || !spaceOverviewTitleMatchesLabel(selectedLabel)) return false;
-
-    const pathSnapshot = cloneSpacePathSegments(path && path.length ? path : fallbackSpacePath(selectedLabel));
-    prefetchHierarchyCacheFromOverview(pane, { authoritative: true });
-
-    const subspaces = collectSubspaces().map(child => ({
-      ...child,
-      path: Array.isArray(child.path) && child.path.length
-        ? child.path
-        : dedupePathSegments([...pathSnapshot, { label: child.label, type: "space", avatarSrc: child.avatarSrc || "", icon: child.icon || "" }])
-    }));
-    const chats = collectSpaceOverviewDirectChats().map(chat => ({
-      ...chat,
-      path: Array.isArray(chat.path) && chat.path.length
-        ? chat.path
-        : dedupePathSegments([...pathSnapshot, { label: chat.label, type: "room", avatarSrc: chat.avatarSrc || "", icon: chat.icon || "" }])
-    }));
-
-    const subspacesChanged = replaceCacheListItemsFromAuthoritativeOverview(spaceDetailCacheKey(pathSnapshot, selectedLabel), subspaces);
-    const chatsChanged = replaceCacheListItemsFromAuthoritativeOverview(chatsCacheKey(pathSnapshot, selectedLabel), chats);
-    const unreadChanged = refreshDesktopAllUnreadBadgesNow(options.reason || "desktop-space-overview-cache-update");
-    updateDesktopChatListUnreadPollingState();
-
-    if (subspacesChanged || chatsChanged || unreadChanged) {
-      renderDesktopHierarchyNativeUiSoon(0);
-      flushPersistentState();
-      return true;
-    }
-
-    return false;
   }
 
   function scheduleDesktopSelectedSpaceCacheRefreshIfNeeded(item, path, label, options = {}) {
@@ -11178,45 +11118,6 @@
     updateHierarchyBar();
   }
 
-  function replaceCacheListItemsFromAuthoritativeOverview(key, items) {
-    if (!key) return false;
-
-    const incoming = Array.isArray(items) ? items.filter(item => item && normalizeSpaces(item.label)) : [];
-    const existing = hierarchyListCache.get(key) || [];
-    const merged = incoming.length
-      ? mergeCachedItemsForStorage(incoming, existing, { preserveMissing: false })
-      : [];
-    const previousSignature = cacheItemListSignature(existing);
-    const nextSignature = cacheItemListSignature(merged);
-
-    if (previousSignature === nextSignature) return false;
-
-    hierarchyListCache.set(key, merged);
-    hierarchyCacheSavedAt = Date.now();
-    cacheAvatarImagesForItems(merged);
-    updateUnreadCachesFromList(key, merged);
-    persistHierarchyCacheSoon();
-    persistUnreadCacheSoon();
-    updateHierarchyBar();
-    return true;
-  }
-
-  function cacheItemListSignature(items) {
-    return (Array.isArray(items) ? items : [])
-      .map(item => [
-        String(item?.type || ""),
-        normalizeSpaces(item?.label || "").toLowerCase(),
-        roomRouteKey(item?.href || ""),
-        normalizeAvatarSource(item?.avatarSrc || ""),
-        normalizeSpaces(item?.icon || ""),
-        item?.joined === false ? "not-joined" : "joined",
-        item?.suggested ? "suggested" : "",
-        spacePathSignature(item?.path || []),
-        unreadStateSignature(item?.unread)
-      ].join("|"))
-      .join("\n");
-  }
-
   function shouldPreserveMissingCachedItems(key, incoming, existing) {
     if (!key || !Array.isArray(existing) || !existing.length) return false;
     if (!Array.isArray(incoming) || !incoming.length) return false;
@@ -12027,7 +11928,7 @@
     } catch {}
   }
 
-  function prefetchHierarchyCacheFromOverview(pane, options = {}) {
+  function prefetchHierarchyCacheFromOverview(pane) {
     if (!(pane instanceof Element)) return;
 
     const rows = collectSpaceOverviewRows(pane)
@@ -12061,13 +11962,8 @@
       const chats = dedupeItemsByLabel(group.chats)
         .sort((a, b) => Number(a.joined === false) - Number(b.joined === false) || a.top - b.top);
 
-      if (options.authoritative === true) {
-        replaceCacheListItemsFromAuthoritativeOverview(`space-detail:${key}`, spaces);
-        replaceCacheListItemsFromAuthoritativeOverview(`chats:${key}`, chats);
-      } else {
-        cacheListItems(`space-detail:${key}`, spaces);
-        cacheListItems(`chats:${key}`, chats);
-      }
+      cacheListItems(`space-detail:${key}`, spaces);
+      cacheListItems(`chats:${key}`, chats);
     }
   }
 
