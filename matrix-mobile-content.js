@@ -1222,7 +1222,9 @@
   async function withDesktopHierarchyNativeAction(callback, options = {}) {
     const html = document.documentElement;
     const shouldRestoreCollapsed = options.restoreCollapsed === true && !isDesktopHierarchyNativeModeUsable();
+    const stableSelectionPanes = options.stableSelectionPanes === true;
     html.classList.add("mmlc-desktop-native-action");
+    if (stableSelectionPanes) html.classList.add("mmlc-desktop-stable-space-selection-action");
     try {
       await nextAnimationFrame();
       return await callback();
@@ -1230,6 +1232,7 @@
       if (shouldRestoreCollapsed) {
         await collapseNativeSpacePanelBeforeDirectChatOpen(options.reason || "desktop-hierarchy-native-action");
       }
+      if (stableSelectionPanes) html.classList.remove("mmlc-desktop-stable-space-selection-action");
       html.classList.remove("mmlc-desktop-native-action");
       renderDesktopHierarchyNativeUiSoon(0);
     }
@@ -1928,9 +1931,11 @@
     if (!(related instanceof Node)) return false;
     const host = document.getElementById("mmlc-desktop-space-list-host");
     const popover = document.getElementById("mmlc-desktop-space-settings-popover");
+    const createMenu = document.getElementById("mmlc-desktop-create-menu");
     return Boolean(
       host instanceof HTMLElement && host.contains(related) ||
-      popover instanceof HTMLElement && popover.contains(related)
+      popover instanceof HTMLElement && popover.contains(related) ||
+      createMenu instanceof HTMLElement && createMenu.contains(related)
     );
   }
 
@@ -1972,7 +1977,8 @@
     if (desktopNativeMenuDismissShouldPreserveSpacePane()) return;
     const host = document.getElementById("mmlc-desktop-space-list-host");
     const popover = document.getElementById("mmlc-desktop-space-settings-popover");
-    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [host, popover], 14)) return;
+    const createMenu = document.getElementById("mmlc-desktop-create-menu");
+    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [host, popover, createMenu], 14)) return;
     clearDesktopSpaceFloatingSelectionHold();
     closeDesktopSpaceFloatingPane("pointer-move-horizontal");
   }
@@ -1988,7 +1994,8 @@
     // request only when the pointer has actually crossed the left or right edge.
     const host = document.getElementById("mmlc-desktop-space-list-host");
     const popover = document.getElementById("mmlc-desktop-space-settings-popover");
-    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [host, popover], 14)) return;
+    const createMenu = document.getElementById("mmlc-desktop-create-menu");
+    if (!eventMovedHorizontallyOutsideFloatingBounds(event, [host, popover, createMenu], 14)) return;
     closeDesktopSpaceFloatingPane("mouse-leave-horizontal");
   }
 
@@ -1997,7 +2004,7 @@
     if (event?.isTrusted === false) return;
     if (desktopNativeMenuDismissShouldPreserveSpacePane()) return;
     const target = event.target;
-    if (target instanceof Element && target.closest("#mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover")) return;
+    if (target instanceof Element && target.closest("#mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover, #mmlc-desktop-create-menu")) return;
     clearDesktopSpaceFloatingSelectionHold();
     closeDesktopSpaceFloatingPane("outside-pointer");
   }
@@ -2193,7 +2200,8 @@
       document.getElementById("mmlc-desktop-chat-list-host"),
       document.getElementById("mmlc-desktop-middle-restore"),
       document.getElementById("mmlc-desktop-space-list-host"),
-      document.getElementById("mmlc-desktop-space-settings-popover")
+      document.getElementById("mmlc-desktop-space-settings-popover"),
+      document.getElementById("mmlc-desktop-create-menu")
     ].some(element => element instanceof HTMLElement && element.contains(related));
   }
 
@@ -2208,7 +2216,8 @@
     const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
     const host = document.getElementById("mmlc-desktop-chat-list-host");
     const restore = document.getElementById("mmlc-desktop-middle-restore");
-    if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
+    const createMenu = document.getElementById("mmlc-desktop-create-menu");
+    if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore, createMenu], 14)) return;
     closeDesktopMiddleFloatingPane("pointer-move-right");
   }
 
@@ -2222,7 +2231,8 @@
       const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
       const host = document.getElementById("mmlc-desktop-chat-list-host");
       const restore = document.getElementById("mmlc-desktop-middle-restore");
-      if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
+      const createMenu = document.getElementById("mmlc-desktop-create-menu");
+      if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore, createMenu], 14)) return;
       const delayMs = Math.max(80, Math.min(10000, desktopMiddlePaneSpaceLandingHoldUntil - Date.now() + 80));
       window.setTimeout(() => {
         if (!desktopMiddleFloatingPaneIsOpen()) return;
@@ -2235,7 +2245,8 @@
     const leftPanel = document.querySelector("#left-panel, [data-testid='left-panel']");
     const host = document.getElementById("mmlc-desktop-chat-list-host");
     const restore = document.getElementById("mmlc-desktop-middle-restore");
-    if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore], 14)) return;
+    const createMenu = document.getElementById("mmlc-desktop-create-menu");
+    if (!eventMovedRightOutsideFloatingBounds(event, [leftPanel, host, restore, createMenu], 14)) return;
     closeDesktopMiddleFloatingPane("mouse-leave-right");
   }
 
@@ -2246,7 +2257,7 @@
     if (desktopMiddlePaneCloseSuppressionActive()) return;
     if (desktopMiddlePaneShouldHoldOpenForSpaceLanding()) return;
     const target = event.target;
-    if (target instanceof Element && target.closest("#left-panel, [data-testid='left-panel'], #mmlc-desktop-chat-list-host, #mmlc-desktop-middle-restore, #mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover")) return;
+    if (target instanceof Element && target.closest("#left-panel, [data-testid='left-panel'], #mmlc-desktop-chat-list-host, #mmlc-desktop-middle-restore, #mmlc-desktop-space-list-host, #mmlc-desktop-space-settings-popover, #mmlc-desktop-create-menu")) return;
     closeDesktopMiddleFloatingPane("outside-pointer");
   }
 
@@ -2427,6 +2438,7 @@
       "mmlc-desktop-indent-subspaces",
       "mmlc-desktop-space-labels-expanded",
       "mmlc-desktop-native-action",
+      "mmlc-desktop-stable-space-selection-action",
       "mmlc-desktop-space-panel-expanded",
       "mmlc-desktop-space-panel-hidden",
       "mmlc-desktop-space-panel-floating-open",
@@ -4137,11 +4149,10 @@
       closeSuppressionToken,
       spaceSelectionLockToken
     });
-    // Do not auto-refresh the Space/chat structure from a normal Space click.
-    // Even when limited to stale/missing caches, refreshOneDesktopSpaceCache()
-    // has to visit Element's native hierarchy and can visibly walk through
-    // subspaces in the right pane. Structure refresh is now manual-only here;
-    // the already cached middle list stays in control.
+    // Do not run the heavy native hierarchy refresh from a normal Space click.
+    // Once Element shows the selected Space's info page, the landing path reads
+    // that already-visible overview to refresh cache rows, icons and unread
+    // state without walking through sibling spaces.
   }
 
 
@@ -4165,7 +4176,7 @@
       desktopSelectedSpaceLandingTimer = null;
       withDesktopHierarchyNativeAction(
         () => openDesktopSelectedSpaceLandingScreen(selectedLabel, pathSnapshot, run, options, item),
-        { reason: "desktop-space-landing-simple" }
+        { reason: "desktop-space-landing-simple", stableSelectionPanes: true }
       )
         .catch(error => console.warn("Smart Element could not show the native Space landing screen.", error))
         .finally(() => {
@@ -4344,9 +4355,69 @@
     reassertDesktopSpaceFloatingSelectionHold("desktop-space-landing-simple-final");
     scheduleDesktopMiddlePaneSpaceLandingReassertions(run, "desktop-space-landing-simple-final-reassert");
     scheduleDesktopSpaceFloatingSelectionHoldReassertions("desktop-space-landing-simple-final-reassert");
+    updateSelectedDesktopSpaceCacheFromVisibleOverview(selectedLabel, targetPath, {
+      reason: "desktop-space-landing-visible-overview"
+    });
+    scheduleSelectedDesktopSpaceOverviewCacheUpdates(selectedLabel, targetPath, run, "desktop-space-landing-visible-overview");
     dispatchDesktopRoomContentWillShow("desktop-space-landing-simple", { label: selectedLabel });
     dispatchDesktopRoomContentRefresh("desktop-space-landing-simple", { label: selectedLabel });
     return Boolean(findSpaceOverviewPane()) || true;
+  }
+
+  function scheduleSelectedDesktopSpaceOverviewCacheUpdates(label, path, run, reason = "desktop-space-overview-cache-update") {
+    const selectedLabel = normalizeSpaces(label || "");
+    if (!selectedLabel) return;
+    const pathSnapshot = cloneSpacePathSegments(path && path.length ? path : fallbackSpacePath(selectedLabel));
+
+    for (const delayMs of [180, 720, 1600]) {
+      window.setTimeout(() => {
+        if (run !== desktopSelectedSpaceLandingRun) return;
+        updateSelectedDesktopSpaceCacheFromVisibleOverview(selectedLabel, pathSnapshot, {
+          reason: `${reason}-${delayMs}`
+        });
+      }, delayMs);
+    }
+  }
+
+  function updateSelectedDesktopSpaceCacheFromVisibleOverview(label, path, options = {}) {
+    const selectedLabel = normalizeSpaces(label || "");
+    if (!selectedLabel || !isDesktopHierarchyNativeModeUsable()) return false;
+
+    const currentSelected = desktopSelectedSpaceNode() || lastSelectableSpacePathSegment(desktopSelectedSpacePath);
+    const currentLabel = normalizeSpaces(currentSelected?.label || currentSpaceLabel || "").toLowerCase();
+    if (currentLabel && currentLabel !== selectedLabel.toLowerCase()) return false;
+
+    const pane = findSpaceOverviewPane();
+    if (!(pane instanceof Element) || !spaceOverviewTitleMatchesLabel(selectedLabel)) return false;
+
+    const pathSnapshot = cloneSpacePathSegments(path && path.length ? path : fallbackSpacePath(selectedLabel));
+    prefetchHierarchyCacheFromOverview(pane, { authoritative: true });
+
+    const subspaces = collectSubspaces().map(child => ({
+      ...child,
+      path: Array.isArray(child.path) && child.path.length
+        ? child.path
+        : dedupePathSegments([...pathSnapshot, { label: child.label, type: "space", avatarSrc: child.avatarSrc || "", icon: child.icon || "" }])
+    }));
+    const chats = collectSpaceOverviewDirectChats().map(chat => ({
+      ...chat,
+      path: Array.isArray(chat.path) && chat.path.length
+        ? chat.path
+        : dedupePathSegments([...pathSnapshot, { label: chat.label, type: "room", avatarSrc: chat.avatarSrc || "", icon: chat.icon || "" }])
+    }));
+
+    const subspacesChanged = replaceCacheListItemsFromAuthoritativeOverview(spaceDetailCacheKey(pathSnapshot, selectedLabel), subspaces);
+    const chatsChanged = replaceCacheListItemsFromAuthoritativeOverview(chatsCacheKey(pathSnapshot, selectedLabel), chats);
+    const unreadChanged = refreshDesktopAllUnreadBadgesNow(options.reason || "desktop-space-overview-cache-update");
+    updateDesktopChatListUnreadPollingState();
+
+    if (subspacesChanged || chatsChanged || unreadChanged) {
+      renderDesktopHierarchyNativeUiSoon(0);
+      flushPersistentState();
+      return true;
+    }
+
+    return false;
   }
 
   function scheduleDesktopSelectedSpaceCacheRefreshIfNeeded(item, path, label, options = {}) {
@@ -11029,6 +11100,45 @@
     updateHierarchyBar();
   }
 
+  function replaceCacheListItemsFromAuthoritativeOverview(key, items) {
+    if (!key) return false;
+
+    const incoming = Array.isArray(items) ? items.filter(item => item && normalizeSpaces(item.label)) : [];
+    const existing = hierarchyListCache.get(key) || [];
+    const merged = incoming.length
+      ? mergeCachedItemsForStorage(incoming, existing, { preserveMissing: false })
+      : [];
+    const previousSignature = cacheItemListSignature(existing);
+    const nextSignature = cacheItemListSignature(merged);
+
+    if (previousSignature === nextSignature) return false;
+
+    hierarchyListCache.set(key, merged);
+    hierarchyCacheSavedAt = Date.now();
+    cacheAvatarImagesForItems(merged);
+    updateUnreadCachesFromList(key, merged);
+    persistHierarchyCacheSoon();
+    persistUnreadCacheSoon();
+    updateHierarchyBar();
+    return true;
+  }
+
+  function cacheItemListSignature(items) {
+    return (Array.isArray(items) ? items : [])
+      .map(item => [
+        String(item?.type || ""),
+        normalizeSpaces(item?.label || "").toLowerCase(),
+        roomRouteKey(item?.href || ""),
+        normalizeAvatarSource(item?.avatarSrc || ""),
+        normalizeSpaces(item?.icon || ""),
+        item?.joined === false ? "not-joined" : "joined",
+        item?.suggested ? "suggested" : "",
+        spacePathSignature(item?.path || []),
+        unreadStateSignature(item?.unread)
+      ].join("|"))
+      .join("\n");
+  }
+
   function shouldPreserveMissingCachedItems(key, incoming, existing) {
     if (!key || !Array.isArray(existing) || !existing.length) return false;
     if (!Array.isArray(incoming) || !incoming.length) return false;
@@ -11839,7 +11949,7 @@
     } catch {}
   }
 
-  function prefetchHierarchyCacheFromOverview(pane) {
+  function prefetchHierarchyCacheFromOverview(pane, options = {}) {
     if (!(pane instanceof Element)) return;
 
     const rows = collectSpaceOverviewRows(pane)
@@ -11868,10 +11978,18 @@
     }
 
     for (const [key, group] of groups) {
-      cacheListItems(`space-detail:${key}`, dedupeItemsByLabel(group.spaces)
-        .sort((a, b) => Number(a.joined === false) - Number(b.joined === false) || a.top - b.top));
-      cacheListItems(`chats:${key}`, dedupeItemsByLabel(group.chats)
-        .sort((a, b) => Number(a.joined === false) - Number(b.joined === false) || a.top - b.top));
+      const spaces = dedupeItemsByLabel(group.spaces)
+        .sort((a, b) => Number(a.joined === false) - Number(b.joined === false) || a.top - b.top);
+      const chats = dedupeItemsByLabel(group.chats)
+        .sort((a, b) => Number(a.joined === false) - Number(b.joined === false) || a.top - b.top);
+
+      if (options.authoritative === true) {
+        replaceCacheListItemsFromAuthoritativeOverview(`space-detail:${key}`, spaces);
+        replaceCacheListItemsFromAuthoritativeOverview(`chats:${key}`, chats);
+      } else {
+        cacheListItems(`space-detail:${key}`, spaces);
+        cacheListItems(`chats:${key}`, chats);
+      }
     }
   }
 
@@ -11971,6 +12089,7 @@
     const label = labels[kind] || "item";
 
     renderPanelStatus(`Opening new ${label} dialog...`);
+    beginDesktopNativeMenuDismissPanePreserve(2400);
 
     if (kind === "subspace") {
       await ensureCurrentSpaceOverview();
@@ -16054,6 +16173,7 @@
     if (!rows.length) return [];
 
     if (!rows.some(row => row.type === "space")) {
+      if (rows.some(row => row.source === "explicit-space-hierarchy")) return [];
       const descendantSpaces = collectDescendantSpaceOverviewSpacesForCurrentSpace(pane);
       if (descendantSpaces.length) rows = descendantSpaces;
     }

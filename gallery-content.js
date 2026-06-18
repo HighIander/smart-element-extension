@@ -11,6 +11,7 @@
   const STORAGE_DESKTOP_HIERARCHY_MODE_KEY = "mmlc_desktop_hierarchy_mode_v1";
   const BUTTON_POSITION_KEY = "mg_button_position";
   const GALLERY_CONTENT_KEY = "de.tkluge.gallery";
+  const PARTY_PARROT_CONTENT_KEY = "de.tkluge.partyparrot";
   const GALLERY_HISTORY_KEY = "matrix_gallery_sender_gallery_history";
   const PAGE_BRIDGE_SOURCE = "matrix-gallery-sender-page-bridge";
   const PAGE_BRIDGE_REQUEST = "matrix-gallery-sender-session-request";
@@ -29,6 +30,9 @@
   const PAGE_BRIDGE_OPEN_THREAD_REQUEST = "matrix-gallery-sender-open-thread-request";
   const PAGE_BRIDGE_OPEN_THREAD_RESPONSE = "matrix-gallery-sender-open-thread-response";
   const THREAD_HEADING_WORD_LIMIT = 8;
+  const PARTY_PARROT_ASSET_DIR = "assets/partyparrot/";
+  const PARTY_PARROT_ASSET_EXTENSIONS = ["gif", "png", "webp", "jpg", "jpeg", "svg"];
+  const PARTY_PARROT_FALLBACK_ALIASES = new Set(["partyparrot", "party_parrot", "party-parrot", "parrot", "parrot_party"]);
   const UI_DEFAULT_LANGUAGE = "de";
   const UI_TEXT = {
     de: {
@@ -246,6 +250,7 @@
     "#mg-thread-side-panel",
     ".mg-lightbox",
     ".mg-inline-gallery",
+    ".mg-partyparrot-strip",
     ".mg-thread-inline-reply",
     ".mg-thread-merged",
     "#mg-thread-target"
@@ -326,6 +331,10 @@
   const clipboardContentHashes = new Map();
   const galleryEventMetadataByEventId = new Map();
   const mattermostImportMetadataByEventId = new Map();
+  const partyParrotMetadataByEventId = new Map();
+  const partyParrotMediaByEventId = new Map();
+  const partyParrotAssetCache = new Map();
+  const partyParrotUploadCache = new Map();
   const galleryScopeIds = new WeakMap();
   let nextGalleryScopeId = 1;
   let mergedThreadViewEnabled = false;
@@ -3132,10 +3141,20 @@
         room = await resolveRoomAlias(homeserver, token, room);
       }
 
-      if (text) {
-        const textResult = await sendTextMessage(homeserver, token, room, text, galleryId, galleryCount, threadTarget);
+      const partyParrotPlan = await preparePartyParrotText(text);
+
+      if (partyParrotPlan.text) {
+        const textResult = await sendTextMessage(homeserver, token, room, partyParrotPlan.text, galleryId, galleryCount, threadTarget);
         updateThreadReplyTargetFromSendResult(threadTarget, textResult);
       }
+
+      await sendPartyParrotImagesViaApi(
+        homeserver,
+        token,
+        room,
+        partyParrotPlan.imageItems,
+        threadTarget ? { ...threadTarget } : null
+      );
 
       const sentUrls = [];
       const fileNames = selectedFiles.map(file => file.name);
@@ -3274,6 +3293,243 @@
     const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
 
     return `<span data-mg-gallery="${escapeHtml(encoded)}" style="display:none"></span>`;
+  }
+
+  function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function safePartyParrotAssetName(value) {
+    return String(value || "partyparrot")
+      .trim()
+      .replace(/[^A-Za-z0-9_+\-]/g, "")
+      .slice(0, 80) || "partyparrot";
+  }
+
+  function mimeTypeForPartyParrotExtension(extension) {
+    if (extension === "gif") return "image/gif";
+    if (extension === "png") return "image/png";
+    if (extension === "webp") return "image/webp";
+    if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+    if (extension === "svg") return "image/svg+xml";
+    return "application/octet-stream";
+  }
+
+  function partyParrotAssetUrl(fileName) {
+    return chrome.runtime.getURL(`${PARTY_PARROT_ASSET_DIR}${fileName}`);
+  }
+
+  function partyParrotAssetNameCandidates(name) {
+    const safeName = safePartyParrotAssetName(name);
+    const candidates = [safeName, safeName.toLowerCase()];
+
+    if (PARTY_PARROT_FALLBACK_ALIASES.has(safeName.toLowerCase())) {
+      candidates.push("partyparrot");
+    }
+
+    return [...new Set(candidates)];
+  }
+
+  async function fetchPartyParrotAsset(name) {
+    for (const candidate of partyParrotAssetNameCandidates(name)) {
+      for (const extension of PARTY_PARROT_ASSET_EXTENSIONS) {
+        const fileName = `${candidate}.${extension}`;
+
+        try {
+          const response = await fetch(partyParrotAssetUrl(fileName));
+
+          if (!response.ok) {
+            continue;
+          }
+
+          const blob = await response.blob();
+          const type = blob.type || mimeTypeForPartyParrotExtension(extension);
+          const file = new File([blob], fileName, {
+            type,
+            lastModified: Date.now()
+          });
+
+          return {
+            name: safePartyParrotAssetName(name),
+            file,
+            fileMeta: {
+              name: fileName,
+              type,
+              size: file.size || blob.size || 0
+            },
+            cacheKey: `partyparrot:${fileName}:${file.size || blob.size || 0}`,
+            source: partyParrotAssetUrl(fileName)
+          };
+        } catch {
+          // Probing bundled asset names is expected to miss most extensions.
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async function partyParrotAssetForShortcode(name) {
+    const safeName = safePartyParrotAssetName(name);
+    const cacheKey = safeName.toLowerCase();
+
+    if (!partyParrotAssetCache.has(cacheKey)) {
+      partyParrotAssetCache.set(cacheKey, fetchPartyParrotAsset(safeName));
+    }
+
+    return partyParrotAssetCache.get(cacheKey);
+  }
+
+  function partyParrotShortcodeOccurrences(text) {
+    const ordered = [];
+    const regex = /(^|[^A-Za-z0-9_+\-]):([A-Za-z0-9_+\-]{2,64}):/g;
+    let match;
+
+    while ((match = regex.exec(String(text || ""))) !== null) {
+      ordered.push(match[2]);
+    }
+
+    return ordered;
+  }
+
+  function removePartyParrotShortcodesFromText(text, names) {
+    let value = String(text || "");
+
+    for (const name of names) {
+      value = value.replace(new RegExp(escapeRegExp(`:${name}:`), "g"), "");
+    }
+
+    return value
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .trim();
+  }
+
+  async function preparePartyParrotText(text) {
+    const occurrences = partyParrotShortcodeOccurrences(text);
+
+    if (occurrences.length === 0) {
+      return {
+        text,
+        imageItems: []
+      };
+    }
+
+    const imageItems = [];
+    const resolvedNames = new Set();
+
+    for (const shortcode of occurrences) {
+      const asset = await partyParrotAssetForShortcode(shortcode);
+
+      if (!asset) {
+        continue;
+      }
+
+      imageItems.push({ shortcode, asset });
+      resolvedNames.add(shortcode);
+    }
+
+    if (imageItems.length === 0) {
+      return {
+        text,
+        imageItems: []
+      };
+    }
+
+    return {
+      text: removePartyParrotShortcodesFromText(text, resolvedNames),
+      imageItems
+    };
+  }
+
+  async function uploadPartyParrotMedia(homeserver, token, asset) {
+    if (!asset?.file) {
+      return "";
+    }
+
+    const key = `${normalizeHomeserver(homeserver)}|${asset.cacheKey || `${asset.file.name}:${asset.file.size || 0}`}`;
+
+    if (!partyParrotUploadCache.has(key)) {
+      partyParrotUploadCache.set(key, uploadMedia(homeserver, token, asset.file).catch(error => {
+        partyParrotUploadCache.delete(key);
+        throw error;
+      }));
+    }
+
+    return partyParrotUploadCache.get(key);
+  }
+
+  function makePartyParrotGroupId() {
+    return `mg_partyparrot_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+
+  function partyParrotImageContent(asset, mxcUrl, groupMeta = {}) {
+    const meta = asset.fileMeta || {};
+    const partyParrotMeta = {
+      version: 1,
+      shortcode: asset.name || "",
+      source: asset.source || "",
+      animated: String(meta.type || asset.file?.type || "").toLowerCase() === "image/gif"
+    };
+
+    if (groupMeta.groupId) partyParrotMeta.groupId = groupMeta.groupId;
+    if (Number.isFinite(Number(groupMeta.index))) partyParrotMeta.index = Number(groupMeta.index);
+    if (Number.isFinite(Number(groupMeta.count))) partyParrotMeta.count = Number(groupMeta.count);
+
+    return {
+      msgtype: "m.image",
+      body: meta.name || asset.file?.name || `${asset.name || "partyparrot"}.gif`,
+      filename: meta.name || asset.file?.name || `${asset.name || "partyparrot"}.gif`,
+      url: mxcUrl,
+      info: {
+        mimetype: meta.type || asset.file?.type || "image/gif",
+        size: meta.size || asset.file?.size || 0,
+        w: 32,
+        h: 32
+      },
+      [PARTY_PARROT_CONTENT_KEY]: partyParrotMeta
+    };
+  }
+
+  async function sendPartyParrotImageMessage(homeserver, token, room, asset, mxcUrl, threadTarget = null, groupMeta = {}) {
+    const txnId = createTxnId();
+    const url =
+      `${homeserver}/_matrix/client/v3/rooms/${encodeURIComponent(room)}` +
+      `/send/m.room.message/${encodeURIComponent(txnId)}`;
+
+    const content = applyThreadRelationToContent(partyParrotImageContent(asset, mxcUrl, groupMeta), threadTarget);
+
+    return matrixFetch(url, token, {
+      method: "PUT",
+      body: JSON.stringify(content)
+    });
+  }
+
+  async function sendPartyParrotImagesViaApi(homeserver, token, room, imageItems, threadTarget = null) {
+    let lastResult = null;
+    const items = Array.isArray(imageItems) ? imageItems : [];
+    const groupId = items.length > 1 ? makePartyParrotGroupId() : "";
+    const baseThreadTarget = threadTarget ? { ...threadTarget } : null;
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      const mxcUrl = await uploadPartyParrotMedia(homeserver, token, item.asset);
+
+      if (!mxcUrl) {
+        continue;
+      }
+
+      const result = await sendPartyParrotImageMessage(homeserver, token, room, item.asset, mxcUrl, baseThreadTarget, {
+        groupId,
+        index,
+        count: items.length
+      });
+      lastResult = result;
+    }
+
+    updateThreadReplyTargetFromSendResult(threadTarget, lastResult);
+    return lastResult;
   }
 
   async function sendTextMessage(homeserver, token, room, body, galleryId, galleryCount, threadTarget = null) {
@@ -3776,6 +4032,14 @@
             if (item.eventId && item.mattermostImport) {
               mattermostImportMetadataByEventId.set(item.eventId, item.mattermostImport);
             }
+
+            if (item.eventId && item.partyParrot) {
+              partyParrotMetadataByEventId.set(item.eventId, item.partyParrot);
+            }
+
+            if (item.eventId && item.partyParrot && item.media) {
+              partyParrotMediaByEventId.set(item.eventId, item.media);
+            }
           }
         }
 
@@ -3817,6 +4081,7 @@
 
       await refreshGalleryMetadataFromElementTimeline();
       syncMattermostImportEventTiles();
+      rebuildPartyParrotRows();
       if (!shouldHideNativeGallerySources()) restorePreviouslyHiddenPlaceholders();
 
       const galleryScrollPositions = captureGalleryScrollPositions();
@@ -3831,6 +4096,7 @@
 
       buildStoredGalleryFallbacks();
       rebuildNativeThreadAttachedGalleries();
+      rebuildPartyParrotRows();
       cleanupStaleInlineGalleryRenderPass(currentGalleryBuildPass);
       restoreGalleryScrollPositions(galleryScrollPositions);
     } finally {
@@ -4033,6 +4299,13 @@
 
         if (item.mattermostImport) {
           mattermostImportMetadataByEventId.set(item.eventId, item.mattermostImport);
+        }
+
+        if (item.partyParrot) {
+          partyParrotMetadataByEventId.set(item.eventId, item.partyParrot);
+          if (item.media) {
+            partyParrotMediaByEventId.set(item.eventId, item.media);
+          }
         }
       }
     }
@@ -4374,6 +4647,7 @@
 
     const media = item.media || {};
     const gallery = item.gallery || {};
+    const partyParrot = item.partyParrot || {};
 
     return [
       item.eventId || "",
@@ -4395,7 +4669,11 @@
       gallery.id || media.galleryId || "",
       gallery.url || media.mxcUrl || "",
       media.thumbnailUrl || "",
-      media.downloadUrl || ""
+      media.downloadUrl || "",
+      partyParrot.shortcode || "",
+      partyParrot.groupId || partyParrot.group_id || "",
+      partyParrot.index ?? "",
+      partyParrot.count ?? ""
     ].join(":");
   }
 
@@ -4508,9 +4786,11 @@
       applyMergedThreadIndent(block, keepRootInOriginalGallery ? anchor : rootElement || anchor, parent);
 
       parent.insertBefore(block, reference);
-      buildInlineThreadReplies(group, replies, eventElements, {
-        skipFirstReplyRun: keepRootInOriginalGallery
-      });
+      if (!isPartyParrotOnlyThreadReplies(replies)) {
+        buildInlineThreadReplies(group, replies, eventElements, {
+          skipFirstReplyRun: keepRootInOriginalGallery
+        });
+      }
 
       const rootMeta = threadMetadataByEventId.get(group.rootEventId);
       if (rootElement && !keepRootInOriginalGallery && shouldHideThreadSourceMessage(rootMeta, rootElement)) {
@@ -4542,6 +4822,11 @@
     // the thread block/gallery. Keeping the native root image visible as well
     // creates the duplicated "original + thread gallery" view reported on mobile.
     return false;
+  }
+
+  function isPartyParrotOnlyThreadReplies(replies) {
+    const renderableReplies = (replies || []).filter(isRenderableThreadItem);
+    return renderableReplies.length > 0 && renderableReplies.every(isPartyParrotThreadItem);
   }
 
   function hideAttachedGallerySourceMessages(item, eventElements) {
@@ -4602,6 +4887,8 @@
       : separatedRuns;
 
     for (const run of inlineRuns) {
+      if (run.every(isPartyParrotThreadItem)) continue;
+
       const placement = findChronologicalThreadReplyPlacement(run, eventElements);
       if (!placement?.parent) continue;
 
@@ -4872,11 +5159,17 @@
 
     const rootItems = isRenderableThreadItem(rootMeta) ? [rootMeta] : [];
     const allItems = [...rootItems, ...replies.filter(isRenderableThreadItem)];
+    const partyParrotOnlyThread = replies.filter(isRenderableThreadItem).length > 0 &&
+      replies.filter(isRenderableThreadItem).every(isPartyParrotThreadItem);
     const split = splitMergedThreadBlockReplies(rootItems, replies, eventElements, {
       ignoreInitialRootGap: Boolean(options.keepRootInOriginalGallery)
     });
-    const isExpanded = expandedMergedThreadRootEventIds.has(group.rootEventId);
+    const isExpanded = partyParrotOnlyThread || expandedMergedThreadRootEventIds.has(group.rootEventId);
     const visibleItems = isExpanded ? allItems : [...rootItems, ...split.visibleReplies];
+
+    if (partyParrotOnlyThread) {
+      block.classList.add("mg-thread-partyparrot-only");
+    }
 
     messages.append(...createThreadMessageRows(visibleItems, eventElements, group.rootEventId));
 
@@ -5069,12 +5362,56 @@
   function createThreadMessageRows(items, eventElements, rootEventId = "") {
     const rows = [];
     let previousSender = null;
-    const consumedEventIds = new Set();
+    const attachedPartyParrots = collectAttachedPartyParrotThreadItems(items);
+    const consumedEventIds = new Set(attachedPartyParrots.consumed);
 
     for (let index = 0; index < items.length; index += 1) {
       const item = items[index];
       if (!isRenderableThreadItem(item)) continue;
       if (item.eventId && consumedEventIds.has(item.eventId)) continue;
+
+      if (isPartyParrotThreadItem(item)) {
+        const groupKey = partyParrotGroupKey(item);
+        const grouped = [item];
+        let nextIndex = index + 1;
+
+        while (
+          nextIndex < items.length &&
+          isRenderableThreadItem(items[nextIndex]) &&
+          isPartyParrotThreadItem(items[nextIndex]) &&
+          partyParrotGroupKey(items[nextIndex]) === groupKey
+        ) {
+          grouped.push(items[nextIndex]);
+          nextIndex += 1;
+        }
+
+        const partyItems = sortPartyParrotItems(grouped, eventElements);
+        const senderKey = item.sender || item.senderName || "";
+        const showSender = Boolean(senderKey) && senderKey !== previousSender;
+        const source = grouped.map(entry => eventElements.get(entry.eventId)).find(Boolean);
+        const itemRootEventId = rootEventId || item.threadRootId || item.eventId || "";
+
+        rows.push(createThreadMessageRow(
+          item,
+          createPartyParrotStripForItems(partyItems, eventElements),
+          source,
+          showSender,
+          itemRootEventId,
+          eventElements,
+          { suppressReplyPreview: true }
+        ));
+
+        for (const partyItem of partyItems) {
+          if (partyItem?.eventId) consumedEventIds.add(partyItem.eventId);
+        }
+
+        if (senderKey) {
+          previousSender = senderKey;
+        }
+
+        index = nextIndex - 1;
+        continue;
+      }
 
       const galleryId = threadGalleryGroupId(item);
 
@@ -5096,10 +5433,16 @@
         const showSender = Boolean(senderKey) && senderKey !== previousSender;
         const source = grouped.map(entry => eventElements.get(entry.eventId)).find(Boolean);
         const itemRootEventId = rootEventId || item.threadRootId || item.eventId || "";
+        const attachedPartyItems = grouped.flatMap(entry => attachedPartyParrots.byTarget.get(entry.eventId) || []);
+        const messageElement = appendPartyParrotStripToThreadMessage(
+          createThreadGalleryMessage(galleryItems, galleryId, eventElements),
+          attachedPartyItems,
+          eventElements
+        );
 
         rows.push(createThreadMessageRow(
           item,
-          createThreadGalleryMessage(galleryItems, galleryId, eventElements),
+          messageElement,
           source,
           showSender,
           itemRootEventId,
@@ -5108,6 +5451,9 @@
 
         for (const galleryItem of galleryItems) {
           if (galleryItem?.eventId) consumedEventIds.add(galleryItem.eventId);
+        }
+        for (const partyItem of attachedPartyItems) {
+          if (partyItem?.eventId) consumedEventIds.add(partyItem.eventId);
         }
 
         if (senderKey) {
@@ -5123,13 +5469,18 @@
       const source = eventElements.get(item.eventId);
       const itemRootEventId = rootEventId || item.threadRootId || item.eventId || "";
       const attachedGalleryItems = attachedGalleryItemsForThreadItem(item, eventElements);
+      const attachedPartyItems = attachedPartyParrots.byTarget.get(item.eventId) || [];
 
       rows.push(createThreadMessageRow(
         item,
-        createThreadMessageWithAttachedGallery(
-          item,
-          source ? cloneThreadMessage(source, item, itemRootEventId) : createThreadFallbackMessage(item),
-          attachedGalleryItems,
+        appendPartyParrotStripToThreadMessage(
+          createThreadMessageWithAttachedGallery(
+            item,
+            source ? cloneThreadMessage(source, item, itemRootEventId) : createThreadFallbackMessage(item),
+            attachedGalleryItems,
+            eventElements
+          ),
+          attachedPartyItems,
           eventElements
         ),
         source,
@@ -5140,6 +5491,9 @@
 
       for (const attachedItem of attachedGalleryItems) {
         if (attachedItem?.eventId) consumedEventIds.add(attachedItem.eventId);
+      }
+      for (const partyItem of attachedPartyItems) {
+        if (partyItem?.eventId) consumedEventIds.add(partyItem.eventId);
       }
 
       if (senderKey) {
@@ -5152,6 +5506,7 @@
 
   function isRenderableThreadItem(item) {
     if (!item || item.redacted) return false;
+    if (isPartyParrotThreadItem(item)) return true;
     if (isThreadImageItem(item)) return true;
     if (typeof item.formattedBody === "string" && item.formattedBody.trim()) return true;
     if (typeof item.body === "string" && item.body.trim()) return true;
@@ -5159,6 +5514,7 @@
   }
 
   function threadGalleryGroupId(item) {
+    if (isPartyParrotThreadItem(item)) return "";
     if (!isThreadImageItem(item)) return "";
 
     const explicitId = item.gallery?.id || item.media?.galleryId || "";
@@ -5168,6 +5524,8 @@
   }
 
   function isThreadImageItem(item) {
+    if (isPartyParrotThreadItem(item)) return false;
+
     const msgtype = item?.msgtype || item?.media?.msgtype || "";
     if (msgtype === "m.image") return true;
 
@@ -5195,7 +5553,7 @@
   }
 
   function attachedGalleryItemsForThreadItem(item, eventElements = null) {
-    if (!item || item.redacted || isThreadImageItem(item)) return [];
+    if (!item || item.redacted || isPartyParrotThreadItem(item) || isThreadImageItem(item)) return [];
 
     const galleryId = attachedThreadGalleryId(item, eventElements);
     if (!galleryId) return [];
@@ -5205,7 +5563,7 @@
   }
 
   function attachedThreadGalleryId(item, eventElements = null) {
-    if (!item || isThreadImageItem(item)) return "";
+    if (!item || isPartyParrotThreadItem(item) || isThreadImageItem(item)) return "";
 
     const explicitId = item.gallery?.id || "";
     if (explicitId) return explicitId;
@@ -5472,7 +5830,7 @@
     }
   }
 
-  function createThreadMessageRow(item, messageElement, source, showSender, rootEventId = "", eventElements = null) {
+  function createThreadMessageRow(item, messageElement, source, showSender, rootEventId = "", eventElements = null, options = {}) {
     const row = document.createElement("div");
     row.className = "mg-thread-message-row";
     if (item.eventId) {
@@ -5517,7 +5875,9 @@
       content.appendChild(sender);
     }
 
-    const replyTarget = createThreadReplyTargetPreview(item, source, rootEventId, eventElements);
+    const replyTarget = options.suppressReplyPreview
+      ? null
+      : createThreadReplyTargetPreview(item, source, rootEventId, eventElements);
     if (replyTarget) {
       content.appendChild(replyTarget);
     }
@@ -5952,6 +6312,10 @@
   }
 
   function createThreadFallbackMessage(item) {
+    if (isPartyParrotThreadItem(item)) {
+      return createPartyParrotStripForItems([item]);
+    }
+
     if (isThreadImageItem(item)) {
       return createThreadGalleryMessage([item], threadGalleryGroupId(item));
     }
@@ -7098,9 +7462,16 @@
         room = await resolveRoomAlias(homeserver, token, room);
       }
 
-      const result = await sendPlainTextMessage(homeserver, token, room, text, source.threadTarget);
-      updateThreadReplyTargetFromSendResult(source.threadTarget, result);
-      finishThreadSidePanelSend(source, result);
+      const partyParrotPlan = await preparePartyParrotText(text);
+      let result = null;
+
+      if (partyParrotPlan.text) {
+        result = await sendPlainTextMessage(homeserver, token, room, partyParrotPlan.text, source.threadTarget);
+        updateThreadReplyTargetFromSendResult(source.threadTarget, result);
+      }
+
+      const partyParrotResult = await sendPartyParrotImagesViaApi(homeserver, token, room, partyParrotPlan.imageItems, source.threadTarget);
+      finishThreadSidePanelSend(source, partyParrotResult || result);
     } catch (error) {
       console.error(error);
       if (status) status.textContent = t("error", { message: error.message });
@@ -7189,6 +7560,296 @@
     return String(value || "").replace(/\s+/g, " ").trim();
   }
 
+  function isPartyParrotEventId(eventId) {
+    return Boolean(eventId && partyParrotMetadataByEventId.has(eventId));
+  }
+
+  function partyParrotMetadataForEventId(eventId) {
+    if (!eventId) return null;
+    return partyParrotMetadataByEventId.get(eventId) ||
+      threadMetadataByEventId.get(eventId)?.partyParrot ||
+      null;
+  }
+
+  function partyParrotMediaForEventId(eventId) {
+    if (!eventId) return null;
+    return partyParrotMediaByEventId.get(eventId) ||
+      threadMetadataByEventId.get(eventId)?.media ||
+      null;
+  }
+
+  function isPartyParrotThreadItem(item) {
+    return Boolean(item?.partyParrot || partyParrotMetadataForEventId(item?.eventId || ""));
+  }
+
+  function partyParrotMetaForItem(item) {
+    return item?.partyParrot || partyParrotMetadataForEventId(item?.eventId || "") || {};
+  }
+
+  function partyParrotMediaForItem(item) {
+    return item?.media || partyParrotMediaForEventId(item?.eventId || "") || {};
+  }
+
+  function partyParrotReplyTargetEventId(item) {
+    return String(
+      item?.partyParrot?.replyToEventId ||
+      item?.partyParrot?.reply_to_event_id ||
+      item?.matrixReplyToEventId ||
+      item?.replyToEventId ||
+      item?.replyPreview?.eventId ||
+      ""
+    ).trim();
+  }
+
+  function resolvedPartyParrotReplyTargetEventId(item, itemByEventId = threadMetadataByEventId) {
+    let targetEventId = partyParrotReplyTargetEventId(item);
+    const seen = new Set([item?.eventId || ""]);
+
+    while (targetEventId && !seen.has(targetEventId)) {
+      seen.add(targetEventId);
+      const targetItem = itemByEventId.get?.(targetEventId) || null;
+      if (!isPartyParrotThreadItem(targetItem)) break;
+      targetEventId = partyParrotReplyTargetEventId(targetItem);
+    }
+
+    return targetEventId || "";
+  }
+
+  function partyParrotGroupKey(item) {
+    const meta = partyParrotMetaForItem(item);
+    const groupId = String(meta.groupId || meta.group_id || "").trim();
+    if (groupId) return `partyparrot-group:${groupId}`;
+
+    const targetEventId = resolvedPartyParrotReplyTargetEventId(item);
+    if (targetEventId) return `partyparrot-target:${targetEventId}`;
+
+    return `partyparrot-event:${item?.eventId || ""}`;
+  }
+
+  function sortPartyParrotItems(items, eventElements = null) {
+    return [...(items || [])].sort((a, b) => {
+      const ai = Number(partyParrotMetaForItem(a).index);
+      const bi = Number(partyParrotMetaForItem(b).index);
+      const hasAi = Number.isFinite(ai);
+      const hasBi = Number.isFinite(bi);
+      if (hasAi && hasBi && ai !== bi) return ai - bi;
+      if (hasAi && !hasBi) return -1;
+      if (!hasAi && hasBi) return 1;
+
+      const at = numericTimestampForThreadItem(a, eventElements || new Map());
+      const bt = numericTimestampForThreadItem(b, eventElements || new Map());
+      if (at && bt && at !== bt) return at - bt;
+
+      return String(a?.eventId || "").localeCompare(String(b?.eventId || ""));
+    });
+  }
+
+  function partyParrotImageUrlForItem(item, eventElements = null) {
+    const media = partyParrotMediaForItem(item);
+    const source = item?.sourceElement ||
+      (item?.eventId ? eventElements?.get?.(item.eventId) : null) ||
+      null;
+    const sourceImage = source instanceof Element ? findMainImage(source) : null;
+
+    return firstBrowserImageUrl(
+      media.downloadUrl,
+      media.thumbnailUrl,
+      media.url,
+      media.mxcUrl,
+      sourceImage?.dataset?.fullSrc,
+      sourceImage?.getAttribute?.("data-full-src"),
+      sourceImage?.currentSrc,
+      sourceImage?.src,
+      sourceImage?.getAttribute?.("src")
+    );
+  }
+
+  function createPartyParrotStripForItems(items, eventElements = null) {
+    const strip = document.createElement("div");
+    strip.className = "mg-partyparrot-strip";
+    strip.dataset.mgPartyparrotStrip = "1";
+
+    for (const item of sortPartyParrotItems(items, eventElements)) {
+      const src = partyParrotImageUrlForItem(item, eventElements);
+      if (!src) continue;
+
+      const meta = partyParrotMetaForItem(item);
+      const shortcode = normalizeSpaces(meta.shortcode || item?.body || "partyparrot").replace(/^:+|:+$/g, "") || "partyparrot";
+      const img = document.createElement("img");
+      img.src = src;
+      img.width = 32;
+      img.height = 32;
+      img.loading = "eager";
+      img.decoding = "async";
+      img.alt = `:${shortcode}:`;
+      img.title = `:${shortcode}:`;
+      if (item?.eventId) img.dataset.eventId = item.eventId;
+      strip.appendChild(img);
+    }
+
+    return strip;
+  }
+
+  function appendPartyParrotStripToThreadMessage(messageElement, partyParrotItems, eventElements = null) {
+    if (!Array.isArray(partyParrotItems) || partyParrotItems.length === 0) {
+      return messageElement;
+    }
+
+    const strip = createPartyParrotStripForItems(partyParrotItems, eventElements);
+    if (!strip.childElementCount) return messageElement;
+
+    const wrap = document.createElement("div");
+    wrap.className = "mg-thread-message-with-partyparrot";
+    wrap.appendChild(messageElement);
+    wrap.appendChild(strip);
+    return wrap;
+  }
+
+  function collectAttachedPartyParrotThreadItems(items) {
+    const byEventId = new Map();
+    const partyParrotItems = [];
+
+    for (const item of items || []) {
+      if (!item?.eventId) continue;
+      byEventId.set(item.eventId, item);
+      if (isPartyParrotThreadItem(item)) {
+        partyParrotItems.push(item);
+      }
+    }
+
+    const byTarget = new Map();
+    const consumed = new Set();
+
+    for (const item of partyParrotItems) {
+      const targetEventId = resolvedPartyParrotReplyTargetEventId(item, byEventId);
+      const targetItem = targetEventId ? byEventId.get(targetEventId) : null;
+      if (!targetItem || isPartyParrotThreadItem(targetItem)) continue;
+
+      if (!byTarget.has(targetEventId)) byTarget.set(targetEventId, []);
+      byTarget.get(targetEventId).push(item);
+      consumed.add(item.eventId);
+    }
+
+    for (const [targetEventId, attachedItems] of byTarget.entries()) {
+      byTarget.set(targetEventId, sortPartyParrotItems(attachedItems));
+    }
+
+    return { byTarget, consumed };
+  }
+
+  function rebuildPartyParrotRows() {
+    for (const strip of document.querySelectorAll('.mg-partyparrot-strip[data-mg-partyparrot-managed="timeline"]')) {
+      strip.remove();
+    }
+
+    for (const source of document.querySelectorAll(".mg-partyparrot-source-hidden")) {
+      source.classList.remove("mg-partyparrot-source-hidden");
+      delete source.dataset.mgPartyparrotHidden;
+    }
+
+    if (!partyParrotMetadataByEventId.size) return;
+
+    const eventElements = collectMainTimelineEventElements();
+    if (!eventElements.size) return;
+
+    const groups = new Map();
+
+    for (const [eventId, source] of eventElements.entries()) {
+      const meta = partyParrotMetadataForEventId(eventId);
+      if (!meta) continue;
+      if (mergedThreadViewEnabled && isEventInMergedThreadGroup(eventId)) continue;
+
+      const item = {
+        ...(threadMetadataByEventId.get(eventId) || {}),
+        eventId,
+        partyParrot: meta,
+        media: partyParrotMediaForEventId(eventId) || {},
+        sourceElement: source
+      };
+      const placement = partyParrotTimelinePlacement(item, eventElements);
+      if (!placement?.parent) continue;
+
+      const key = placement.targetEventId
+        ? `target:${placement.targetEventId}`
+        : partyParrotGroupKey(item);
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          key,
+          placement,
+          items: []
+        });
+      }
+
+      groups.get(key).items.push(item);
+    }
+
+    const orderedGroups = Array.from(groups.values()).sort((a, b) => {
+      const aItem = a.items[0] || null;
+      const bItem = b.items[0] || null;
+      if (!aItem || !bItem) return aItem ? -1 : bItem ? 1 : 0;
+      return compareThreadItemsByTimeThenDom(aItem, bItem, eventElements);
+    });
+
+    for (const group of orderedGroups) {
+      const items = sortPartyParrotItems(group.items, eventElements);
+      const strip = createPartyParrotStripForItems(items, eventElements);
+      if (!strip.childElementCount) continue;
+
+      strip.dataset.mgPartyparrotManaged = "timeline";
+      strip.dataset.mgPartyparrotKey = group.key;
+
+      group.placement.parent.insertBefore(strip, group.placement.reference || null);
+      applyPartyParrotIndent(strip, group.placement.indentAnchor || group.placement.anchor, group.placement.parent);
+
+      for (const item of items) {
+        const source = item.sourceElement || (item.eventId ? eventElements.get(item.eventId) : null);
+        if (!(source instanceof Element)) continue;
+        source.classList.add("mg-partyparrot-source-hidden");
+        source.dataset.mgPartyparrotHidden = "1";
+      }
+    }
+  }
+
+  function partyParrotTimelinePlacement(item, eventElements) {
+    const source = item?.sourceElement ||
+      (item?.eventId ? eventElements.get(item.eventId) : null) ||
+      null;
+    if (!(source instanceof Element)) return null;
+
+    const targetEventId = resolvedPartyParrotReplyTargetEventId(item);
+    const target = targetEventId ? eventElements.get(targetEventId) : null;
+    const anchor = target instanceof Element ? target : source;
+    const parent = findBestGalleryParent(anchor);
+    if (!parent) return null;
+
+    const anchorChild = findDirectChildForParent(anchor, parent);
+    return {
+      parent,
+      anchor,
+      indentAnchor: target instanceof Element ? target : source,
+      targetEventId: target instanceof Element ? targetEventId : "",
+      reference: target instanceof Element ? anchorChild.nextSibling : findDirectChildForParent(source, parent)
+    };
+  }
+
+  function applyPartyParrotIndent(strip, anchor, parent) {
+    if (!(strip instanceof HTMLElement) || !(anchor instanceof Element) || !(parent instanceof Element)) return;
+
+    const indentSource = findGalleryIndentSource(anchor);
+    if (!(indentSource instanceof Element)) return;
+
+    const parentRect = parent.getBoundingClientRect();
+    const sourceRect = indentSource.getBoundingClientRect();
+    if (!(parentRect.width > 0 && sourceRect.width > 0 && sourceRect.height > 0)) return;
+
+    const indent = Math.max(0, Math.round(sourceRect.left - parentRect.left));
+    if (indent > 0) {
+      strip.style.marginLeft = `${indent}px`;
+      strip.style.maxWidth = `calc(100% - ${indent}px)`;
+    }
+  }
+
   function shortenMatrixUserId(userId) {
     const match = String(userId || "").match(/^@([^:]+):/);
     return match ? match[1] : String(userId || "");
@@ -7263,6 +7924,7 @@
       if (!img) continue;
 
       const eventId = eventIdForElement(message);
+      if (isPartyParrotEventId(eventId)) continue;
       if (shouldSkipMainGalleryForThreadEvent(eventId, message)) continue;
 
       if (result.some(item => item.element === message)) continue;
@@ -7455,6 +8117,7 @@
 
     return element.getAttribute("data-event-id") ||
       element.closest("[data-event-id]")?.getAttribute("data-event-id") ||
+      element.querySelector?.("[data-event-id]")?.getAttribute("data-event-id") ||
       "";
   }
 

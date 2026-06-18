@@ -26,11 +26,11 @@
   const PAGE_BRIDGE_CREATE_ROOM_RESPONSE = "matrix-mattermost-importer-create-room-response";
   const EMOJI_SHORTCODE_REGEX = /(^|[^A-Za-z0-9_+\-]):([A-Za-z0-9_+\-]{2,64}):/g;
   const BUNDLED_PARTY_PARROT_EMOJI_ASSETS = {
-    parrot: "assets/partyparrot/partyparrot.png",
-    partyparrot: "assets/partyparrot/partyparrot.png",
-    "party_parrot": "assets/partyparrot/partyparrot.png",
-    "party-parrot": "assets/partyparrot/partyparrot.png",
-    "parrot_party": "assets/partyparrot/partyparrot.png"
+    parrot: "assets/partyparrot/partyparrot.gif",
+    partyparrot: "assets/partyparrot/partyparrot.gif",
+    "party_parrot": "assets/partyparrot/partyparrot.gif",
+    "party-parrot": "assets/partyparrot/partyparrot.gif",
+    "parrot_party": "assets/partyparrot/partyparrot.gif"
   };
   const CHAT_VIEW_CONTAINER_SELECTOR = [
     ".mx_RoomView",

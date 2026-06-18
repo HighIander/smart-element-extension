@@ -213,6 +213,38 @@ body.mg-global-dragover #mg-global-drop-hint {
   display: none !important;
 }
 
+.mg-partyparrot-source-hidden {
+  display: none !important;
+}
+
+.mg-partyparrot-strip {
+  display: inline-flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px !important;
+  min-height: 36px !important;
+  max-width: 100% !important;
+  margin: 2px 0 4px 0 !important;
+  padding: 0 !important;
+  line-height: 0 !important;
+  box-sizing: border-box !important;
+}
+
+.mg-partyparrot-strip img {
+  display: block !important;
+  flex: 0 0 32px !important;
+  width: 32px !important;
+  height: 32px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  max-width: 32px !important;
+  max-height: 32px !important;
+  object-fit: contain !important;
+  border-radius: 0 !important;
+  cursor: default !important;
+}
+
 .mg-lightbox {
   position: fixed;
   inset: 0;
@@ -653,6 +685,26 @@ html[data-mg-language="en"] .mg-thread-inline-reply::after {
   opacity: 1 !important;
 }
 
+.mg-thread-partyparrot-only {
+  background: #ffffff !important;
+  border-color: #ffffff !important;
+  box-shadow: none !important;
+}
+
+.mg-thread-partyparrot-only::after {
+  display: none !important;
+  content: none !important;
+}
+
+.mg-thread-partyparrot-only .mg-thread-heading,
+.mg-thread-partyparrot-only .mg-thread-later-toggle {
+  display: none !important;
+}
+
+.mg-thread-partyparrot-only .mg-thread-message-row {
+  cursor: default !important;
+}
+
 .mg-thread-later-toggle {
   position: absolute !important;
   right: 10px !important;
@@ -830,6 +882,17 @@ html[data-mg-language="en"] .mg-thread-inline-reply::after {
   display: flex !important;
   flex-direction: column !important;
   gap: 6px !important;
+}
+
+.mg-thread-message-with-partyparrot {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 3px !important;
+}
+
+.mg-thread-message-body > .mg-partyparrot-strip,
+.mg-thread-message-with-partyparrot > .mg-partyparrot-strip {
+  margin-top: 1px !important;
 }
 
 .mg-thread-message-with-gallery > .mg-inline-gallery {

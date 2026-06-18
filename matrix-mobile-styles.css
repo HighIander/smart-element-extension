@@ -2285,9 +2285,112 @@ html.mmlc-desktop-hierarchy-mode:not(.mmlc-desktop-native-action) .mx_SpacePanel
   display: none !important;
 }
 
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action #mmlc-desktop-space-list-host,
-html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action #mmlc-desktop-chat-list-host {
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action:not(.mmlc-desktop-stable-space-selection-action) #mmlc-desktop-space-list-host,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action:not(.mmlc-desktop-stable-space-selection-action) #mmlc-desktop-chat-list-host {
   display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #mmlc-desktop-space-list-host,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #mmlc-desktop-chat-list-host {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #mmlc-desktop-space-list-host,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #mmlc-desktop-chat-list-host {
+  position: relative !important;
+  z-index: 2147483604 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel {
+  position: relative !important;
+  z-index: 2147483504 !important;
+  overflow: visible !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel .mx_UserMenu {
+  display: flex !important;
+  justify-content: center !important;
+  align-items: center !important;
+  min-height: 44px !important;
+  padding: 6px 0 2px !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel .mx_UserMenu > span:not([role="img"]) {
+  display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-hidden .mx_SpacePanel .mx_UserMenu {
+  display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action:not(.mmlc-desktop-space-panel-hidden) #mmlc-desktop-space-list-host {
+  padding-top: 42px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action:not(.mmlc-desktop-space-panel-expanded):not(.mmlc-desktop-space-panel-hidden) #mmlc-desktop-space-list-host {
+  padding-top: 76px !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel .mx_SpacePanel_toggleCollapse,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel [class*="SpacePanel_toggleCollapse"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel .mx_ThreadsActivityCentre_container,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel .mx_QuickSettingsButton {
+  display: none !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel > ul.mx_SpaceTreeLevel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action .mx_SpacePanel > ul[role="tree"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  filter: opacity(0) !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: 0 !important;
+  right: auto !important;
+  top: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 0 !important;
+  overflow: visible !important;
+  z-index: 1 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #left-panel .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #left-panel nav[aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #left-panel nav[aria-label="Room list"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action [data-testid="left-panel"] .mx_RoomListPanel,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action [data-testid="left-panel"] nav[aria-label="Chatliste"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action [data-testid="left-panel"] nav[aria-label="Room list"] {
+  gap: 0 !important;
+  position: relative !important;
+  overflow: visible !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #left-panel .mx_RoomListPanel > :not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #left-panel nav[aria-label="Chatliste"] > :not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #left-panel nav[aria-label="Room list"] > :not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action [data-testid="left-panel"] .mx_RoomListPanel > :not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action [data-testid="left-panel"] nav[aria-label="Chatliste"] > :not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action [data-testid="left-panel"] nav[aria-label="Room list"] > :not(#mmlc-desktop-chat-list-host),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action #left-panel .mx_RoomListPanel :is([data-testid="room-list"], .mx_RoomList, [data-virtuoso-scroller="true"][aria-label="Chatliste"], [data-virtuoso-scroller="true"][aria-label="Room list"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action [data-testid="left-panel"] .mx_RoomListPanel :is([data-testid="room-list"], .mx_RoomList, [data-virtuoso-scroller="true"][aria-label="Chatliste"], [data-virtuoso-scroller="true"][aria-label="Room list"]) {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: hidden !important;
+  flex: 0 0 0 !important;
 }
 
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-space-floating-selection-hold.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open #mmlc-desktop-space-list-host {
@@ -3110,7 +3213,7 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-middle-pane-floating-open:not(.mml
 
 #mmlc-desktop-create-menu {
   position: fixed;
-  z-index: 2147483610;
+  z-index: 2147483647;
   min-width: 220px;
   max-width: min(280px, calc(100vw - 16px));
   padding: 6px;
@@ -3496,12 +3599,157 @@ html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.
   max-width: 280px !important;
 }
 
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action:not(.mmlc-desktop-space-panel-expanded):not(.mmlc-desktop-space-panel-hidden) .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action:not(.mmlc-desktop-space-panel-expanded):not(.mmlc-desktop-space-panel-hidden) nav[aria-label="Spaces"] {
+  flex: 0 0 104px !important;
+  flex-basis: 104px !important;
+  width: 104px !important;
+  min-width: 104px !important;
+  max-width: 104px !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-expanded .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-expanded nav[aria-label="Spaces"] {
+  flex: 0 0 280px !important;
+  flex-basis: 280px !important;
+  width: 280px !important;
+  min-width: 280px !important;
+  max-width: 280px !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-hidden .mx_SpacePanel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-hidden .mx_SpacePanel.collapsed,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-hidden nav[aria-label="Spaces"] {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: none !important;
+  position: absolute !important;
+  left: 0 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  flex: 0 0 clamp(172px, 28vw, 260px) !important;
+  flex-basis: clamp(172px, 28vw, 260px) !important;
+  width: clamp(172px, 28vw, 260px) !important;
+  min-width: 160px !important;
+  max-width: 300px !important;
+  height: auto !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: visible !important;
+  transform: none !important;
+  z-index: 1 !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open) #left-panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open) [data-testid="left-panel"] {
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  flex: 0 0 48px !important;
+  flex-basis: 48px !important;
+  overflow: hidden !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open #left-panel,
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open [data-testid="left-panel"] {
+  --mmlc-desktop-chat-overlay-width: var(--mmlc-desktop-chat-overlay-width-root, min(640px, calc(100vw - var(--mmlc-desktop-middle-edge-x, 48px) - 36px)));
+  width: 48px !important;
+  min-width: 48px !important;
+  max-width: 48px !important;
+  flex: 0 0 48px !important;
+  flex-basis: 48px !important;
+  overflow: visible !important;
+  position: relative !important;
+  z-index: 2147483637 !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open #left-panel :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open [data-testid="left-panel"] :is(.mx_LeftPanel, .mx_LeftPanel_panel, .mx_LeftPanel_outerWrapper, .mx_LeftPanel_wrapper, .mx_LeftPanel_roomListContainer, .mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  width: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  min-width: min(430px, var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px)))) !important;
+  max-width: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  flex: 0 0 var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  flex-basis: var(--mmlc-desktop-chat-overlay-width, min(640px, calc(100vw - 84px))) !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open #left-panel :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]),
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open [data-testid="left-panel"] :is(.mx_RoomListPanel, [aria-label="Chatliste"], [aria-label="Room list"]) {
+  position: fixed !important;
+  left: var(--mmlc-desktop-middle-edge-x, 48px) !important;
+  right: auto !important;
+  top: 8px !important;
+  bottom: 8px !important;
+  height: calc(100vh - 16px) !important;
+  max-height: calc(100vh - 16px) !important;
+  border: 2px solid #000 !important;
+  border-radius: 10px !important;
+  box-shadow: 10px 10px 34px rgba(0, 0, 0, 0.34) !important;
+  background: #fff !important;
+  color: #111827 !important;
+  z-index: 2147483638 !important;
+  pointer-events: auto !important;
+  isolation: isolate !important;
+  overflow: hidden auto !important;
+}
+
+html.mmlc-enabled.mmlc-native-navigation-panes-open.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-middle-pane-floating-open #mmlc-desktop-chat-list-host:not(.mmlc-desktop-chat-list-host-start) {
+  position: relative !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 100% !important;
+  min-height: 0 !important;
+  max-height: 100% !important;
+  padding-bottom: 58px !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+}
+
 
 /* Smart Element patch: keep floating pane controls from overlapping and keep edge buttons above adjacent panes. */
 html.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-space-list-host {
   left: 8px !important;
   top: 12px !important;
   z-index: 2147483638 !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) body > #mmlc-desktop-space-list-host,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-middle-pane-floating-open):not(.mmlc-desktop-space-panel-floating-open) body > #mmlc-desktop-space-list-host,
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) body > #mmlc-desktop-space-list-host {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed !important;
+  left: 8px !important;
+  top: 12px !important;
+  width: 40px !important;
+  min-width: 40px !important;
+  max-width: 40px !important;
+  height: 40px !important;
+  min-height: 0 !important;
+  max-height: 40px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  background: transparent !important;
+  z-index: 2147483638 !important;
+  pointer-events: auto !important;
+}
+
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) body > #mmlc-desktop-space-list-host > .mmlc-desktop-space-expand-toggle {
+  display: inline-flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed !important;
+  left: 8px !important;
+  top: 12px !important;
+  z-index: 2147483642 !important;
+  pointer-events: auto !important;
 }
 
 html.mmlc-desktop-middle-pane-hidden:not(.mmlc-desktop-middle-pane-floating-open).mmlc-desktop-space-panel-hidden:not(.mmlc-desktop-space-panel-floating-open) #mmlc-desktop-middle-restore {

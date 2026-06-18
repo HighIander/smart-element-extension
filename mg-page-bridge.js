@@ -19,9 +19,23 @@
   const OPEN_THREAD_RESPONSE = "matrix-gallery-sender-open-thread-response";
   const GALLERY_CONTENT_KEY = "de.tkluge.gallery";
   const MATTERMOST_CONTENT_KEY = "de.tkluge.mattermost_import";
+  const PARTY_PARROT_CONTENT_KEY = "de.tkluge.partyparrot";
+  const EXTENSION_BASE_URL = (() => {
+    try {
+      const scriptUrl = document.currentScript && document.currentScript.src;
+      return scriptUrl ? new URL(".", scriptUrl).href : "";
+    } catch {
+      return "";
+    }
+  })();
+  const PARTY_PARROT_ASSET_DIR = "assets/partyparrot/";
+  const PARTY_PARROT_ASSET_EXTENSIONS = ["gif", "png", "webp", "jpg", "jpeg", "svg"];
+  const PARTY_PARROT_FALLBACK_ALIASES = new Set(["partyparrot", "party_parrot", "party-parrot", "parrot", "parrot_party"]);
 
   let lastSession = null;
   let installed = false;
+  const partyParrotAssetCache = new Map();
+  const partyParrotUploadCache = new WeakMap();
 
   function cleanUrl(value) {
     if (typeof value !== "string") return "";
@@ -544,6 +558,257 @@
     return `<span data-mg-gallery="${escapeHtml(encoded)}" style="display:none"></span>`;
   }
 
+  function escapeRegExp(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function safePartyParrotAssetName(value) {
+    return String(value || "partyparrot")
+      .trim()
+      .replace(/[^A-Za-z0-9_+\-]/g, "")
+      .slice(0, 80) || "partyparrot";
+  }
+
+  function mimeTypeForPartyParrotExtension(extension) {
+    if (extension === "gif") return "image/gif";
+    if (extension === "png") return "image/png";
+    if (extension === "webp") return "image/webp";
+    if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+    if (extension === "svg") return "image/svg+xml";
+    return "application/octet-stream";
+  }
+
+  function partyParrotAssetUrl(fileName) {
+    if (!EXTENSION_BASE_URL) {
+      return "";
+    }
+
+    return new URL(`${PARTY_PARROT_ASSET_DIR}${encodeURIComponent(fileName)}`, EXTENSION_BASE_URL).href;
+  }
+
+  function partyParrotAssetNameCandidates(name) {
+    const safeName = safePartyParrotAssetName(name);
+    const candidates = [safeName, safeName.toLowerCase()];
+
+    if (PARTY_PARROT_FALLBACK_ALIASES.has(safeName.toLowerCase())) {
+      candidates.push("partyparrot");
+    }
+
+    return [...new Set(candidates)];
+  }
+
+  async function fetchPartyParrotAsset(name) {
+    for (const candidate of partyParrotAssetNameCandidates(name)) {
+      for (const extension of PARTY_PARROT_ASSET_EXTENSIONS) {
+        const fileName = `${candidate}.${extension}`;
+        const url = partyParrotAssetUrl(fileName);
+
+        if (!url) {
+          continue;
+        }
+
+        try {
+          const response = await fetch(url);
+
+          if (!response.ok) {
+            continue;
+          }
+
+          const blob = await response.blob();
+          const type = blob.type || mimeTypeForPartyParrotExtension(extension);
+          const file = new File([blob], fileName, {
+            type,
+            lastModified: Date.now()
+          });
+
+          return {
+            name: safePartyParrotAssetName(name),
+            file,
+            fileMeta: {
+              name: fileName,
+              type,
+              size: file.size || blob.size || 0
+            },
+            cacheKey: `partyparrot:${fileName}:${file.size || blob.size || 0}`,
+            source: url
+          };
+        } catch {
+          // Probing bundled asset names is expected to miss most extensions.
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async function partyParrotAssetForShortcode(name) {
+    const safeName = safePartyParrotAssetName(name);
+    const cacheKey = safeName.toLowerCase();
+
+    if (!partyParrotAssetCache.has(cacheKey)) {
+      partyParrotAssetCache.set(cacheKey, fetchPartyParrotAsset(safeName));
+    }
+
+    return partyParrotAssetCache.get(cacheKey);
+  }
+
+  function partyParrotShortcodeOccurrences(text) {
+    const ordered = [];
+    const regex = /(^|[^A-Za-z0-9_+\-]):([A-Za-z0-9_+\-]{2,64}):/g;
+    let match;
+
+    while ((match = regex.exec(String(text || ""))) !== null) {
+      ordered.push(match[2]);
+    }
+
+    return ordered;
+  }
+
+  function removePartyParrotShortcodesFromText(text, names) {
+    let value = String(text || "");
+
+    for (const name of names) {
+      value = value.replace(new RegExp(escapeRegExp(`:${name}:`), "g"), "");
+    }
+
+    return value
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .trim();
+  }
+
+  async function preparePartyParrotText(text) {
+    const occurrences = partyParrotShortcodeOccurrences(text);
+
+    if (occurrences.length === 0) {
+      return {
+        text,
+        imageItems: []
+      };
+    }
+
+    const imageItems = [];
+    const resolvedNames = new Set();
+
+    for (const shortcode of occurrences) {
+      const asset = await partyParrotAssetForShortcode(shortcode);
+
+      if (!asset) {
+        continue;
+      }
+
+      imageItems.push({ shortcode, asset });
+      resolvedNames.add(shortcode);
+    }
+
+    if (imageItems.length === 0) {
+      return {
+        text,
+        imageItems: []
+      };
+    }
+
+    return {
+      text: removePartyParrotShortcodesFromText(text, resolvedNames),
+      imageItems
+    };
+  }
+
+  function partyParrotUploadMapForClient(client) {
+    if (!partyParrotUploadCache.has(client)) {
+      partyParrotUploadCache.set(client, new Map());
+    }
+
+    return partyParrotUploadCache.get(client);
+  }
+
+  async function uploadPartyParrotAsset(client, asset) {
+    if (!asset?.file) {
+      return "";
+    }
+
+    const uploadMap = partyParrotUploadMapForClient(client);
+    const cacheKey = asset.cacheKey || `partyparrot:${asset.file.name}:${asset.file.size || 0}`;
+
+    if (!uploadMap.has(cacheKey)) {
+      uploadMap.set(cacheKey, (async () => {
+        const file = asset.file;
+        const meta = asset.fileMeta || {};
+        return uploadContentViaClient(client, file, {
+          name: meta.name || file.name,
+          type: meta.type || file.type || "image/png",
+          size: meta.size || file.size || 0
+        });
+      })().catch(error => {
+        uploadMap.delete(cacheKey);
+        throw error;
+      }));
+    }
+
+    return uploadMap.get(cacheKey);
+  }
+
+  function makePartyParrotGroupId() {
+    return `mg_partyparrot_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+
+  function partyParrotImageContent(asset, mxcUrl, groupMeta = {}) {
+    const meta = asset.fileMeta || {};
+    const partyParrotMeta = {
+      version: 1,
+      shortcode: asset.name || "",
+      source: asset.source || "",
+      animated: String(meta.type || asset.file?.type || "").toLowerCase() === "image/gif"
+    };
+
+    if (groupMeta.groupId) partyParrotMeta.groupId = groupMeta.groupId;
+    if (Number.isFinite(Number(groupMeta.index))) partyParrotMeta.index = Number(groupMeta.index);
+    if (Number.isFinite(Number(groupMeta.count))) partyParrotMeta.count = Number(groupMeta.count);
+
+    return {
+      msgtype: "m.image",
+      body: meta.name || asset.file?.name || `${asset.name || "partyparrot"}.gif`,
+      filename: meta.name || asset.file?.name || `${asset.name || "partyparrot"}.gif`,
+      url: mxcUrl,
+      info: {
+        mimetype: meta.type || asset.file?.type || "image/gif",
+        size: meta.size || asset.file?.size || 0,
+        w: 32,
+        h: 32
+      },
+      [PARTY_PARROT_CONTENT_KEY]: partyParrotMeta
+    };
+  }
+
+  async function sendPartyParrotImagesViaClient(client, roomId, imageItems, threadTarget, requestId) {
+    let lastResult = null;
+    const items = Array.isArray(imageItems) ? imageItems : [];
+    const groupId = items.length > 1 ? makePartyParrotGroupId() : "";
+    const baseThreadTarget = threadTarget ? { ...threadTarget } : null;
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      postSendProgress(requestId, `Sende Partyparrot :${item.shortcode}: ...`);
+
+      const mxcUrl = await uploadPartyParrotAsset(client, item.asset);
+
+      if (!mxcUrl) {
+        continue;
+      }
+
+      const result = await sendMessageViaClient(client, roomId, partyParrotImageContent(item.asset, mxcUrl, {
+        groupId,
+        index,
+        count: items.length
+      }), baseThreadTarget);
+      lastResult = result;
+    }
+
+    updateThreadReplyTargetFromSendResult(threadTarget, lastResult);
+    return lastResult;
+  }
+
 
   async function sendMessageViaClient(client, roomId, content, threadTarget = null) {
     const relatedContent = applyThreadRelationToContent(content, threadTarget);
@@ -599,15 +864,24 @@
     }
 
     const threadTarget = payload.threadTarget?.rootEventId ? { ...payload.threadTarget } : null;
+    const partyParrotPlan = await preparePartyParrotText(payload.text || "");
 
     if (payload.plainTextOnly) {
-      const result = await sendMessageViaClient(client, roomId, {
-        msgtype: "m.text",
-        body: payload.text || ""
-      }, threadTarget);
+      let result = null;
+
+      if (partyParrotPlan.text) {
+        result = await sendMessageViaClient(client, roomId, {
+          msgtype: "m.text",
+          body: partyParrotPlan.text
+        }, threadTarget);
+
+        updateThreadReplyTargetFromSendResult(threadTarget, result);
+      }
+
+      const partyParrotResult = await sendPartyParrotImagesViaClient(client, roomId, partyParrotPlan.imageItems, threadTarget, payload.requestId);
 
       return {
-        eventId: eventIdFromSendResult(result)
+        eventId: eventIdFromSendResult(partyParrotResult || result)
       };
     }
 
@@ -615,12 +889,12 @@
     const count = Array.isArray(payload.files) ? payload.files.length : 0;
     const uploadedUrls = [];
 
-    if (payload.text) {
+    if (partyParrotPlan.text) {
       const textResult = await sendMessageViaClient(client, roomId, {
         msgtype: "m.text",
-        body: payload.text,
+        body: partyParrotPlan.text,
         format: "org.matrix.custom.html",
-        formatted_body: `${escapeHtml(payload.text)}${makeGalleryHtmlMetadata(galleryId, "caption", -1, count)}`,
+        formatted_body: `${escapeHtml(partyParrotPlan.text)}${makeGalleryHtmlMetadata(galleryId, "caption", -1, count)}`,
         "de.tkluge.gallery": {
           id: galleryId,
           type: "caption",
@@ -630,6 +904,14 @@
 
       updateThreadReplyTargetFromSendResult(threadTarget, textResult);
     }
+
+    await sendPartyParrotImagesViaClient(
+      client,
+      roomId,
+      partyParrotPlan.imageItems,
+      threadTarget ? { ...threadTarget } : null,
+      payload.requestId
+    );
 
     for (let i = 0; i < count; i++) {
       const file = payload.files[i];
@@ -1109,13 +1391,25 @@
         const mattermostImport = summarizeMattermostImport(
           content[MATTERMOST_CONTENT_KEY] || rawContent[MATTERMOST_CONTENT_KEY]
         );
+        const partyParrot = summarizePartyParrot(
+          content[PARTY_PARROT_CONTENT_KEY] || rawContent[PARTY_PARROT_CONTENT_KEY]
+        );
+        if (partyParrot) {
+          const relatesTo = content["m.relates_to"] || rawContent["m.relates_to"] || {};
+          const replyToEventId = relatesTo["m.in_reply_to"]?.event_id || "";
+          const threadRootId = relatesTo.rel_type === "m.thread" ? relatesTo.event_id || "" : "";
+          if (replyToEventId) partyParrot.replyToEventId = replyToEventId;
+          if (threadRootId) partyParrot.threadRootId = threadRootId;
+        }
 
-        if ((!gallery || !gallery.id) && !mattermostImport) continue;
+        if ((!gallery || !gallery.id) && !mattermostImport && !partyParrot) continue;
 
         result.push({
           eventId,
           gallery,
-          mattermostImport
+          mattermostImport,
+          partyParrot,
+          media: partyParrot ? summarizeEventMedia(content) : null
         });
       } catch {}
     }
@@ -1325,6 +1619,30 @@
     };
   }
 
+  function summarizePartyParrot(meta) {
+    if (!meta || typeof meta !== "object") return null;
+
+    const shortcode = normalizeBridgeSpaces(meta.shortcode || meta.name || "");
+    const source = String(meta.source || "").trim();
+    const groupId = String(meta.groupId || meta.group_id || "").trim();
+    const index = Number(meta.index);
+    const count = Number(meta.count);
+
+    if (!shortcode && !source && !groupId) return null;
+
+    return {
+      version: Number(meta.version || 0) || 0,
+      shortcode,
+      source,
+      animated: meta.animated === true,
+      groupId,
+      index: Number.isFinite(index) ? index : null,
+      count: Number.isFinite(count) ? count : null,
+      replyToEventId: String(meta.replyToEventId || meta.reply_to_event_id || "").trim(),
+      threadRootId: String(meta.threadRootId || meta.thread_root_id || "").trim()
+    };
+  }
+
   function matrixThreadFallbackFlag(...sources) {
     for (const source of sources) {
       if (!source || typeof source !== "object") continue;
@@ -1356,6 +1674,9 @@
       const relatesTo = content["m.relates_to"] || rawRelatesTo || {};
       const mattermostImport = summarizeMattermostImport(
         content[MATTERMOST_CONTENT_KEY] || rawContent[MATTERMOST_CONTENT_KEY]
+      );
+      const partyParrot = summarizePartyParrot(
+        content[PARTY_PARROT_CONTENT_KEY] || rawContent[PARTY_PARROT_CONTENT_KEY]
       );
       const relationType = relatesTo.rel_type || relation.rel_type || "";
       const isThreadRelation = relationType === "m.thread";
@@ -1424,6 +1745,7 @@
         matrixReplyToEventId,
         replyToEventId,
         gallery: content[GALLERY_CONTENT_KEY] || null,
+        partyParrot,
         mattermostImport,
         media: redacted ? null : summarizeEventMedia(content)
       };

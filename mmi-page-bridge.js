@@ -13,6 +13,7 @@
   const CREATE_ROOM_RESPONSE = "matrix-mattermost-importer-create-room-response";
   const GALLERY_CONTENT_KEY = "de.tkluge.gallery";
   const MATTERMOST_CONTENT_KEY = "de.tkluge.mattermost_import";
+  const PARTY_PARROT_CONTENT_KEY = "de.tkluge.partyparrot";
   const DUPLICATE_HISTORY_PAGE_SIZE = 100;
   const RATE_LIMIT_RETRY_MAX_ATTEMPTS = 12;
   const RATE_LIMIT_RETRY_DEFAULT_MS = 5000;
@@ -653,7 +654,12 @@
   }
 
   function shortcodeNamesInHtml(html) {
+    return [...new Set(shortcodeOccurrencesInHtml(html))];
+  }
+
+  function shortcodeOccurrencesInHtml(html) {
     const names = new Set();
+    const ordered = [];
     const regex = /(^|[^A-Za-z0-9_+\-]):([A-Za-z0-9_+\-]{2,64}):/g;
     const parts = String(html || "").split(/(<[^>]*>)/g);
     let protectedDepth = 0;
@@ -686,10 +692,11 @@
       regex.lastIndex = 0;
       while ((match = regex.exec(part)) !== null) {
         names.add(match[2]);
+        ordered.push(match[2]);
       }
     }
 
-    return [...names];
+    return ordered;
   }
 
   function safePartyParrotAssetName(value) {
@@ -852,23 +859,159 @@
     return uploadMap.get(cacheKey);
   }
 
-  async function enhancePartyParrotContent(client, content) {
+  function removeEmojiShortcodeHtml(html, name) {
+    const escapedToken = escapeHtml(`:${name}:`);
+    const tokenPattern = new RegExp(escapeRegExp(escapedToken), "g");
+    const parts = String(html || "").split(/(<[^>]*>)/g);
+    let protectedDepth = 0;
+
+    return parts.map(part => {
+      if (!part) {
+        return part;
+      }
+
+      if (part.startsWith("<")) {
+        const tagMatch = part.match(/^<\s*(\/?)\s*([a-zA-Z0-9]+)/);
+        const tagName = tagMatch ? tagMatch[2].toLowerCase() : "";
+        const closing = Boolean(tagMatch && tagMatch[1]);
+        const selfClosing = /\/\s*>$/.test(part);
+
+        if ((tagName === "code" || tagName === "pre") && closing) {
+          protectedDepth = Math.max(0, protectedDepth - 1);
+        } else if ((tagName === "code" || tagName === "pre") && !selfClosing) {
+          protectedDepth += 1;
+        }
+
+        return part;
+      }
+
+      return protectedDepth > 0 ? part : part.replace(tokenPattern, "");
+    }).join("");
+  }
+
+  function removeEmojiShortcodesFromPlainText(text, names) {
+    let value = String(text || "");
+
+    for (const name of names) {
+      value = value.replace(new RegExp(escapeRegExp(`:${name}:`), "g"), "");
+    }
+
+    return value
+      .replace(/[ \t]{2,}/g, " ")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .trim();
+  }
+
+  function removeEmojiShortcodesFromHtml(html, names) {
+    let value = String(html || "");
+
+    for (const name of names) {
+      value = removeEmojiShortcodeHtml(value, name);
+    }
+
+    return value
+      .replace(/(?:&nbsp;|\s){2,}/g, " ")
+      .replace(/>\s+</g, "><")
+      .trim();
+  }
+
+  function stripPlainReplyFallback(body) {
+    const value = String(body || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+
+    if (!value.startsWith(">")) {
+      return value;
+    }
+
+    const splitAt = value.indexOf("\n\n");
+    return splitAt === -1 ? value : value.slice(splitAt + 2);
+  }
+
+  function stripHtmlReplyFallback(html) {
+    return String(html || "").replace(/^<mx-reply>[\s\S]*?<\/mx-reply>/i, "");
+  }
+
+  function htmlToText(html) {
+    return String(html || "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&amp;/g, "&")
+      .trim();
+  }
+
+  function hasSubstantiveMessageText(content) {
+    const bodyText = stripPlainReplyFallback(content?.body || "").trim();
+    if (bodyText) return true;
+
+    const htmlText = htmlToText(stripHtmlReplyFallback(content?.formatted_body || ""));
+    return Boolean(htmlText);
+  }
+
+  function makePartyParrotGroupId() {
+    return `mg_partyparrot_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  }
+
+  function partyParrotImageContent(originalContent, asset, mxcUrl, groupMeta = {}) {
+    const meta = asset.fileMeta || {};
+    const partyParrotMeta = {
+      version: 1,
+      shortcode: asset.name,
+      source: asset.source || "",
+      animated: String(meta.type || asset.file?.type || "").toLowerCase() === "image/gif"
+    };
+
+    if (groupMeta.groupId) partyParrotMeta.groupId = groupMeta.groupId;
+    if (Number.isFinite(Number(groupMeta.index))) partyParrotMeta.index = Number(groupMeta.index);
+    if (Number.isFinite(Number(groupMeta.count))) partyParrotMeta.count = Number(groupMeta.count);
+
+    const content = {
+      msgtype: "m.image",
+      body: meta.name || asset.file?.name || asset.name || "partyparrot.gif",
+      filename: meta.name || asset.file?.name || `${asset.name}.gif`,
+      url: mxcUrl,
+      info: {
+        mimetype: meta.type || asset.file?.type || "image/gif",
+        size: meta.size || asset.file?.size || 0,
+        w: 32,
+        h: 32
+      },
+      [PARTY_PARROT_CONTENT_KEY]: partyParrotMeta
+    };
+
+    if (originalContent?.["m.relates_to"]) {
+      content["m.relates_to"] = cloneMessageContent(originalContent["m.relates_to"]);
+    }
+
+    return content;
+  }
+
+  async function preparePartyParrotSend(client, content) {
     if (!isTextRoomMessageContent(content)) {
-      return content;
+      return {
+        content,
+        imageItems: [],
+        shouldSendText: true
+      };
     }
 
     const sourceHtml = content.formatted_body
       ? String(content.formatted_body)
       : plainBodyToMatrixHtml(content.body || "");
-    const shortcodes = shortcodeNamesInHtml(sourceHtml);
+    const shortcodes = shortcodeOccurrencesInHtml(sourceHtml);
 
     if (shortcodes.length === 0) {
-      return content;
+      return {
+        content,
+        imageItems: [],
+        shouldSendText: true
+      };
     }
 
-    let formattedBody = sourceHtml;
-    let replacementCount = 0;
-    const replacedShortcodes = [];
+    const imageItems = [];
+    const resolvedNames = new Set();
 
     for (const shortcode of shortcodes) {
       const asset = await partyParrotAssetForShortcode(shortcode);
@@ -877,47 +1020,45 @@
         continue;
       }
 
-      let mxcUrl = "";
+      imageItems.push({ shortcode, asset });
+      resolvedNames.add(shortcode);
+    }
 
-      try {
-        mxcUrl = await uploadPartyParrotAsset(client, asset);
-      } catch (error) {
-        console.warn(`[Smart Element] Could not upload partyparrot emoji :${shortcode}:; sending shortcode text.`, error);
-        continue;
-      }
+    if (imageItems.length === 0) {
+      return {
+        content,
+        imageItems: [],
+        shouldSendText: true
+      };
+    }
 
-      if (!mxcUrl) {
-        continue;
-      }
+    const namesToRemove = [...resolvedNames];
+    const cleanedContent = { ...content };
 
-      const renderSrc = emojiRenderSrc(client, mxcUrl, asset);
-      const beforeCount = countEmojiShortcodeMatches(formattedBody, shortcode);
-      formattedBody = replaceEmojiShortcodeHtml(formattedBody, shortcode, renderSrc);
-      const afterCount = countEmojiShortcodeMatches(formattedBody, shortcode);
-      const changed = Math.max(0, beforeCount - afterCount);
+    if (typeof cleanedContent.body === "string") {
+      cleanedContent.body = removeEmojiShortcodesFromPlainText(cleanedContent.body, namesToRemove);
+    }
 
-      if (changed > 0) {
-        replacementCount += changed;
-        replacedShortcodes.push(shortcode);
-        if (String(asset?.fileMeta?.type || "").toLowerCase() === "image/gif") {
-          console.info(`[Smart Element] GIF emoji :${shortcode}: render source:`, renderSrc.startsWith("mxc://") ? "mxc" : "download", renderSrc);
-        }
+    if (typeof cleanedContent.formatted_body === "string") {
+      cleanedContent.formatted_body = removeEmojiShortcodesFromHtml(cleanedContent.formatted_body, namesToRemove);
+
+      if (!htmlToText(stripHtmlReplyFallback(cleanedContent.formatted_body))) {
+        delete cleanedContent.formatted_body;
+        delete cleanedContent.format;
       }
     }
 
-    if (replacementCount === 0) {
-      return content;
-    }
+    const shouldSendText = hasSubstantiveMessageText(cleanedContent);
 
-    console.info(
-      `[Smart Element] Replaced ${replacementCount} partyparrot shortcode(s) in outgoing Matrix message.`,
-      { shortcodes: replacedShortcodes }
-    );
+    console.info("[Smart Element] Converting partyparrot shortcode(s) to image event(s).", {
+      shortcodes: imageItems.map(item => item.shortcode),
+      sendText: shouldSendText
+    });
 
     return {
-      ...content,
-      format: "org.matrix.custom.html",
-      formatted_body: formattedBody
+      content: cleanedContent,
+      imageItems,
+      shouldSendText
     };
   }
 
@@ -944,15 +1085,149 @@
   }
 
   function sendHtmlMessageBodyIndexes(args) {
+    if (typeof args[1] === "string" && args[1].startsWith("$") && typeof args[2] === "string" && typeof args[3] === "string") {
+      return { bodyIndex: 2, htmlIndex: 3, threadId: args[1] };
+    }
+
     if (typeof args[1] === "string" && typeof args[2] === "string") {
-      return { bodyIndex: 1, htmlIndex: 2 };
+      return { bodyIndex: 1, htmlIndex: 2, threadId: null };
     }
 
     if (typeof args[2] === "string" && typeof args[3] === "string") {
-      return { bodyIndex: 2, htmlIndex: 3 };
+      return { bodyIndex: 2, htmlIndex: 3, threadId: typeof args[1] === "string" ? args[1] : null };
     }
 
     return null;
+  }
+
+  async function sendPartyParrotImageEvents(client, originalMethod, thisArg, args, contentIndex, originalContent, imageItems) {
+    let firstResult = null;
+    const items = Array.isArray(imageItems) ? imageItems : [];
+    const groupId = items.length > 1 ? makePartyParrotGroupId() : "";
+
+    for (let index = 0; index < items.length; index += 1) {
+      const item = items[index];
+      try {
+        const mxcUrl = await uploadPartyParrotAsset(client, item.asset);
+        if (!mxcUrl) {
+          continue;
+        }
+
+        const imageArgs = [...args];
+        imageArgs[contentIndex] = partyParrotImageContent(originalContent, item.asset, mxcUrl, {
+          groupId,
+          index,
+          count: items.length
+        });
+        const result = await originalMethod.apply(thisArg, imageArgs);
+
+        if (!firstResult) {
+          firstResult = result;
+        }
+      } catch (error) {
+        console.warn(`[Smart Element] Could not send partyparrot image :${item.shortcode}:`, error);
+      }
+    }
+
+    return firstResult;
+  }
+
+  async function sendMessageArgsWithPartyParrotImages(client, originalMethod, thisArg, args, contentIndex) {
+    const originalContent = args[contentIndex];
+    const plan = await preparePartyParrotSend(client, originalContent);
+
+    if (plan.imageItems.length === 0) {
+      args[contentIndex] = plan.content;
+      return originalMethod.apply(thisArg, args);
+    }
+
+    let firstResult = null;
+
+    if (plan.shouldSendText) {
+      const textArgs = [...args];
+      textArgs[contentIndex] = plan.content;
+      firstResult = await originalMethod.apply(thisArg, textArgs);
+    }
+
+    const imageResult = await sendPartyParrotImageEvents(
+      client,
+      originalMethod,
+      thisArg,
+      args,
+      contentIndex,
+      originalContent,
+      plan.imageItems
+    );
+
+    if (firstResult || imageResult) {
+      return firstResult || imageResult;
+    }
+
+    return originalMethod.apply(thisArg, args);
+  }
+
+  async function sendHtmlMessageWithPartyParrotImages(client, originalSendHtmlMessage, thisArg, args) {
+    const indexes = sendHtmlMessageBodyIndexes(args);
+
+    if (!indexes) {
+      return originalSendHtmlMessage.apply(thisArg, args);
+    }
+
+    const originalContent = {
+      msgtype: "m.text",
+      body: args[indexes.bodyIndex],
+      format: "org.matrix.custom.html",
+      formatted_body: args[indexes.htmlIndex]
+    };
+    const plan = await preparePartyParrotSend(client, originalContent);
+
+    if (plan.imageItems.length === 0) {
+      return originalSendHtmlMessage.apply(thisArg, args);
+    }
+
+    let firstResult = null;
+
+    if (plan.shouldSendText) {
+      const textArgs = [...args];
+      textArgs[indexes.bodyIndex] = plan.content.body || "";
+      textArgs[indexes.htmlIndex] = plan.content.formatted_body || escapeHtml(plan.content.body || "");
+      firstResult = await originalSendHtmlMessage.apply(thisArg, textArgs);
+    }
+
+    const roomId = args[0];
+    const threadId = indexes.threadId || null;
+    let imageResult = null;
+    const groupId = plan.imageItems.length > 1 ? makePartyParrotGroupId() : "";
+
+    for (let index = 0; index < plan.imageItems.length; index += 1) {
+      const item = plan.imageItems[index];
+      try {
+        const mxcUrl = await uploadPartyParrotAsset(client, item.asset);
+        if (!mxcUrl) {
+          continue;
+        }
+
+        const imageContent = partyParrotImageContent(originalContent, item.asset, mxcUrl, {
+          groupId,
+          index,
+          count: plan.imageItems.length
+        });
+
+        if (threadId && typeof client.sendMessage === "function") {
+          imageResult = await client.sendMessage(roomId, threadId, imageContent);
+        } else if (typeof client.sendMessage === "function") {
+          imageResult = await client.sendMessage(roomId, imageContent);
+        }
+
+        if (!firstResult && imageResult) {
+          firstResult = imageResult;
+        }
+      } catch (error) {
+        console.warn(`[Smart Element] Could not send partyparrot image :${item.shortcode}:`, error);
+      }
+    }
+
+    return firstResult || originalSendHtmlMessage.apply(thisArg, args);
   }
 
   function patchPartyParrotComposerClient(client) {
@@ -969,7 +1244,7 @@
         const contentIndex = sendMessageContentArgIndex(args);
         if (contentIndex !== -1) {
           const activeClient = isUsableMatrixClient(this) ? this : client;
-          args[contentIndex] = await enhancePartyParrotContent(activeClient, args[contentIndex]);
+          return sendMessageArgsWithPartyParrotImages(activeClient, originalSendMessage, this, args, contentIndex);
         }
 
         return originalSendMessage.apply(this, args);
@@ -983,7 +1258,7 @@
         const contentIndex = sendEventContentArgIndex(args);
         if (contentIndex !== -1) {
           const activeClient = isUsableMatrixClient(this) ? this : client;
-          args[contentIndex] = await enhancePartyParrotContent(activeClient, args[contentIndex]);
+          return sendMessageArgsWithPartyParrotImages(activeClient, originalSendEvent, this, args, contentIndex);
         }
 
         return originalSendEvent.apply(this, args);
@@ -994,21 +1269,8 @@
       const originalSendHtmlMessage = client.sendHtmlMessage;
 
       client.sendHtmlMessage = async function smartElementSendHtmlMessageWithPartyParrot(...args) {
-        const indexes = sendHtmlMessageBodyIndexes(args);
-        if (indexes) {
-          const activeClient = isUsableMatrixClient(this) ? this : client;
-          const enhanced = await enhancePartyParrotContent(activeClient, {
-            msgtype: "m.text",
-            body: args[indexes.bodyIndex],
-            format: "org.matrix.custom.html",
-            formatted_body: args[indexes.htmlIndex]
-          });
-
-          args[indexes.bodyIndex] = enhanced.body || args[indexes.bodyIndex];
-          args[indexes.htmlIndex] = enhanced.formatted_body || args[indexes.htmlIndex];
-        }
-
-        return originalSendHtmlMessage.apply(this, args);
+        const activeClient = isUsableMatrixClient(this) ? this : client;
+        return sendHtmlMessageWithPartyParrotImages(activeClient, originalSendHtmlMessage, this, args);
       };
     }
 
