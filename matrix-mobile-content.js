@@ -1222,9 +1222,11 @@
   async function withDesktopHierarchyNativeAction(callback, options = {}) {
     const html = document.documentElement;
     const shouldRestoreCollapsed = options.restoreCollapsed === true && !isDesktopHierarchyNativeModeUsable();
-    const stableSelectionPanes = options.stableSelectionPanes === true;
+    const createActionPanes = options.createActionPanes === true;
+    const stableSelectionPanes = options.stableSelectionPanes === true || createActionPanes;
     html.classList.add("mmlc-desktop-native-action");
     if (stableSelectionPanes) html.classList.add("mmlc-desktop-stable-space-selection-action");
+    if (createActionPanes) html.classList.add("mmlc-desktop-create-native-action");
     try {
       await nextAnimationFrame();
       return await callback();
@@ -1232,6 +1234,7 @@
       if (shouldRestoreCollapsed) {
         await collapseNativeSpacePanelBeforeDirectChatOpen(options.reason || "desktop-hierarchy-native-action");
       }
+      if (createActionPanes) html.classList.remove("mmlc-desktop-create-native-action");
       if (stableSelectionPanes) html.classList.remove("mmlc-desktop-stable-space-selection-action");
       html.classList.remove("mmlc-desktop-native-action");
       renderDesktopHierarchyNativeUiSoon(0);
@@ -2439,6 +2442,7 @@
       "mmlc-desktop-space-labels-expanded",
       "mmlc-desktop-native-action",
       "mmlc-desktop-stable-space-selection-action",
+      "mmlc-desktop-create-native-action",
       "mmlc-desktop-space-panel-expanded",
       "mmlc-desktop-space-panel-hidden",
       "mmlc-desktop-space-panel-floating-open",
@@ -3678,12 +3682,13 @@
       return overridden;
     }
 
-    const header = document.querySelector("[data-testid='room-list-header']");
-    if (!(header instanceof Element) || header.closest(OWNED_SELECTOR)) return null;
+    const headers = uniqueElements(Array.from(document.querySelectorAll("[data-testid='room-list-header']")))
+      .filter(header => header instanceof Element && !header.closest(OWNED_SELECTOR) && isRendered(header));
 
-    const candidates = uniqueElements(Array.from(header.querySelectorAll("button, [role='button']")))
-      .filter(control => control instanceof HTMLElement && !control.closest(OWNED_SELECTOR) && isRendered(control))
-      .map(control => ({ control, score: nativeRoomListComposeButtonScore(control, header) }))
+    const candidates = headers.flatMap(header => uniqueElements(Array.from(header.querySelectorAll("button, [role='button']")))
+        .filter(control => control instanceof HTMLElement && !control.closest(OWNED_SELECTOR) && isRendered(control))
+        .map(control => ({ control, score: nativeRoomListComposeButtonScore(control, header) }))
+      )
       .filter(entry => entry.score > 0)
       .sort((a, b) => b.score - a.score);
 
@@ -3698,17 +3703,37 @@
       visibleText(control),
       elementSignature(control)
     ].filter(Boolean).join(" ")).toLowerCase();
-    if (!text) return 0;
+    const unlabelledCompose = looksLikeUnlabelledNativeComposeButton(control, header);
+    if (!text && !unlabelledCompose) return 0;
     if (/chatoptionen|chat options|space-optionen|space options|filter|suchen|search|men[üu]|menue|menu/.test(text)) return 0;
 
     let score = 0;
     if (/\b(new conversation|compose|new chat|new room|start chat)\b|verfassen|neue unterhaltung/.test(text)) score += 200;
+    if (unlabelledCompose) score += 180;
     if (/pencil|edit|compose|newconversation|new-conversation/.test(text)) score += 100;
     if (control.getAttribute("aria-haspopup") === "menu") score += 25;
     if (header.contains(control)) score += 20;
     const rect = control.getBoundingClientRect();
     if (Number.isFinite(rect.right) && rect.right > window.innerWidth * 0.12) score += 5;
     return score;
+  }
+
+  function looksLikeUnlabelledNativeComposeButton(control, header) {
+    if (!(control instanceof Element) || !(header instanceof Element) || !header.contains(control)) return false;
+    if (getElementLabel(control) || control.getAttribute("aria-label") || control.getAttribute("title")) return false;
+    if (control.getAttribute("aria-haspopup") !== "menu") return false;
+
+    const buttons = uniqueElements(Array.from(header.querySelectorAll("button, [role='button']")))
+      .filter(button => button instanceof Element && !button.closest(OWNED_SELECTOR) && isRendered(button));
+    const index = buttons.indexOf(control);
+    if (index < 0 || index < buttons.length - 2) return false;
+
+    const svgPathText = Array.from(control.querySelectorAll("svg path[d]"))
+      .map(path => path.getAttribute("d") || "")
+      .join(" ")
+      .toLowerCase();
+    if (/m6 14q|m12 14\.95/.test(svgPathText)) return false;
+    return /16\.937|7\.071|1\.331|3\.993|m3 5a2 2/.test(svgPathText);
   }
 
   function handleDesktopHierarchyNativeComposePointerDown(event) {
@@ -3797,12 +3822,21 @@
     const kind = action === "group-room" || action === "subspace" ? action : "";
     if (!kind) return;
 
+    if (kind === "group-room" && desktopMiddleFloatingPaneIsOpen()) {
+      await runDesktopGroupRoomCreateViaTemporaryStickyChatList();
+      return;
+    }
+
     if (isDesktopHierarchyNativeModeUsable()) {
       const wasCollapsed = nativeSpacePanelIsCollapsed();
       await withDesktopHierarchyNativeAction(async () => {
         await openCreateFlow(kind);
         await delay(240);
-      }, { restoreCollapsed: wasCollapsed, reason: `desktop-hierarchy-create-${kind}` });
+      }, {
+        restoreCollapsed: wasCollapsed,
+        reason: `desktop-hierarchy-create-${kind}`,
+        createActionPanes: desktopMiddleFloatingPaneIsOpen() || desktopSpaceFloatingPaneIsOpen()
+      });
       return;
     }
 
@@ -3812,6 +3846,50 @@
     }
     if (action === "subspace") {
       await openCreateFlow("subspace");
+    }
+  }
+
+  async function runDesktopGroupRoomCreateViaTemporaryStickyChatList() {
+    const restoreHidden = desktopMiddlePaneHidden === true;
+    const restoreTemporaryOpen = desktopMiddlePaneTemporaryOpen === true;
+    const restoreTemporaryFromSpaceSelection = desktopMiddlePaneTemporaryFromSpaceSelection === true;
+    const restoreSpaceLandingHoldUntil = desktopMiddlePaneSpaceLandingHoldUntil || 0;
+
+    desktopMiddlePaneHidden = false;
+    desktopMiddlePaneTemporaryOpen = false;
+    desktopMiddlePaneTemporaryFromSpaceSelection = false;
+    desktopMiddlePaneSpaceLandingHoldUntil = 0;
+    clearDesktopMiddlePaneCloseSuppression();
+    syncDesktopPaneModeClasses();
+    enforceNativeNavigationPanesOpen("desktop-create-group-room-temporary-sticky");
+    await ensureMiddlePaneExpanded({ allowStyleFallback: true }).catch(() => {});
+    renderDesktopMiddleChatNativeUi();
+    renderDesktopHierarchyNativeUiSoon(0);
+    await delay(120);
+
+    try {
+      if (isDesktopHierarchyNativeModeUsable()) {
+        const wasCollapsed = nativeSpacePanelIsCollapsed();
+        await withDesktopHierarchyNativeAction(async () => {
+          await openCreateFlow("group-room");
+          await delay(240);
+        }, {
+          restoreCollapsed: wasCollapsed,
+          reason: "desktop-hierarchy-create-group-room-temporary-sticky"
+        });
+      } else {
+        await openCreateFlow("group-room");
+      }
+    } finally {
+      desktopMiddlePaneHidden = restoreHidden;
+      desktopMiddlePaneTemporaryOpen = restoreTemporaryOpen;
+      desktopMiddlePaneTemporaryFromSpaceSelection = restoreTemporaryFromSpaceSelection;
+      desktopMiddlePaneSpaceLandingHoldUntil = restoreSpaceLandingHoldUntil;
+      syncDesktopPaneModeClasses();
+      persistDesktopHierarchySettings();
+      renderDesktopMiddleChatNativeUi();
+      renderDesktopHierarchyNativeUiSoon(0);
+      scheduleDesktopChatListUnreadImmediateUpdate(0, "desktop-create-group-room-restore-collapsed");
     }
   }
 
@@ -12166,10 +12244,14 @@
     if (!pattern) return null;
 
     const roots = uniqueElements(Array.from(document.querySelectorAll([
+      "#mx_ContextualMenu_Container",
+      "#mx_Dialog_Container",
       ".mx_ContextualMenu",
       "[role='menu']",
       "[class*='ContextualMenu']",
-      "[data-radix-menu-content]"
+      "[data-radix-menu-content]",
+      "[data-floating-ui-portal]",
+      "[data-floating-ui-focusable]"
     ].join(",")))).filter(root => root instanceof Element && !root.closest(OWNED_SELECTOR));
 
     const candidates = uniqueElements(roots.flatMap(root => Array.from(root.querySelectorAll("[role='menuitem'], button, [role='button'], li"))));

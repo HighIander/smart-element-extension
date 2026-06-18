@@ -2393,6 +2393,33 @@ html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-
   flex: 0 0 0 !important;
 }
 
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action #left-panel .mx_RoomListPanel > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action #left-panel nav[aria-label="Chatliste"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action #left-panel nav[aria-label="Room list"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action [data-testid="left-panel"] .mx_RoomListPanel > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action [data-testid="left-panel"] nav[aria-label="Chatliste"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action [data-testid="left-panel"] nav[aria-label="Room list"] > [data-testid="room-list-header"],
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action #left-panel .mx_RoomListPanel > :is(div, section, header):has([data-testid="room-list-header"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action #left-panel nav[aria-label="Chatliste"] > :is(div, section, header):has([data-testid="room-list-header"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action #left-panel nav[aria-label="Room list"] > :is(div, section, header):has([data-testid="room-list-header"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action [data-testid="left-panel"] .mx_RoomListPanel > :is(div, section, header):has([data-testid="room-list-header"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action [data-testid="left-panel"] nav[aria-label="Chatliste"] > :is(div, section, header):has([data-testid="room-list-header"]),
+html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-stable-space-selection-action.mmlc-desktop-create-native-action [data-testid="left-panel"] nav[aria-label="Room list"] > :is(div, section, header):has([data-testid="room-list-header"]) {
+  display: flex !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  width: 100% !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: auto !important;
+  min-height: 40px !important;
+  max-height: none !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  flex: 0 0 auto !important;
+}
+
 html.mmlc-desktop-hierarchy-mode.mmlc-desktop-native-action.mmlc-desktop-space-floating-selection-hold.mmlc-desktop-space-panel-hidden.mmlc-desktop-space-panel-floating-open #mmlc-desktop-space-list-host {
   display: flex !important;
   visibility: visible !important;
